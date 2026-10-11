@@ -1,0 +1,40 @@
+{"cat": "chat", "input": "kyouhaosokunarisoudakara,sakinitabeteoite.", "expected": ["今日は遅くなりそうだから、先に食べておいて。"]}
+{"cat": "chat", "input": "ashitanokaigi,nanjikaradakke?", "expected": ["明日の会議、何時からだっけ？", "明日の会議、何時からだっけ?"]}
+{"cat": "chat", "input": "ryoukai!arigatou.", "expected": ["了解！ありがとう。", "了解!ありがとう。"]}
+{"cat": "chat", "input": "sonokenhamatakondohanasou.", "expected": ["その件はまた今度話そう。"]}
+{"cat": "chat", "input": "ekimaenokafedemachiawaseshiyou.", "expected": ["駅前のカフェで待ち合わせしよう。"]}
+{"cat": "chat", "input": "chottookurerukamo.gomen!", "expected": ["ちょっと遅れるかも。ごめん！", "ちょっと遅れるかも。ごめん!"]}
+{"cat": "chat", "input": "shashinokuttekuretearigatou.", "expected": ["写真送ってくれてありがとう。"]}
+{"cat": "chat", "input": "konshuumatsuhahimadesuka?", "expected": ["今週末は暇ですか？", "今週末は暇ですか?"]}
+{"cat": "tech", "input": "githubnipushshiteoite.", "expected": ["GitHubにpushしておいて。", "githubにpushしておいて。", "GitHubにプッシュしておいて。"]}
+{"cat": "tech", "input": "konofunctionnotesutowokaite.", "expected": ["このfunctionのテストを書いて。"]}
+{"cat": "tech", "input": "claude.mdnikomittonokisokuwotsuikashite.", "expected": ["CLAUDE.mdにコミットの規則を追加して。", "claude.mdにコミットの規則を追加して。"]}
+{"cat": "tech", "input": "era-gadetararoguwomisete.", "expected": ["エラーが出たらログを見せて。"]}
+{"cat": "tech", "input": "llama.cppdemoderuwougokasu.", "expected": ["llama.cppでモデルを動かす。"]}
+{"cat": "tech", "input": "pythonnoba-jonwo3.12niageta.", "expected": ["Pythonのバージョンを3.12に上げた。", "pythonのバージョンを3.12に上げた。"]}
+{"cat": "tech", "input": "konoissuehamadashuuseishinaide.", "expected": ["このissueはまだ修正しないで。", "このイシューはまだ修正しないで。"]}
+{"cat": "tech", "input": "apiki-hakankyouhensuukarayomikomu.", "expected": ["APIキーは環境変数から読み込む。"]}
+{"cat": "tech", "input": "ok,sorededeployshite.", "expected": ["OK、それでdeployして。", "ok、それでdeployして。", "OK、それでデプロイして。"]}
+{"cat": "tech", "input": "pullrequestwotsukuttekure.", "expected": ["pull requestを作ってくれ。", "プルリクエストを作ってくれ。", "Pull Requestを作ってくれ。"]}
+{"cat": "academic", "input": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonatta.", "expected": ["本研究では視線計測を用いたユーザビリティ評価を行った。"]}
+{"cat": "academic", "input": "jikkennokekka,yuuisagamitomerareta.", "expected": ["実験の結果、有意差が認められた。"]}
+{"cat": "academic", "input": "hikenshahadaigakusei20nindearu.", "expected": ["被験者は大学生20人である。", "被験者は大学生20名である。"]}
+{"cat": "academic", "input": "senkoukenkyuunogenkaiwotsuginishimesu.", "expected": ["先行研究の限界を次に示す。"]}
+{"cat": "academic", "input": "teianshuhouhajuuraishuhounikurabetesagyoujikanwotanshukushita.", "expected": ["提案手法は従来手法に比べて作業時間を短縮した。"]}
+{"cat": "academic", "input": "shitsumonshichousanokaitouwobunsekishita.", "expected": ["質問紙調査の回答を分析した。"]}
+{"cat": "academic", "input": "kanouseigaarukotowoshisasuru.", "expected": ["可能性があることを示唆する。"]}
+{"cat": "academic", "input": "honronbunnokouseihaikanotooridearu.", "expected": ["本論文の構成は以下の通りである。", "本論文の構成は以下のとおりである。"]}
+{"cat": "memo", "input": "kyouhaasakaraatamagaitakatta.", "expected": ["今日は朝から頭が痛かった。"]}
+{"cat": "memo", "input": "kaimono:gyuunyuu,tamago,pan", "expected": ["買い物：牛乳、卵、パン", "買い物:牛乳、卵、パン"]}
+{"cat": "memo", "input": "honwoyondakansouwokaku.", "expected": ["本を読んだ感想を書く。"]}
+{"cat": "memo", "input": "raishuunogetsuyoubinihaishanoyoyaku.", "expected": ["来週の月曜日に歯医者の予約。"]}
+{"cat": "memo", "input": "omoitsuitaaidea:shisenderimokonwosousasuru.", "expected": ["思いついたアイデア：視線でリモコンを操作する。", "思いついたアイデア:視線でリモコンを操作する。"]}
+{"cat": "memo", "input": "10ji30funnidenshaninotta.", "expected": ["10時30分に電車に乗った。"]}
+{"cat": "memo", "input": "kibungaochikonderunodesanponideta.", "expected": ["気分が落ち込んでるので散歩に出た。"]}
+{"cat": "memo", "input": "ronbunnodai2shouwokakiowatta.", "expected": ["論文の第2章を書き終わった。"]}
+{"cat": "typo", "input": "kyouhaosokunarisoudalara,sakinitabetwoite.", "expected": ["今日は遅くなりそうだから、先に食べておいて。"]}
+{"cat": "typo", "input": "jikkennokekka,yuuisagamitomeraretq.", "expected": ["実験の結果、有意差が認められた。"]}
+{"cat": "typo", "input": "githibnipushshiteoite.", "expected": ["GitHubにpushしておいて。", "githubにpushしておいて。", "GitHubにプッシュしておいて。"]}
+{"cat": "typo", "input": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonata.", "expected": ["本研究では視線計測を用いたユーザビリティ評価を行った。"]}
+{"cat": "typo", "input": "ryoukai!arigatpu.", "expected": ["了解！ありがとう。", "了解!ありがとう。"]}
+{"cat": "typo", "input": "raishuunogetsuyobinihaishanoyoyaku.", "expected": ["来週の月曜日に歯医者の予約。"]}
