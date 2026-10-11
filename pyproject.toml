@@ -18,7 +18,17 @@ url = "https://download.pytorch.org/whl/cu128"
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0.0",
     "gguf>=0.19.0",
     "numpy>=2.5.2",
     "sentencepiece>=0.2.2",
 ]
+data = [
+    "datasets>=4.0.0",
+    "sudachipy>=0.6.10",
+    "sudachidict-core>=20250129",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
