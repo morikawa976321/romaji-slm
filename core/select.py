@@ -44,13 +44,13 @@ class ZenzScorer:
         self.model = AutoModelForCausalLM.from_pretrained(model, dtype=torch.float32).to(device).eval()
         self.pad = self.tok.pad_token_id if self.tok.pad_token_id is not None else self.tok.eos_token_id
 
-    def logprobs(self, prompts: list[str], continuations: list[str]) -> list[float]:
-        """各 i について log P(continuations[i] + EOS | prompts[i]) を返す（トークンの対数確率の和）。"""
+    def logprobs(self, prompts: list[str], continuations: list[str], eos: bool = True) -> list[float]:
+        """各 i について log P(continuations[i] (+ EOS) | prompts[i]) を返す（トークンの対数確率の和）。"""
         torch, tok = self._torch, self.tok
         seqs = []
         for p, c in zip(prompts, continuations):
             p_ids = tok(p, add_special_tokens=False).input_ids
-            c_ids = tok(c, add_special_tokens=False).input_ids + [tok.eos_token_id]
+            c_ids = tok(c, add_special_tokens=False).input_ids + ([tok.eos_token_id] if eos else [])
             seqs.append((p_ids + c_ids, len(p_ids)))
         out: list[float] = []
         for k in range(0, len(seqs), self.batch):
@@ -69,6 +69,18 @@ class ZenzScorer:
                 tgt = torch.tensor(s[n_p:], device=self.device)
                 out.append(logp[r, n_p - 1:len(s) - 1].gather(1, tgt[:, None]).sum().item())
         return out
+
+
+def fluency(scorer: ZenzScorer, texts: list[str], left_context: str = "") -> list[float]:
+    """完成文そのものの自然さ: zenz の「左文脈」の位置に文を置いたときの log P(文 + 入力開始の印 | 文脈開始の印)。
+
+    zenz は変換の条件（読み）を与えられると、その読みの書き方としての確率しか出さない（読みをそのまま写す出力は
+    どの読みでもほぼ確率1になり、読みの良し悪しを比べられない）。学習時には左文脈の日本語も読んでいるので、
+    文を左文脈として置けば、読みと無関係に「日本語の文章として出てくる確率」を測れる。
+    文の後ろに入力開始の印（INPUT）を置き、文がそこで終わる確率まで含める。
+    """
+    head = CONTEXT + left_context
+    return scorer.logprobs([head] * len(texts), [scoring_text(t) + INPUT for t in texts], eos=False)
 
 
 @dataclass

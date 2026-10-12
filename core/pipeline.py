@@ -2,7 +2,7 @@
 
 読みの上位 k 件それぞれについて制約付き生成を行い、
 
-    score = zenz の対数確率（出力 + EOS）− w_read × 読みのコスト
+    score = zenz の対数確率（出力 + EOS）+ w_flu × 完成文の自然さ − w_read × 読みのコスト
 
 が最大のものを返す。英語か日本語か・打鍵ミスを直すかは、ここで zenz の尤度と読みのコストの比較で決まる。
 """
@@ -14,16 +14,16 @@ from eval.converters import Result
 from .constrained import ConstrainedZenz
 from .kanakanji import Dictionary
 from .reading import readings
-from .select import ZenzScorer
+from .select import ZenzScorer, fluency
 
 
 class CorePipeline:
     def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu", k: int = 3,
-                 n_read: int = 20, w_read: float = 1.0, name: str | None = None):
+                 n_read: int = 20, w_read: float = 1.0, w_flu: float = 0.0, name: str | None = None):
         self.dic = Dictionary.load()
         self.scorer = ZenzScorer(model, device)
         self.cz = ConstrainedZenz(self.scorer)
-        self.k, self.n_read, self.w_read = k, n_read, w_read
+        self.k, self.n_read, self.w_read, self.w_flu = k, n_read, w_read, w_flu
         self.name = name or f"core(k={k},w_read={w_read})"
         self.n_params = sum(p.numel() for p in self.scorer.model.parameters())
 
@@ -43,6 +43,11 @@ class CorePipeline:
                 "lm": lp, "read_cost": r.cost, "reading": r.zenz_input(), "edits": [e.detail for e in r.edits],
                 "ms": (time.perf_counter() - t0) * 1000,
             })
+        if self.w_flu and out:
+            # 完成文としての自然さを足す（core.select.fluency）。zenz の変換の確率は読みの良し悪しを比べられないため
+            for c, f in zip(out, fluency(self.scorer, [c["text"] for c in out], left_context)):
+                c["fluency"] = f
+                c["score"] += self.w_flu * f
         return sorted(out, key=lambda c: -c["score"])
 
     def convert_detailed(self, romaji: str, left_context: str = "") -> Result:
