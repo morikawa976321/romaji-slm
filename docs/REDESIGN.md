@@ -32,6 +32,15 @@ Claude・astra（Codex consult）・fable（fable-consultant）の3者で2回意
 - 安定性の保証: 出力は「入力から、許可した補正と表記変換で説明できるもの」だけ。
 - かな漢字の段は入出力を「読み（複数）→ 表層候補＋読みとの対応」に固定し、Python 製と azooKey 製を挿し替えられるようにする。
 
+## 先行例（2026-10-12 調査）
+
+- **Roman IME**（macOS、github.com/taizoy0725/roman、個人無料・法人有料でオープンソースではない）: 辞書で候補を組み立て、ローカルの AI（BERT、24GB 以上の Mac では Qwen も）が文脈で採点。打鍵が止まると自動で変換（変換キー不要）。開発者の実測で AJIMEE 1位 80.5%、macOS 標準のライブ変換 64.5%（Qiita `mobazou/items/7155b95c062f2e1f387d`）。英単語の混在・打鍵ミス・句読点は記事に記載なし（英語は Shift で打つ）。
+- **RomKana**（macOS、github.com/t10471/RomKana、Zenn `toshinao/articles/1cffb713b1c670`）: 辞書の候補を汎用 LLM の合計対数尤度で選ぶ方式から、AzooKeyKanaKanjiConverter＋zenz-v3.2-small に移行。同音語30問で辞書だけ 22/30、辞書＋Qwen3-1.7B 26/30、azooKey＋zenz 28/30、変換約50ms・常駐約74MB。教訓として「汎用 LLM は生成させると辞書を超えにくく、確率の計算だけに使うと超える」「同音語の文脈分岐は LLM より利用者の履歴が効いた」「平均でなく合計の対数尤度で採点する」。英単語・打鍵ミスは扱っていない。
+- **azooKey-Desktop**（macOS、MIT、アルファ版）: 辞書＋zenz（Zenzai）。英単語・打鍵ミスの扱いは未確認。
+- **LREC 2026 のベンチマーク**（Zou ほか、`junli-cuny/llm-ime-benchmark`、コード MIT、元文は Snow 簡約日本語コーパス）: 日本語ローマ字の誤り訂正データ 1080件。誤りは JWTD 由来の語単位の誤り（wo→no 等）で、ローマ字は単語ごとに空白区切り。この設計の入力（空白なし・打鍵ミス）とは形が合わないので評価には使っていない。
+
+確認できた範囲では、**英単語の混在と打鍵ミスの吸収を変換の中で扱う既存ツールは無かった**。辞書で候補を作り、変換専用の小さなモデルで選ぶ構成は、Roman・RomKana・azooKey で共通している。
+
 ## 3者で確かめた事実
 
 - 元の zenz-v3.1-small は、読みに英単語を綴りのまま入れると12件すべて綴りのまま出す。ただし大文字・空白は復元しない（github→github、pull request→pullrequest）。句読点の無い読みに句読点を挿入しない。無制約だと読みから外れる（ユウイサ→優位性）。（Claude 実測）
