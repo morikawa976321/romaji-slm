@@ -16,6 +16,8 @@ from array import array
 from dataclasses import dataclass
 from pathlib import Path
 
+from .numbers import DATE_READINGS, number_prefixes
+from .numbers import surfaces as num_surfaces
 from .types import Conversion, Reading, Seg, Word
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -255,6 +257,16 @@ def _build_lattice(reading: Reading, dic: Dictionary) -> tuple[_Lattice, int]:
                 for key in dic.index.prefixes(rest):
                     for lid, rid, cost, surf in dic.lookup(key):
                         lat.add(pos + i, pos + i + len(key), lid, rid, cost, surf, key, si, "dict")
+                # 数の読み → 数字（辞書に合成数がほぼ無いため。core/numbers.py）
+                for end, value in number_prefixes(text, i):
+                    for k, surf in enumerate(num_surfaces(value)):
+                        lat.add(pos + i, pos + end, dic.num_id, dic.num_id, c.num + c.alt_surface * k,
+                                surf, text[i:end], si, "num")
+                for dr, day in DATE_READINGS.items():
+                    if rest.startswith(dr):
+                        for k, surf in enumerate(num_surfaces(day)[:2]):
+                            lat.add(pos + i, pos + i + len(dr), dic.num_id, dic.num_id, c.num + c.alt_surface * k,
+                                    surf + "日", dr, si, "num")
                 for l in range(1, min(n - i, c.unk_max_len) + 1):
                     kana = rest[:l]
                     lat.add(pos + i, pos + i + l, dic.unk_id, dic.unk_id,
