@@ -30,7 +30,12 @@ class CorePipeline:
     def candidates(self, romaji: str, left_context: str = "") -> list[dict]:
         """読みの上位 k 件の変換と点数（点数の高い順）。"""
         out = []
-        for r in readings(romaji, n=self.n_read)[: self.k]:
+        rs = readings(romaji, n=self.n_read)[: self.k]
+        if rs and all(r.edits for r in rs):
+            # 打鍵を直さない読みも必ず比べる。辞書に無い略語・型番（cdma, jr, scc-0210）は、読みの段では
+            # 直す経路のほうが安くなりやすい。直すかどうかは zenz の尤度との比較に任せる
+            rs += readings(romaji, n=1, max_edits=0)
+        for r in rs:
             t0 = time.perf_counter()
             text, lp, finished = self.cz.decode_scored(r, self.dic, left_context)
             out.append({

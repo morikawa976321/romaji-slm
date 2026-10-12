@@ -56,6 +56,8 @@ def _build() -> dict[str, str]:
         "twa": "トァ", "twi": "トィ", "twu": "トゥ", "twe": "トェ", "two": "トォ",
         "dwa": "ドァ", "dwi": "ドィ", "dwu": "ドゥ", "dwe": "ドェ", "dwo": "ドォ",
         "wha": "ウァ", "whi": "ウィ", "whu": "ウ", "whe": "ウェ", "who": "ウォ",
+        # hw+母音 = ファ行（Microsoft IME の表。生成した試験データに hwairu=ファイル がある）
+        "hwa": "ファ", "hwi": "フィ", "hwe": "フェ", "hwo": "フォ", "hwyu": "フュ",
         "xtu": "ッ", "ltu": "ッ", "xtsu": "ッ", "ltsu": "ッ",
         "xwa": "ヮ", "lwa": "ヮ", "xka": "ヵ", "xke": "ヶ", "lka": "ヵ", "lke": "ヶ",
         "xya": "ャ", "xyu": "ュ", "xyo": "ョ", "lya": "ャ", "lyu": "ュ", "lyo": "ョ",
