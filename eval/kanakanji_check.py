@@ -9,7 +9,6 @@ import argparse
 import dataclasses
 import json
 import os
-import resource
 import statistics
 import sys
 import time
@@ -28,7 +27,37 @@ def _rss_mb() -> float:
                     return int(line.split()[1]) / 1024
     except OSError:
         pass
+    if sys.platform == "win32":
+        return _win_mem()[0]
     return float("nan")
+
+
+def _peak_rss_mb() -> float:
+    """プロセスの最大常駐メモリ（MB）。resource は Unix にしか無い。"""
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    except ImportError:
+        return _win_mem()[1]
+
+
+def _win_mem() -> tuple[float, float]:
+    """Windows の (現在, 最大) 常駐メモリ（MB）。"""
+    import ctypes
+    from ctypes import wintypes
+
+    class PMC(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [
+            (n, ctypes.c_size_t) for n in ("PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
+                                           "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage",
+                                           "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage")]
+    k32 = ctypes.WinDLL("kernel32")
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    # 64bit では HANDLE をポインタ幅で渡さないと無効なハンドルになり、0 が返る
+    k32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+    pmc = PMC(cb=ctypes.sizeof(PMC))
+    k32.K32GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb)
+    return pmc.WorkingSetSize / 2**20, pmc.PeakWorkingSetSize / 2**20
 
 
 def run(dic: Dictionary, items, n: int) -> dict:
@@ -90,7 +119,7 @@ def main():
 
     print(f"辞書の読み込み: {dic.stats['load_sec']:.2f} 秒（{dic.stats['source']}）、"
           f"RSS {rss0:.0f} → {rss1:.0f} MB（読み込み後）→ {rss2:.0f} MB（評価後）、"
-          f"ru_maxrss {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.0f} MB")
+          f"最大メモリ {_peak_rss_mb():.0f} MB")
     print(f"Costs: {dataclasses.asdict(costs)}")
     print(f"件数 {res['n']}、N={args.n}、CPU {os.cpu_count()} 論理コア")
     print(f"1位正解 {res['top1']:.1%}（記号・長音を無視 {res['top1_loose']:.1%}）")

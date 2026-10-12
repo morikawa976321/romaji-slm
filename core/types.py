@@ -54,7 +54,7 @@ class Word:
     seg_index: int  # Reading.segs の何番目の区間に属するか（kana 区間は複数語に分かれうる）
     source: str  # "dict"（辞書の語）| "kana"（辞書に無くかなのまま）| "en" | "num" | "sym"
     cost: float = 0.0  # 語のコスト（辞書の生起コストなど）
-    lid: int = -1  # 左文脈 ID（Mozc の品詞 ID。辞書の語以外は -1）
+    lid: int = -1  # 接続に使った品詞 ID（Mozc の id.def。英語・数字・記号・かなのままの語にも、接続に使った ID を入れる）
     rid: int = -1
 
 
