@@ -105,6 +105,7 @@ def main():
     ap.add_argument("--batch-tokens", type=int, default=16384)
     ap.add_argument("--max-len", type=int, default=256)
     ap.add_argument("--eval-every", type=int, default=1000)
+    ap.add_argument("--log-every", type=int, default=100)
     ap.add_argument("--max-valid", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
@@ -161,8 +162,8 @@ def main():
             opt.zero_grad(set_to_none=True)
             step += 1
             run_loss += loss.item()
-            if step % 100 == 0:
-                print(f"step {step}/{total} loss={run_loss / 100:.4f} lr={sched.get_last_lr()[0]:.2e} "
+            if step % args.log_every == 0:
+                print(f"step {step}/{total} loss={run_loss / args.log_every:.4f} lr={sched.get_last_lr()[0]:.2e} "
                       f"{(time.time() - t0) / step:.3f}s/step", flush=True)
                 run_loss = 0.0
             if step % args.eval_every == 0 or step == total:
