@@ -28,6 +28,7 @@ _CLOSERS = set("」』）)】］]”’")
 _OPENERS = set("「『（(【［[“‘")
 _CLAUSE_END = ("、", "，", ",")
 _TYPED_OK = re.compile(r"^[!-~]+$")
+_HAS_WORD = re.compile(r"[a-z0-9]")
 
 
 def split_of(inp: str, out: str, valid: float, test: float) -> str:
@@ -89,9 +90,16 @@ def split_segments(tokens: list[Token], max_chars: int) -> tuple[list[list[Token
     return kept, dropped
 
 
-def segment_pieces(tokens: list[Token]) -> list[tuple[str, str]]:
+def segment_pieces(tokens: list[Token], omit_punct: bool = False) -> list[tuple[str, str]]:
+    """omit_punct=True なら、和文の記号（、。「」・！？ など全角のもの）を打たない。
+
+    本人は記号を最小限にして打つ（2026-10-12）ので、句読点を省いた入力から句読点付きの出力を作る例を混ぜる。
+    英字区間の中の ASCII 記号（llama.cpp の「.」、メールの「@」）は省くと語が変わるので残す。
+    """
     pieces: list[tuple[str, str]] = []
     for t in tokens:
+        if t.kind == "sym" and omit_punct and not t.surface.isascii():
+            continue
         if t.kind == "ja":
             kind, text = "kana", t.reading
         elif t.kind in ("lit", "sym"):
@@ -135,12 +143,14 @@ def process_record(rec: dict, args: argparse.Namespace, stats: Counter) -> list[
     stats["excluded_segments:too_long"] += dropped
     key = f"{args.seed}:{zenz_in}\t{output}"
     rng = random.Random(key)
+    omit_rng = random.Random(key + ":omit")  # 表記揺れ・ノイズの乱数列を変えないよう別にする
     out: list[dict] = []
     ctx = left
     for seg in segs:
         text = "".join(t.surface for t in seg).strip()
+        omit = omit_rng.random() < args.omit_punct_rate
         try:
-            clean = romanize(segment_pieces(seg), rng)
+            clean = romanize(segment_pieces(seg, omit), rng)
         except UnreadableKana:
             stats["excluded_segments:unreadable_kana"] += 1
             ctx += text
@@ -149,13 +159,20 @@ def process_record(rec: dict, args: argparse.Namespace, stats: Counter) -> list[
             stats["excluded_segments:no_typed_text"] += 1
             ctx += text
             continue
+        if not _HAS_WORD.search(clean):
+            # 「。」1字のような記号だけの断片。実データ2万件中 423 件（2.1%）あり、学習の足しにならない
+            stats["excluded_segments:symbol_only"] += 1
+            ctx += text
+            continue
         romaji, notes = add_noise(clean, rng, args.noise_rate, args.noise_max)
         out.append({
             "romaji": romaji,
             "output": text,
             "left_context": ctx[-args.max_left:] if args.max_left else ctx,
-            "meta": {"source": rec.get("source", HF_DATASET), "noise": notes, "reading_from": reading_from},
+            "meta": {"source": rec.get("source", HF_DATASET), "noise": notes, "reading_from": reading_from,
+                     "omit_punct": omit},
         })
+        stats["omit_punct"] += omit
         ctx += text
     if out:
         stats["records_kept"] += 1
@@ -218,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--shuffle-buffer", type=int, default=10000, help="hf streaming のシャッフル用バッファ（0で無効）")
     p.add_argument("--noise-rate", type=float, default=0.3)
     p.add_argument("--noise-max", type=int, default=2)
+    p.add_argument("--omit-punct-rate", type=float, default=0.5,
+                   help="和文の記号（、。「」など）を入力から省くサンプルの割合")
     p.add_argument("--max-chars", type=int, default=60, help="1サンプルの output の最大字数")
     p.add_argument("--max-left", type=int, default=200, help="left_context の最大字数（末尾側を残す。0で無制限）")
     p.add_argument("--valid-ratio", type=float, default=0.02)

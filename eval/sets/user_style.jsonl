@@ -4,7 +4,7 @@
 {"romaji": "sonokenhamatakondohanasou.", "output": "その件はまた今度話そう。", "left_context": "", "meta": {"category": "chat"}}
 {"romaji": "ekimaenokafedemachiawaseshiyou.", "output": "駅前のカフェで待ち合わせしよう。", "left_context": "", "meta": {"category": "chat"}}
 {"romaji": "chottookurerukamo.gomen!", "output": "ちょっと遅れるかも。ごめん！", "left_context": "", "meta": {"category": "chat", "alternatives": ["ちょっと遅れるかも。ごめん!"]}}
-{"romaji": "shashinokuttekuretearigatou.", "output": "写真送ってくれてありがとう。", "left_context": "", "meta": {"category": "chat"}}
+{"romaji": "shashinnookuttekuretearigatou.", "output": "写真送ってくれてありがとう。", "left_context": "", "meta": {"category": "chat"}}
 {"romaji": "konshuumatsuhahimadesuka?", "output": "今週末は暇ですか？", "left_context": "", "meta": {"category": "chat", "alternatives": ["今週末は暇ですか?"]}}
 {"romaji": "githubnipushshiteoite.", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "tech", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"]}}
 {"romaji": "konofunctionnotesutowokaite.", "output": "このfunctionのテストを書いて。", "left_context": "", "meta": {"category": "tech"}}
@@ -17,7 +17,7 @@
 {"romaji": "ok,sorededeployshite.", "output": "OK、それでdeployして。", "left_context": "", "meta": {"category": "tech", "alternatives": ["ok、それでdeployして。", "OK、それでデプロイして。"]}}
 {"romaji": "pullrequestwotsukuttekure.", "output": "pull requestを作ってくれ。", "left_context": "", "meta": {"category": "tech", "alternatives": ["プルリクエストを作ってくれ。", "Pull Requestを作ってくれ。"]}}
 {"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonatta.", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "academic"}}
-{"romaji": "jikkennokekka,yuuisagamitomerareta.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "jikkennnokekka,yuuisagamitomerareta.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "academic"}}
 {"romaji": "hikenshahadaigakusei20nindearu.", "output": "被験者は大学生20人である。", "left_context": "", "meta": {"category": "academic", "alternatives": ["被験者は大学生20名である。"]}}
 {"romaji": "senkoukenkyuunogenkaiwotsuginishimesu.", "output": "先行研究の限界を次に示す。", "left_context": "", "meta": {"category": "academic"}}
 {"romaji": "teianshuhouhajuuraishuhounikurabetesagyoujikanwotanshukushita.", "output": "提案手法は従来手法に比べて作業時間を短縮した。", "left_context": "", "meta": {"category": "academic"}}
@@ -29,11 +29,11 @@
 {"romaji": "honwoyondakansouwokaku.", "output": "本を読んだ感想を書く。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "raishuunogetsuyoubinihaishanoyoyaku.", "output": "来週の月曜日に歯医者の予約。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "omoitsuitaaidea:shisenderimokonwosousasuru.", "output": "思いついたアイデア：視線でリモコンを操作する。", "left_context": "", "meta": {"category": "memo", "alternatives": ["思いついたアイデア:視線でリモコンを操作する。"]}}
-{"romaji": "10ji30funnidenshaninotta.", "output": "10時30分に電車に乗った。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "10ji30funnnidenshaninotta.", "output": "10時30分に電車に乗った。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "kibungaochikonderunodesanponideta.", "output": "気分が落ち込んでるので散歩に出た。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "ronbunnnodai2shouwokakiowatta.", "output": "論文の第2章を書き終わった。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "kyouhaosokunarisoudalara,sakinitabetwoite.", "output": "今日は遅くなりそうだから、先に食べておいて。", "left_context": "", "meta": {"category": "typo"}}
-{"romaji": "jikkennokekka,yuuisagamitomeraretq.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "typo"}}
+{"romaji": "jikkennnokekka,yuuisagamitomeraretq.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "typo"}}
 {"romaji": "githibnipushshiteoite.", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "typo", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"]}}
 {"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonata.", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "typo"}}
 {"romaji": "ryoukai!arigatpu.", "output": "了解！ありがとう。", "left_context": "", "meta": {"category": "typo", "alternatives": ["了解!ありがとう。"]}}

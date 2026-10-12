@@ -13,9 +13,16 @@ from data.reading import align_zenz, analyze  # noqa: E402
 
 def make_args(**kw) -> argparse.Namespace:
     d = dict(limit=10**9, max_records=10**9, seed=0, noise_rate=0.0, noise_max=2, max_chars=60,
-             max_left=200, valid_ratio=0.02, test_ratio=0.02, keep_mismatch=False, out="")
+             max_left=200, valid_ratio=0.02, test_ratio=0.02, keep_mismatch=False, out="",
+             omit_punct_rate=0.0)
     d.update(kw)
     return argparse.Namespace(**d)
+
+
+def test_omit_punct_drops_japanese_symbols_but_keeps_ascii_in_literals():
+    out, _ = run({"input": "ショウ、ヲツカウ。", "output": "llama.cppを使う。", "left_context": ""}, omit_punct_rate=1.0)
+    assert [s["romaji"] for s in out] == ["llama.cppwotsukau"]
+    assert out[0]["output"] == "llama.cppを使う。" and out[0]["meta"]["omit_punct"] is True
 
 
 def run(rec, **kw):
@@ -121,7 +128,7 @@ def test_build_cli_reproducible_and_contract(tmp_path):
     assert len(rows) == 100
     for r in rows:
         assert set(r) == {"romaji", "output", "left_context", "meta"}
-        assert set(r["meta"]) == {"source", "noise", "reading_from"}
+        assert set(r["meta"]) == {"source", "noise", "reading_from", "omit_punct"}
         assert r["meta"]["reading_from"] in ("zenz", "analyzer")
         assert r["romaji"] and all("!" <= c <= "~" and not c.isupper() for c in r["romaji"])
     assert any(r["meta"]["noise"] for r in rows)
