@@ -81,6 +81,15 @@ class ConstrainedZenz:
         self.max_tries = max_tries
 
     def decode(self, reading: Reading, dic: Dictionary, left_context: str = "", max_new: int | None = None) -> str:
+        return self.decode_scored(reading, dic, left_context, max_new)[0]
+
+    def decode_scored(self, reading: Reading, dic: Dictionary, left_context: str = "",
+                      max_new: int | None = None) -> tuple[str, float, bool]:
+        """(出力, 選んだトークンの対数確率の和（EOS を含む）, ラティスの終点まで届いたか)。
+
+        対数確率は制約をかける前の分布で測る（制約で弾いた分を正規化し直さない）。読みの違う候補どうしを
+        比べるとき、zenz がその読みと出力をどれだけ自然と見たかの尺度になる。
+        """
         torch, model, tok = self.s._torch, self.s.model, self.s.tok
         m = LatticeMatcher(reading, dic)
         states = m.start()
@@ -90,11 +99,15 @@ class ConstrainedZenz:
         out = bytearray()
         past = None
         step_ids = ids
+        logp_sum = 0.0
+        finished = False
         for _ in range(max_new):
             with torch.no_grad():
                 r = model(input_ids=step_ids, past_key_values=past, use_cache=True)
             past = r.past_key_values
-            order = torch.argsort(r.logits[0, -1], descending=True).tolist()
+            logits = r.logits[0, -1].float()
+            logp = torch.log_softmax(logits, dim=-1)
+            order = torch.argsort(logits, descending=True).tolist()
             chosen = None
             for t in order[: self.max_tries]:
                 if t == self.eos:
@@ -109,8 +122,12 @@ class ConstrainedZenz:
                 if ns:
                     chosen, states = t, ns
                     break
-            if chosen is None or chosen == self.eos:
+            if chosen is None:
+                break
+            logp_sum += logp[chosen].item()
+            if chosen == self.eos:
+                finished = True
                 break
             out += self.tok_bytes[chosen]
             step_ids = torch.tensor([[chosen]], device=self.s.device)
-        return out.decode("utf-8", errors="replace")
+        return out.decode("utf-8", errors="replace"), logp_sum, finished
