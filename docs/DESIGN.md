@@ -47,7 +47,7 @@ ThinkPad は 2028-01 頃まで Windows、その後 Debian 13 に移る予定。�
 
 ### 方式2: romaji2ja の変換精度
 
-`eval/eval_romaji2ja.py`。推論は配布元 `code/infer.py` と同じ手順（`{入力}`、貪欲法、fp32）。辞書を引く高速経路（`infer_fast.py` と `lexicon/`）は使わず、モデル単体を測った。
+`eval/eval_romaji2ja.py`（現在は削除。`python -m eval.run --converter romaji2ja` が同じ手順）。推論は配布元 `code/infer.py` と同じ手順（`{入力}`、貪欲法、fp32）。辞書を引く高速経路（`infer_fast.py` と `lexicon/`）は使わず、モデル単体を測った。
 
 | セット | 入力 | 完全一致 | 記号を無視した一致 | 平均 MinCER |
 |---|---|---|---|---|
@@ -90,13 +90,13 @@ ThinkPad は 2028-01 頃まで Windows、その後 Debian 13 に移る予定。�
 2. **速度**: デスクトップ上で 255H を模擬して測った（上記）。100M 級までなら1秒の要件に収まる。
 3. **方式3の部品**（クラウドセッションに並行で出せる）:
    - 学習データ生成パイプライン（読み付与・ローマ字化・打鍵ミス注入・英字区間と記号の扱い）
-   - 評価の仕組み（文字誤り率・完全一致・AJIMEE-Bench のローマ字版）
+   - 評価の仕組み（文字誤り率・完全一致・AJIMEE-Bench のローマ字版）— ハーネスは実装済み（[EVAL.md](EVAL.md)）。ベースラインの実測は未
    - 微調整スクリプト（CPU で小さい設定が通るところまで。本学習は 5060 Ti）
    - 推論 CLI（GGUF 変換、llama.cpp で `ローマ字 → 日本語`）
 4. **本学習と実用試験**（ローカル）
 
 ## 未確認の論点
 
-- zenz の文字単位トークナイザ（ku-nlp/gpt2-small-japanese-char 系）がラテン小文字・記号を単独トークンとして持つか
+- zenz の文字単位トークナイザ（ku-nlp/gpt2-small-japanese-char 系）がラテン小文字・記号を単独トークンとして持つか — 調査スクリプトは用意済み（`eval/tokenizer_survey.py`、[EVAL.md](EVAL.md)）。クラウドから Hugging Face に接続できず結論はまだ
 - 日本語 Wikipedia 由来の学習で、公開する重みに CC BY-SA が及ぶか（CC 自身は保守的な読みを示しつつ、法的結論は出ていない）。CC BY-SA 4.0 で出す前提なら問題にならない
 - 読み付与の精度（MeCab＋UniDic / Sudachi / pyopenjtalk）。読みの誤りはそのまま学習データの誤りになる

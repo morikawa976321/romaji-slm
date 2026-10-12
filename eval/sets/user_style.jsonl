@@ -1,40 +1,40 @@
-{"cat": "chat", "input": "kyouhaosokunarisoudakara,sakinitabeteoite.", "expected": ["今日は遅くなりそうだから、先に食べておいて。"]}
-{"cat": "chat", "input": "ashitanokaigi,nanjikaradakke?", "expected": ["明日の会議、何時からだっけ？", "明日の会議、何時からだっけ?"]}
-{"cat": "chat", "input": "ryoukai!arigatou.", "expected": ["了解！ありがとう。", "了解!ありがとう。"]}
-{"cat": "chat", "input": "sonokenhamatakondohanasou.", "expected": ["その件はまた今度話そう。"]}
-{"cat": "chat", "input": "ekimaenokafedemachiawaseshiyou.", "expected": ["駅前のカフェで待ち合わせしよう。"]}
-{"cat": "chat", "input": "chottookurerukamo.gomen!", "expected": ["ちょっと遅れるかも。ごめん！", "ちょっと遅れるかも。ごめん!"]}
-{"cat": "chat", "input": "shashinokuttekuretearigatou.", "expected": ["写真送ってくれてありがとう。"]}
-{"cat": "chat", "input": "konshuumatsuhahimadesuka?", "expected": ["今週末は暇ですか？", "今週末は暇ですか?"]}
-{"cat": "tech", "input": "githubnipushshiteoite.", "expected": ["GitHubにpushしておいて。", "githubにpushしておいて。", "GitHubにプッシュしておいて。"]}
-{"cat": "tech", "input": "konofunctionnotesutowokaite.", "expected": ["このfunctionのテストを書いて。"]}
-{"cat": "tech", "input": "claude.mdnikomittonokisokuwotsuikashite.", "expected": ["CLAUDE.mdにコミットの規則を追加して。", "claude.mdにコミットの規則を追加して。"]}
-{"cat": "tech", "input": "era-gadetararoguwomisete.", "expected": ["エラーが出たらログを見せて。"]}
-{"cat": "tech", "input": "llama.cppdemoderuwougokasu.", "expected": ["llama.cppでモデルを動かす。"]}
-{"cat": "tech", "input": "pythonnoba-jonwo3.12niageta.", "expected": ["Pythonのバージョンを3.12に上げた。", "pythonのバージョンを3.12に上げた。"]}
-{"cat": "tech", "input": "konoissuehamadashuuseishinaide.", "expected": ["このissueはまだ修正しないで。", "このイシューはまだ修正しないで。"]}
-{"cat": "tech", "input": "apiki-hakankyouhensuukarayomikomu.", "expected": ["APIキーは環境変数から読み込む。"]}
-{"cat": "tech", "input": "ok,sorededeployshite.", "expected": ["OK、それでdeployして。", "ok、それでdeployして。", "OK、それでデプロイして。"]}
-{"cat": "tech", "input": "pullrequestwotsukuttekure.", "expected": ["pull requestを作ってくれ。", "プルリクエストを作ってくれ。", "Pull Requestを作ってくれ。"]}
-{"cat": "academic", "input": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonatta.", "expected": ["本研究では視線計測を用いたユーザビリティ評価を行った。"]}
-{"cat": "academic", "input": "jikkennokekka,yuuisagamitomerareta.", "expected": ["実験の結果、有意差が認められた。"]}
-{"cat": "academic", "input": "hikenshahadaigakusei20nindearu.", "expected": ["被験者は大学生20人である。", "被験者は大学生20名である。"]}
-{"cat": "academic", "input": "senkoukenkyuunogenkaiwotsuginishimesu.", "expected": ["先行研究の限界を次に示す。"]}
-{"cat": "academic", "input": "teianshuhouhajuuraishuhounikurabetesagyoujikanwotanshukushita.", "expected": ["提案手法は従来手法に比べて作業時間を短縮した。"]}
-{"cat": "academic", "input": "shitsumonshichousanokaitouwobunsekishita.", "expected": ["質問紙調査の回答を分析した。"]}
-{"cat": "academic", "input": "kanouseigaarukotowoshisasuru.", "expected": ["可能性があることを示唆する。"]}
-{"cat": "academic", "input": "honronbunnokouseihaikanotooridearu.", "expected": ["本論文の構成は以下の通りである。", "本論文の構成は以下のとおりである。"]}
-{"cat": "memo", "input": "kyouhaasakaraatamagaitakatta.", "expected": ["今日は朝から頭が痛かった。"]}
-{"cat": "memo", "input": "kaimono:gyuunyuu,tamago,pan", "expected": ["買い物：牛乳、卵、パン", "買い物:牛乳、卵、パン"]}
-{"cat": "memo", "input": "honwoyondakansouwokaku.", "expected": ["本を読んだ感想を書く。"]}
-{"cat": "memo", "input": "raishuunogetsuyoubinihaishanoyoyaku.", "expected": ["来週の月曜日に歯医者の予約。"]}
-{"cat": "memo", "input": "omoitsuitaaidea:shisenderimokonwosousasuru.", "expected": ["思いついたアイデア：視線でリモコンを操作する。", "思いついたアイデア:視線でリモコンを操作する。"]}
-{"cat": "memo", "input": "10ji30funnidenshaninotta.", "expected": ["10時30分に電車に乗った。"]}
-{"cat": "memo", "input": "kibungaochikonderunodesanponideta.", "expected": ["気分が落ち込んでるので散歩に出た。"]}
-{"cat": "memo", "input": "ronbunnodai2shouwokakiowatta.", "expected": ["論文の第2章を書き終わった。"]}
-{"cat": "typo", "input": "kyouhaosokunarisoudalara,sakinitabetwoite.", "expected": ["今日は遅くなりそうだから、先に食べておいて。"]}
-{"cat": "typo", "input": "jikkennokekka,yuuisagamitomeraretq.", "expected": ["実験の結果、有意差が認められた。"]}
-{"cat": "typo", "input": "githibnipushshiteoite.", "expected": ["GitHubにpushしておいて。", "githubにpushしておいて。", "GitHubにプッシュしておいて。"]}
-{"cat": "typo", "input": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonata.", "expected": ["本研究では視線計測を用いたユーザビリティ評価を行った。"]}
-{"cat": "typo", "input": "ryoukai!arigatpu.", "expected": ["了解！ありがとう。", "了解!ありがとう。"]}
-{"cat": "typo", "input": "raishuunogetsuyobinihaishanoyoyaku.", "expected": ["来週の月曜日に歯医者の予約。"]}
+{"romaji": "kyouhaosokunarisoudakara,sakinitabeteoite.", "output": "今日は遅くなりそうだから、先に食べておいて。", "left_context": "", "meta": {"category": "chat"}}
+{"romaji": "ashitanokaigi,nanjikaradakke?", "output": "明日の会議、何時からだっけ？", "left_context": "", "meta": {"category": "chat", "alternatives": ["明日の会議、何時からだっけ?"]}}
+{"romaji": "ryoukai!arigatou.", "output": "了解！ありがとう。", "left_context": "", "meta": {"category": "chat", "alternatives": ["了解!ありがとう。"]}}
+{"romaji": "sonokenhamatakondohanasou.", "output": "その件はまた今度話そう。", "left_context": "", "meta": {"category": "chat"}}
+{"romaji": "ekimaenokafedemachiawaseshiyou.", "output": "駅前のカフェで待ち合わせしよう。", "left_context": "", "meta": {"category": "chat"}}
+{"romaji": "chottookurerukamo.gomen!", "output": "ちょっと遅れるかも。ごめん！", "left_context": "", "meta": {"category": "chat", "alternatives": ["ちょっと遅れるかも。ごめん!"]}}
+{"romaji": "shashinokuttekuretearigatou.", "output": "写真送ってくれてありがとう。", "left_context": "", "meta": {"category": "chat"}}
+{"romaji": "konshuumatsuhahimadesuka?", "output": "今週末は暇ですか？", "left_context": "", "meta": {"category": "chat", "alternatives": ["今週末は暇ですか?"]}}
+{"romaji": "githubnipushshiteoite.", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "tech", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"]}}
+{"romaji": "konofunctionnotesutowokaite.", "output": "このfunctionのテストを書いて。", "left_context": "", "meta": {"category": "tech"}}
+{"romaji": "claude.mdnikomittonokisokuwotsuikashite.", "output": "CLAUDE.mdにコミットの規則を追加して。", "left_context": "", "meta": {"category": "tech", "alternatives": ["claude.mdにコミットの規則を追加して。"]}}
+{"romaji": "era-gadetararoguwomisete.", "output": "エラーが出たらログを見せて。", "left_context": "", "meta": {"category": "tech"}}
+{"romaji": "llama.cppdemoderuwougokasu.", "output": "llama.cppでモデルを動かす。", "left_context": "", "meta": {"category": "tech"}}
+{"romaji": "pythonnoba-jonwo3.12niageta.", "output": "Pythonのバージョンを3.12に上げた。", "left_context": "", "meta": {"category": "tech", "alternatives": ["pythonのバージョンを3.12に上げた。"]}}
+{"romaji": "konoissuehamadashuuseishinaide.", "output": "このissueはまだ修正しないで。", "left_context": "", "meta": {"category": "tech", "alternatives": ["このイシューはまだ修正しないで。"]}}
+{"romaji": "apiki-hakankyouhensuukarayomikomu.", "output": "APIキーは環境変数から読み込む。", "left_context": "", "meta": {"category": "tech"}}
+{"romaji": "ok,sorededeployshite.", "output": "OK、それでdeployして。", "left_context": "", "meta": {"category": "tech", "alternatives": ["ok、それでdeployして。", "OK、それでデプロイして。"]}}
+{"romaji": "pullrequestwotsukuttekure.", "output": "pull requestを作ってくれ。", "left_context": "", "meta": {"category": "tech", "alternatives": ["プルリクエストを作ってくれ。", "Pull Requestを作ってくれ。"]}}
+{"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonatta.", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "jikkennokekka,yuuisagamitomerareta.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "hikenshahadaigakusei20nindearu.", "output": "被験者は大学生20人である。", "left_context": "", "meta": {"category": "academic", "alternatives": ["被験者は大学生20名である。"]}}
+{"romaji": "senkoukenkyuunogenkaiwotsuginishimesu.", "output": "先行研究の限界を次に示す。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "teianshuhouhajuuraishuhounikurabetesagyoujikanwotanshukushita.", "output": "提案手法は従来手法に比べて作業時間を短縮した。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "shitsumonshichousanokaitouwobunsekishita.", "output": "質問紙調査の回答を分析した。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "kanouseigaarukotowoshisasuru.", "output": "可能性があることを示唆する。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "honronbunnokouseihaikanotooridearu.", "output": "本論文の構成は以下の通りである。", "left_context": "", "meta": {"category": "academic", "alternatives": ["本論文の構成は以下のとおりである。"]}}
+{"romaji": "kyouhaasakaraatamagaitakatta.", "output": "今日は朝から頭が痛かった。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "kaimono:gyuunyuu,tamago,pan", "output": "買い物：牛乳、卵、パン", "left_context": "", "meta": {"category": "memo", "alternatives": ["買い物:牛乳、卵、パン"]}}
+{"romaji": "honwoyondakansouwokaku.", "output": "本を読んだ感想を書く。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "raishuunogetsuyoubinihaishanoyoyaku.", "output": "来週の月曜日に歯医者の予約。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "omoitsuitaaidea:shisenderimokonwosousasuru.", "output": "思いついたアイデア：視線でリモコンを操作する。", "left_context": "", "meta": {"category": "memo", "alternatives": ["思いついたアイデア:視線でリモコンを操作する。"]}}
+{"romaji": "10ji30funnidenshaninotta.", "output": "10時30分に電車に乗った。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "kibungaochikonderunodesanponideta.", "output": "気分が落ち込んでるので散歩に出た。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "ronbunnodai2shouwokakiowatta.", "output": "論文の第2章を書き終わった。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "kyouhaosokunarisoudalara,sakinitabetwoite.", "output": "今日は遅くなりそうだから、先に食べておいて。", "left_context": "", "meta": {"category": "typo"}}
+{"romaji": "jikkennokekka,yuuisagamitomeraretq.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "typo"}}
+{"romaji": "githibnipushshiteoite.", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "typo", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"]}}
+{"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonata.", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "typo"}}
+{"romaji": "ryoukai!arigatpu.", "output": "了解！ありがとう。", "left_context": "", "meta": {"category": "typo", "alternatives": ["了解!ありがとう。"]}}
+{"romaji": "raishuunogetsuyobinihaishanoyoyaku.", "output": "来週の月曜日に歯医者の予約。", "left_context": "", "meta": {"category": "typo"}}
