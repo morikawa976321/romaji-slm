@@ -5,14 +5,17 @@ from eval.romaji_kana import romaji_to_katakana
 
 
 @pytest.mark.parametrize("romaji, kana", [
-    ("konnichiha", "コンニチハ"),
-    ("kanna", "カンナ"),            # nn の後ろが母音: ン + ナ
-    ("kannnai", "カンナイ"),        # nnn: ン + ナ
+    ("konnnichiha", "コンニチハ"),
+    ("konnichiha", "コンイチハ"),       # nn は「ン」なので、こんにちは は konnnichiha
+    ("kanna", "カンア"),            # nn は常に「ン」
+    ("kannna", "カンナ"),
+    ("kannnai", "カンナイ"),
     ("kantan", "カンタン"),
     ("hon", "ホン"),
     ("honn", "ホン"),
+    ("honnya", "ホンヤ"),
     ("hon'ya", "ホンヤ"),
-    ("kannya", "カンニャ"),
+    ("kannnya", "カンニャ"),
     ("kitte", "キッテ"),
     ("matcha", "マッチャ"),
     ("gakkou", "ガッコウ"),
@@ -56,10 +59,10 @@ def test_roundtrip_with_kana_py(kana):
 
 
 def test_roundtrip_n_before_vowel():
-    # ン+母音・y は n' と書く。nn+母音 だと「ん」+な行に読まれて戻らない
-    assert kata_to_romaji("ホンヤ") == "hon'ya"
-    assert kata_to_romaji("ホンア") == "hon'a"
-    assert kata_to_romaji("ホンナ") == "honna"
+    # ン+母音・y・n は nn と書く（記号を打たない方針）。nn は常に「ン」と読むので戻る
+    assert kata_to_romaji("ホンヤ") == "honnya"
+    assert kata_to_romaji("ホンア") == "honna"
+    assert kata_to_romaji("ホンナ") == "honnna"
     assert kata_to_romaji("ホン") == "honn"
     for kana in ["ホンヤ", "ホンア", "ホンナ", "ホンニャ", "ホン", "ホンタ", "ニンイ", "ホン、"]:
         assert romaji_to_katakana(kata_to_romaji(kana)) == kana

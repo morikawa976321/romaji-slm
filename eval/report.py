@@ -25,6 +25,8 @@ def env_info(device: str) -> dict:
         import torch
         info["torch"] = torch.__version__
         info["torch_threads"] = torch.get_num_threads()
+        if device.startswith("cuda") and torch.cuda.is_available():
+            info["gpu"] = torch.cuda.get_device_name(0)
     except ImportError:
         pass
     return info

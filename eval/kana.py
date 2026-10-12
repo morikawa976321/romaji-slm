@@ -62,9 +62,9 @@ def kata_to_romaji(text: str) -> str:
             # 次の音節の子音を重ねる。子音で始まらない（記号・末尾）ときは単独の小さい「っ」
             out.append(nxt[0] if nxt[:1].isalpha() and nxt[0] not in "aiueon" else "xtu")
         elif s == "ン":
-            # 母音・y が続くと「ん」が次と結合するので n' と打つ（nn+母音は IME では「ん」+な行に読まれ、
-            # 「ンヤ」が honnya=ほんにゃ になる）。n が続くときは n だけで足りる（nna=んな）。末尾は nn
-            out.append("nn" if not nxt else "n'" if nxt[0] in "aiueoy" else "n")
+            # 母音・y・n が続くと「ん」が次と結合するので nn と打つ（IME は nn を常に「ん」と読む）。
+            # 記号を打たない方針（2026-10-12 本人）なので n' は使わない
+            out.append("nn" if (not nxt) or nxt[0] in "aiueoyn" else "n")
         else:
             out.append(s)
     return "".join(out)

@@ -1,0 +1,200 @@
+{"romaji": "sennkoukenkyuudeha,yominoaimaiseigakadaitosaretekita.", "output": "先行研究では、読みの曖昧性が課題とされてきた。", "left_context": "実験の結果、提案手法は従来手法よりも高い精度を示した。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "gohqnnwotqberu.", "output": "ごはんを食べる。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:3:a>q", "sub:9:a>q"], "reading_from": "zenz"}}
+{"romaji": "gyoumunohyakubunnnoitiwozidouka.", "output": "ぎょうむのひゃくぶんのいちをじどうか。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "thinkpadnoki-bo-dohauchiyasui.", "output": "ThinkPadのキーボードは打ちやすい。", "left_context": "Google検索で調べてみた。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "honkounoko8seihaikanootoridearu.", "output": "本稿の構成は以下のとおりである。", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:21:to", "sub:10:u>8"], "reading_from": "zenz"}}
+{"romaji": "eeto,doushiyou.", "output": "ええと、どうしよう。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ukkariwasureteita.", "output": "うっかり忘れていた。", "left_context": "めっちゃ疲れた…。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kippuwokattekara,ho-muniiku.", "output": "きっぷを買ってから、ホームに行く。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "sakkinohanashinotsudukidakedo,yosannhadounatta?", "output": "さっきの話の続きだけど、予算はどうなった？", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "me-ruhatest@example.comniokuttekudasai.", "output": "メールはtest@example.comに送ってください。", "left_context": "URLはhttps://example.com/ですか？", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ja,mataasu.", "output": "じゃあ、また明日。", "left_context": "雨が降りそうだから、傘を持っていこう。", "meta": {"source": "fixture", "noise": ["drop:2:a"], "reading_from": "zenz"}}
+{"romaji": "kikaigakushuunomoderuwohyoukasuru.", "output": "機械学習のモデルを評価する。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "honshuhounokeisanryouhao(n)dearu.", "output": "本手法の計算量はO(n)である。", "left_context": "参加者は20名で、平均年齢は24.5歳であった。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kyakusamagairasshatta.", "output": "きゃく様がいらっしゃった。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kazewohiiteshimattanode,hayakuneru.", "output": "風邪をひいてしまったので、早く寝る。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "redmeniinsuto-ruhouhouwotsuikisuru.", "output": "READMEにインストール方法を追記する。", "left_context": "ビルドが失敗したので、ログを確認してください。", "meta": {"source": "fixture", "noise": ["drop:2:a"], "reading_from": "zenz"}}
+{"romaji": "annnanitabetanoni,madaonakagasuiteiru.", "output": "あんなに食べたのに、まだお腹がすいている。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "hyou1nikakumoderunomojiayamariritsuwoshimesu.", "output": "表1に各モデルの文字誤り率を示す。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "notionnimemowonokoshita.", "output": "Notionにメモを残した。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kyoutonihaookunojiingaaru.", "output": "京都には多くの寺院がある。", "left_context": "日本語の文字には、ひらがな、カタカナ、漢字がある。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "tsugihahoukokusyowokaku.", "output": "次は報告書を書く。", "left_context": "朝ごはんを食べた。それから学校に行った。会議が終わった。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "bikkurishita!", "output": "びっくりした！", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kaigideha,yosannnominaosito,jinninnnohaichito,sukeju-runotyouseinituite,tyoujikannniwatattegirongaokonawaretaga,ketsuronhadenakatta.", "output": "会議では、予算の見直しと、人員の配置と、スケジュールの調整について、長時間にわたって議論が行われたが、結論は出なかった。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "konoko-doworifakutaringushitehoshii.", "output": "このコードをリファクタリングしてほしい。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "shimekiriharaisuhunpokinnyoubidesu.", "output": "締め切りは来週の金曜日です。", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:19:p", "swap:15:hu"], "reading_from": "zenz"}}
+{"romaji": "kasawowasureta.", "output": "傘を忘れた。", "left_context": "雨が降っている。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "apinoresuponsugaosoi.", "output": "APIのレスポンスが遅い。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "nannkaattaraittene.", "output": "何かあったら言ってね。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "otto,machigaeta.", "output": "おっと、間違えた。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "hikarihanmideari,ryuushidmoaru.", "output": "光は波であり、粒子でもある。", "left_context": "富士山は日本で一番高い山です。", "meta": {"source": "fixture", "noise": ["drop:9:a", "drop:25:e"], "reading_from": "zenz"}}
+{"romaji": "shiryouhakyouyuuforudanioitearimasu.", "output": "資料は共有フォルダに置いてあります。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "linuxdemougokuyounisitai.", "output": "Linuxでも動くようにしたい。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "llama.cppdeemoderuwougokasu.", "output": "llama.cppでモデルを動かす。", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:10:e"], "reading_from": "zenz"}}
+{"romaji": "nihongonomoziniha,hirqgana,katakana,kanjitaaru.", "output": "日本語の文字には、ひらがな、カタカナ、漢字がある。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:41:g>t", "sub:21:a>q"], "reading_from": "zenz"}}
+{"romaji": "unn,wakwtta.", "output": "うん、わかった。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:7:a>w"], "reading_from": "zenz"}}
+{"romaji": "hutsuunoyarikata.", "output": "ふつうのやりかた。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "2025nenn4tsu1kihikarasikousareru.", "output": "2025年4月1日から施行される。", "left_context": "定価は1,200円です。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "arehahondesu.", "output": "あれは本です。", "left_context": "これはペンです。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kinouhaosokumadezangyoushiteita.", "output": "昨日は遅くまで残業していた。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "byouinnnoyoyakuwototta.", "output": "びょういんのよやくをとった。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "uchiawasenonitteiwochixyouseishitaidesu.", "output": "打ち合わせの日程を調整したいです。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kongonokadaitoshjte,nagaibunmyakuhenotaiougaagerareu.", "output": "今後の課題として、長い文脈への対応が挙げられる。", "left_context": "", "meta": {"source": "fixture", "noise": ["drop:51:r", "sub:16:i>j"], "reading_from": "zenz"}}
+{"romaji": "atodesyashinnokurune.", "output": "あとで写真送るね。", "left_context": "いつものお店でいい？", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "raishuunogetsuyoubihashukuzitsunanodeyasumidesu.", "output": "来週の月曜日は祝日なので休みです。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "jugyougaowattekara,toshokannniyoru.", "output": "じゅぎょうがおわってから、図書館に寄る。", "left_context": "びょういんのよやくをとった。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "mecchatsukareta....", "output": "めっちゃ疲れた…。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "moutsuitayo.", "output": "もう着いたよ。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kaigigaowatta.", "output": "会議が終わった。", "left_context": "朝ごはんを食べた。それから学校に行った。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "hottoshita.", "output": "ほっとした。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "asunokaigihaitukaradesuka?", "output": "明日の会議は何時からですか？", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "nekogahizanouedeneteiru.", "output": "猫が膝の上で寝ている。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "linederenrakusurune.", "output": "LINEで連絡するね。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "urlhahttps://example.com/desuka?", "output": "URLはhttps://example.com/ですか？", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "keizaiseityoritsuhazennnenhide2.1%jousyooushita.", "output": "経済成長率は前年比で2.1%上昇した。", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:40:o", "drop:12:u"], "reading_from": "zenz"}}
+{"romaji": "eiganotsudukigakininaru.", "output": "映画の続きが気になる。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "yappari7ameteoku.", "output": "やっぱりやめておく。", "left_context": "そんなこと言わないで。", "meta": {"source": "fixture", "noise": ["sub:7:y>7"], "reading_from": "zenz"}}
+{"romaji": "iphonenogamengawareta.", "output": "iPhoneの画面が割れた。", "left_context": "Windows 11にアップデートした。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "hanbunkosiyou.", "output": "はんぶんこしよう。", "left_context": "ごはんを食べる。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "asagohannwotabeta.", "output": "朝ごはんを食べた。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "sqlnokueriwosaitekikasitai.", "output": "SQLのクエリを最適化したい。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "tomatotoch-zunosandoitti.", "output": "トマトとチーズのサンドイッチ。", "left_context": "", "meta": {"source": "fixture", "noise": ["drop:10:i"], "reading_from": "zenz"}}
+{"romaji": "wi-fini6sunagaranai.", "output": "Wi-Fiにつながらない。", "left_context": "Linuxでも動くようにしたい。", "meta": {"source": "fixture", "noise": ["sub:7:t>6"], "reading_from": "zenz"}}
+{"romaji": "kanojohamaiasajoginguwoshteiru.", "output": "彼女は毎朝ジョギングをしている。", "left_context": "", "meta": {"source": "fixture", "noise": ["drop:25:i"], "reading_from": "zenz"}}
+{"romaji": "exxcelnosuushikigawanai.", "output": "Excelの数式が合わない。", "left_context": "PDFをWordに変換したい。", "meta": {"source": "fixture", "noise": ["drop:17:a", "insert:1:x"], "reading_from": "zenz"}}
+{"romaji": "shuumatsuhatomodatitoeigawominiikuyoteidesu.", "output": "週末は友達と映画を見に行く予定です。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "imakaradenwashitemoii?", "output": "今から電話してもいい？", "left_context": "ありがとう、助かりました。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "tannjoubiomddetou!", "output": "誕生日おめでとう！", "left_context": "何かあったら言ってね。", "meta": {"source": "fixture", "noise": ["sub:11:e>d"], "reading_from": "zenz"}}
+{"romaji": "maa,ikka.", "output": "まあ、いっか。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "zsumimasenn,sukosiokuremasu.", "output": "すみません、少し遅れます。", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:0:z"], "reading_from": "zenz"}}
+{"romaji": "onakagasuitanode,ra-menwotabeniikou.", "output": "お腹がすいたので、ラーメンを食べに行こう。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "atarashiino-towokatta.", "output": "新しいノートを買った。", "left_context": "夜、なかなか眠れなかった。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "fujiyamahanipponndeitibantakaiyamadesu.", "output": "富士山は日本で一番高い山です。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "rebyu-woonegaisimasu.", "output": "レビューをお願いします。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "purozyekutonoshinnchixyokugaokureteirutame,tanntoushawohuyashi,sagyounoyuusenjyunniwominaoshi,mainichinouchiawasedezyoukyouwokyouyuusurukotonishita.", "output": "プロジェクトの進捗が遅れているため、担当者を増やし、作業の優先順位を見直し、毎日の打ち合わせで状況を共有することにした。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "tesutogazenbutoottarariri-sushimasu.", "output": "テストが全部通ったらリリースします。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kyouhaasakaraamedatta.", "output": "今日は朝から雨だった。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "gpunomemorigatarinakutegakushuugatomatta.", "output": "GPUのメモリが足りなくて学習が止まった。", "left_context": "型エラーを直したら、CIが通った。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "chottomattekudasai.", "output": "ちょっと待ってください。", "left_context": "明日の会議は何時からですか？", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ryousikonnpyu-tanokenkyuugssusundeiru.", "output": "量子コンピュータの研究が進んでいる。", "left_context": "機械学習のモデルを評価する。", "meta": {"source": "fixture", "noise": ["sub:26:a>s"], "reading_from": "zenz"}}
+{"romaji": "massugususundekudasai.", "output": "まっすぐ進んでください。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "jikkennnokeoka,teianshuhouhajuuraishuhouyorimotakaiseidowozshimeshita.", "output": "実験の結果、提案手法は従来手法よりも高い精度を示した。", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:58:z", "sub:11:k>o"], "reading_from": "zenz"}}
+{"romaji": "nee,tyottoii?", "output": "ねえ、ちょっといい？", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kyoutoniiku.", "output": "きょうとにいく。", "left_context": "きっぷを買ってから、ホームに行く。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "vscodenokakuchoukinouwoireru.", "output": "VS Codeの拡張機能を入れる。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "konohonhatotemoomoshirokatta.", "output": "この本はとても面白かった。", "left_context": "来週の月曜日は祝日なので休みです。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kyouhatukareta.", "output": "今日は疲れた。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "honnkenkyuudeha,nihonngonomojitannigengomoderuwomochiitahenkanshuhouwoteiansuru.", "output": "本研究では、日本語の文字単位言語モデルを用いた変換手法を提案する。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ryokounokeikakuwoatteeru.", "output": "りょこうのけいかくをたてる。", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:17:ta", "insert:21:e"], "reading_from": "zenz"}}
+{"romaji": "ijounokekkakara,tuginokotogawakaru.", "output": "以上の結果から、次のことが分かる。", "left_context": "データセットは2024年に公開されたものを使用した。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "hyakuennshoxtupudekatta.", "output": "ひゃくえんショップで買った。", "left_context": "きゃく様がいらっしゃった。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kesanonyu-suwomita?", "output": "今朝のニュースを見た？", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "shinkansenndeoosakamadeiku.", "output": "新幹線で大阪まで行く。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "undoufusokuwokaishousitai.", "output": "運動不足を解消したい。", "left_context": "掃除をしたら、部屋がすっきりした。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "asukaraznrennkyuuda.", "output": "明日から三連休だ。", "left_context": "友人の結婚式に出席した。", "meta": {"source": "fixture", "noise": ["sub:8:a>z", "drop:7:s"], "reading_from": "zenz"}}
+{"romaji": "zoomdwkagiiwosuru.", "output": "Zoomで会議をする。", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:8:ig", "sub:5:e>w"], "reading_from": "zenz"}}
+{"romaji": "shinbunwoyomy.", "output": "しんぶんを読む。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:12:u>y"], "reading_from": "zenz"}}
+{"romaji": "saikinn,hayaokinosyuukanngatsuitekita.", "output": "最近、早起きの習慣がついてきた。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "gotugounoyoinitiziwoosietekudasai.", "output": "ご都合のよい日時を教えてください。", "left_context": "添付ファイルをご確認ください。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "soekaragakkouniitta.", "output": "それから学校に行った。", "left_context": "朝ごはんを食べた。", "meta": {"source": "fixture", "noise": ["drop:2:r"], "reading_from": "zenz"}}
+{"romaji": "nihonshuwochottonnonda.", "output": "日本酒をちょっと飲んだ。", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:17:on"], "reading_from": "zenz"}}
+{"romaji": "uvdeizonnkannkeiwokanrishiteiru.", "output": "uvで依存関係を管理している。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "no-topcnobatteri-ganagamochisuru.", "output": "ノートPCのバッテリーが長持ちする。", "left_context": "Notionにメモを残した。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "dennwabangouha090-1234-5678desu.", "output": "電話番号は090-1234-5678です。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "suma-tofonnnozyuuengakiresouda.", "output": "スマートフォンの充電が切れそうだ。", "left_context": "", "meta": {"source": "fixture", "noise": ["drop:17:d"], "reading_from": "zenz"}}
+{"romaji": "sonnnakotoiwanaide.", "output": "そんなこと言わないで。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "sankasyaha20nade,heikinnnenreiha24.5toshideatta.", "output": "参加者は20名で、平均年齢は24.5歳であった。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "dokod4emachiawaseru?", "output": "どこで待ち合わせる？", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:5:4"], "reading_from": "zenz"}}
+{"romaji": "kaigishitsunoyoyakuwotorikeshitekudasai.", "output": "会議室の予約を取り消してください。", "left_context": "トマトとチーズのサンドイッチ。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "syashinwotoru.", "output": "しゃしんを撮る。", "left_context": "ぎゃくに考えてみよう。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "gomdenn,nteta.", "output": "ごめん、寝てた。", "left_context": "もう着いたよ。", "meta": {"source": "fixture", "noise": ["drop:8:e", "insert:3:d"], "reading_from": "zenz"}}
+{"romaji": "yoru,nakanakanenmurenakatta.", "output": "夜、なかなか眠れなかった。", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:15:n"], "reading_from": "zenz"}}
+{"romaji": "da8jyouub?", "output": "だいじょうぶ？", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:7:bu", "sub:2:i>8"], "reading_from": "zenz"}}
+{"romaji": "honn5ouniarigatougozaimasita.", "output": "ほんとうにありがとうございました。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:4:t>5"], "reading_from": "zenz"}}
+{"romaji": "githubnipushsiteoite.", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "haajimemashoite.", "output": "はじめまして。", "left_context": "ほんとうにありがとうございました。こんにちは。", "meta": {"source": "fixture", "noise": ["insert:1:a", "insert:11:o"], "reading_from": "zenz"}}
+{"romaji": "zehisankasitaidesu.", "output": "ぜひ参加したいです。", "left_context": "おっと、間違えた。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "hikkoshinojunbigaowaranai.", "output": "ひっこしの準備が終わらない。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "gajbaytene!", "output": "がんばってね！", "left_context": "それはちょっと難しいかも。", "meta": {"source": "fixture", "noise": ["sub:5:t>y", "sub:2:n>j"], "reading_from": "zenz"}}
+{"romaji": "[iine.]tokarehaitta.", "output": "「いいね。」と彼は言った。", "left_context": "その件については後で連絡します。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ekimadearuitezyuppunnhodokakarimasu.", "output": "駅まで歩いて十分ほどかかります。", "left_context": "お腹がすいたので、ラーメンを食べに行こう。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "o-hi-wonomingara,nikkiwokaiteiru.", "output": "コーヒーを飲みながら、日記を書いている。", "left_context": "猫が膝の上で寝ている。", "meta": {"source": "fixture", "noise": ["drop:0:k", "drop:12:a"], "reading_from": "zenz"}}
+{"romaji": "kataera-wonaositara,cigatootta.", "output": "型エラーを直したら、CIが通った。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "asita,harerutoiina.", "output": "あした、はれるといいな。", "left_context": "うまくいったら、教えてください。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "taihennmouswiakegzaimasenn.", "output": "大変申し訳ございません。", "left_context": "請求書を再発行してもらえますか。", "meta": {"source": "fixture", "noise": ["swap:11:iw", "drop:17:o"], "reading_from": "zenz"}}
+{"romaji": "arkgatou,tasukarkmasita.", "output": "ありがとう、助かりました。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:16:i>k", "sub:2:i>k"], "reading_from": "zenz"}}
+{"romaji": "inunosanponiittekimasu.", "output": "犬の散歩に行ってきます。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "gaykunikangaetemmiyou.", "output": "ぎゃくに考えてみよう。", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:15:m", "swap:1:ya"], "reading_from": "zenz"}}
+{"romaji": "gpt-2hamojitanninojoderutositetsukaeru.", "output": "GPT-2は文字単位のモデルとして使える。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:18:m>j"], "reading_from": "zenz"}}
+{"romaji": "hyoukanihakannzennicchiritutohenshuukyoriwomochiita.", "output": "評価には完全一致率と編集距離を用いた。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "10bungonishuppatsusimasu.", "output": "10分後に出発します。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "goukeide5kennnoera-gamitsukatta.", "output": "合計で5件のエラーが見つかった。", "left_context": "第2章では、関連研究を概観する。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "1hini3kai,kusuriwonomu.", "output": "1日に3回、薬を飲む。", "left_context": "この問題は3つの要素に分けられる。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "honwoyokunogasukidesu.", "output": "本を読むのが好きです。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:7:m>k"], "reading_from": "zenz"}}
+{"romaji": "teeijaha1,200endesu.", "output": "定価は1,200円です。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:3:k>j", "insert:1:e"], "reading_from": "zenz"}}
+{"romaji": "gaxtukounosyukudaigaowaranai.", "output": "学校の宿題が終わらない。", "left_context": "犬の散歩に行ってきます。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "osewaninatteorimasu.", "output": "お世話になっております。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "natsuyasumin0keikakuwtateru.", "output": "夏休みの計画を立てる。", "left_context": "日本酒をちょっと飲んだ。", "meta": {"source": "fixture", "noise": ["drop:21:o", "sub:12:o>0"], "reading_from": "zenz"}}
+{"romaji": "amazondehowochuumonshita.", "output": "Amazonで本を注文した。", "left_context": "", "meta": {"source": "fixture", "noise": ["drop:10:n"], "reading_from": "zenz"}}
+{"romaji": "era-messe-jiwokopi-siteharitsuketekudasai.", "output": "エラーメッセージをコピーして貼り付けてください。", "left_context": "uvで依存関係を管理している。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "tenpuhwairuwogokakuinnnkudasai.", "output": "添付ファイルをご確認ください。", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:19:ni"], "reading_from": "zenz"}}
+{"romaji": "dockerkontenawosaikidoushitekudasai.", "output": "Dockerコンテナを再起動してください。", "left_context": "テストが全部通ったらリリースします。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "mainburantinima-zishitemoiidesuka?", "output": "mainブランチにマージしてもいいですか？", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "oyasuminasai.", "output": "おやすみなさい。", "left_context": "今日は疲れた。早く寝よう。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "de-tasettoha2024nennnikoukaisaretamonowosiyoushita.", "output": "データセットは2024年に公開されたものを使用した。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "honjitsuchuunigokaitouitashimasu.", "output": "本日中にご回答いたします。", "left_context": "承知いたしました。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "pullrequestwosakuseishimashita.", "output": "pull requestを作成しました。", "left_context": "GitHubにpushしておいて。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ofuronihaittekaraneru.", "output": "お風呂に入ってから寝る。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "korehapendesu.", "output": "これはペンです。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "saiseikanoueneruti-nodounyyuugakakudaisiteiru.", "output": "再生可能エネルギーの導入が拡大している。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:16:g>t", "insert:25:y"], "reading_from": "zenz"}}
+{"romaji": "npminstallwojikkoushitaatode,sa-ba-wokidousuru.", "output": "npm installを実行したあとで、サーバーを起動する。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "konngestuhasyuppigaookatta.", "output": "今月は出費が多かった。", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:6:ts"], "reading_from": "zenz"}}
+{"romaji": "yuujinnnokekkonnsikinishuxtusekishita.", "output": "友人の結婚式に出席した。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "gogo3tokinisyuugoushit3kudasai.", "output": "午後3時に集合してください。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:22:e>3"], "reading_from": "zenz"}}
+{"romaji": "kasetuhashijisarenakatta.", "output": "仮説は支持されなかった。", "left_context": "評価には完全一致率と編集距離を用いた。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "amegafurisoudakara,kasawomotteikou.", "output": "雨が降りそうだから、傘を持っていこう。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "soudane,watakushimosouomou.", "output": "そうだね、私もそう思う。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "soujiwositara,heyagasukkirisita.", "output": "掃除をしたら、部屋がすっきりした。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "sorehatyottomuzukasiikamo.", "output": "それはちょっと難しいかも。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "kareha[asuiku]toittaga,kekkyokukonakatta.", "output": "彼は「明日行く」と言ったが、結局来なかった。", "left_context": "今日は疲れた。早く寝よう。おやすみなさい。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "tegamiwokaite,posutonidashita.", "output": "手紙を書いて、ポストに出した。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ohayougozaimasu.", "output": "おはようございます。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "googlekennsakudeshirabetemita.", "output": "Google検索で調べてみた。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "chantoestumeishitekudasai.", "output": "ちゃんと説明してください。", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:6:se"], "reading_from": "zenz"}}
+{"romaji": "konobaguhaissue#123dehoukokusareteiru.", "output": "このバグはissue #123で報告されている。", "left_context": "llama.cppでモデルを動かす。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ryoukaidesu!", "output": "了解です！", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ce-tabe-usnosextukeiwominaosu.", "output": "データベースの設計を見直す。", "left_context": "", "meta": {"source": "fixture", "noise": ["swap:8:su", "sub:0:d>c"], "reading_from": "zenz"}}
+{"romaji": "yuuhanhanannnishiyouka.", "output": "夕飯は何にしようか。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "h8sashiburinijikkanikaette,hahanoryouriwotabeta.", "output": "久しぶりに実家に帰って、母の料理を食べた。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:1:i>8"], "reading_from": "zenz"}}
+{"romaji": "mizuhahyakudodehuttousuru.", "output": "水は百度で沸騰する。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "tannakatomouushimasu.", "output": "田中と申します。", "left_context": "ほんとうにありがとうございました。こんにちは。はじめまして。", "meta": {"source": "fixture", "noise": ["insert:2:n", "insert:11:u"], "reading_from": "zenz"}}
+{"romaji": "ima,nanndokidesuka.", "output": "今、何時ですか。", "left_context": "全然わからない。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "shizenngeenngosyorihazinnkoutinounoichibunnyadearu.", "output": "自然言語処理は人工知能の一分野である。", "left_context": "データベースの設計を見直す。", "meta": {"source": "fixture", "noise": ["insert:8:e"], "reading_from": "zenz"}}
+{"romaji": "sannponotochuude,kireinahanawomitsuketa.", "output": "散歩の途中で、きれいな花を見つけた。", "left_context": "久しぶりに実家に帰って、母の料理を食べた。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "pdfwowordnihennkanshitai.", "output": "PDFをWordに変換したい。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "youtubededougawomiru.", "output": "YouTubeで動画を見る。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "sjouchiitashinasita.", "output": "承知いたしました。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:13:m>n", "sub:1:h>j"], "reading_from": "zenz"}}
+{"romaji": "konnniccchiha.", "output": "こんにちは。", "left_context": "ほんとうにありがとうございました。", "meta": {"source": "fixture", "noise": ["insert:6:c", "insert:7:c"], "reading_from": "zenz"}}
+{"romaji": "tanosiminisiteru.", "output": "楽しみにしてる。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "sokka,arigatuo!", "output": "そっか、ありがとう！", "left_context": "まあ、いっか。", "meta": {"source": "fixture", "noise": ["swap:12:ou"], "reading_from": "zenz"}}
+{"romaji": "konomondaiha3tunoyousoniwakerarer.", "output": "この問題は3つの要素に分けられる。", "left_context": "", "meta": {"source": "fixture", "noise": ["drop:33:u"], "reading_from": "zenz"}}
+{"romaji": "amegzfugteiru.", "output": "雨が降っている。", "left_context": "", "meta": {"source": "fixture", "noise": ["sub:4:a>z", "sub:7:t>g"], "reading_from": "zenz"}}
+{"romaji": "extu,hontuoni?", "output": "えっ、本当に？", "left_context": "そうだね、私もそう思う。", "meta": {"source": "fixture", "noise": ["swap:9:ou"], "reading_from": "zenz"}}
+{"romaji": "issyonigohannwotabemashou.", "output": "一緒にご飯を食べましょう。", "left_context": "手紙を書いて、ポストに出した。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "otsukaresamadeshita.", "output": "お疲れさまでした。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "birudogashippaisitanode,roguwokakuninshitekudasai.", "output": "ビルドが失敗したので、ログを確認してください。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "gofumeinatengagozaimasitara,oshirasekudasai.", "output": "ご不明な点がございましたら、お知らせください。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "chatgptnikiitemitara,chigaukotaegakaettekita.", "output": "ChatGPTに聞いてみたら、違う答えが返ってきた。", "left_context": "npm installを実行したあとで、サーバーを起動する。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "windows11niappude-tosita.", "output": "Windows 11にアップデートした。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "umakuittara,oshietekudasai.", "output": "うまくいったら、教えてください。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "onseininsikinoseidogakouzyoushiteiru.", "output": "音声認識の精度が向上している。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "ke-kiwoyaitaga,sukoshikogeteshimatta.", "output": "ケーキを焼いたが、少し焦げてしまった。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "slacknim4sse-jiwookutta.", "output": "Slackにメッセージを送った。", "left_context": "Amazonで本を注文した。", "meta": {"source": "fixture", "noise": ["sub:8:e>4"], "reading_from": "zenz"}}
+{"romaji": "pythondesukurjiputowokaita.", "output": "Pythonでスクリプトを書いた。", "left_context": "", "meta": {"source": "fixture", "noise": ["insert:13:j"], "reading_from": "zenz"}}
+{"romaji": "gussirinemureta.", "output": "ぐっすり眠れた。", "left_context": "まっすぐ進んでください。", "meta": {"source": "fixture", "noise": ["sub:4:u>i"], "reading_from": "zenz"}}
+{"romaji": "sensei,shitsumonngaarimasu.", "output": "せんせい、質問があります。", "left_context": "あんなに食べたのに、まだお腹がすいている。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "mitsumoriwookutteitadakemasuka.", "output": "見積もりを送っていただけますか。", "left_context": "締め切りは来週の金曜日です。", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}
+{"romaji": "setteifaruhaxonfig.tomlnikaku.", "output": "設定ファイルはconfig.tomlに書く。", "left_context": "", "meta": {"source": "fixture", "noise": ["drop:8:i", "sub:12:c>x"], "reading_from": "zenz"}}
+{"romaji": "atarashiimoderunogakusyuunihituyounade-tawoatsume,raisensuwokakuninshi,zensyoriwookonaxtutekara,hatihyakumankebnnosannpuruwoseiseisita.", "output": "新しいモデルの学習に必要なデータを集め、ライセンスを確認し、前処理を行ってから、八百万件のサンプルを生成した。", "left_context": "プロジェクトの進捗が遅れているため、担当者を増やし、作業の優先順位を見直し、毎日の打ち合わせで状況を共有することにした。", "meta": {"source": "fixture", "noise": ["sub:110:n>b"], "reading_from": "zenz"}}
+{"romaji": "dokusyonozikanwomaiiti30buntorukotonisita.", "output": "読書の時間を毎日30分とることにした。", "left_context": "", "meta": {"source": "fixture", "noise": ["drop:19:n"], "reading_from": "zenz"}}
+{"romaji": "dai2shoudeha,kannrenkennkyuuwogaikansuru.", "output": "第2章では、関連研究を概観する。", "left_context": "", "meta": {"source": "fixture", "noise": [], "reading_from": "zenz"}}

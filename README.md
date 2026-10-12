@@ -4,3 +4,4 @@
 
 - 要件・先行例・方式・進め方: [docs/DESIGN.md](docs/DESIGN.md)
 - 評価ハーネスの使い方・指標・結果: [docs/EVAL.md](docs/EVAL.md)
+- 学習データ生成（ローマ字化・打鍵ミス・読み付与）: [docs/DATA.md](docs/DATA.md)、`python -m data.build`

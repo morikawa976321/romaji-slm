@@ -23,7 +23,7 @@
 {"romaji": "teianshuhouhajuuraishuhounikurabetesagyoujikanwotanshukushita.", "output": "提案手法は従来手法に比べて作業時間を短縮した。", "left_context": "", "meta": {"category": "academic"}}
 {"romaji": "shitsumonshichousanokaitouwobunsekishita.", "output": "質問紙調査の回答を分析した。", "left_context": "", "meta": {"category": "academic"}}
 {"romaji": "kanouseigaarukotowoshisasuru.", "output": "可能性があることを示唆する。", "left_context": "", "meta": {"category": "academic"}}
-{"romaji": "honronbunnokouseihaikanotooridearu.", "output": "本論文の構成は以下の通りである。", "left_context": "", "meta": {"category": "academic", "alternatives": ["本論文の構成は以下のとおりである。"]}}
+{"romaji": "honronbunnnokouseihaikanotooridearu.", "output": "本論文の構成は以下の通りである。", "left_context": "", "meta": {"category": "academic", "alternatives": ["本論文の構成は以下のとおりである。"]}}
 {"romaji": "kyouhaasakaraatamagaitakatta.", "output": "今日は朝から頭が痛かった。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "kaimono:gyuunyuu,tamago,pan", "output": "買い物：牛乳、卵、パン", "left_context": "", "meta": {"category": "memo", "alternatives": ["買い物:牛乳、卵、パン"]}}
 {"romaji": "honwoyondakansouwokaku.", "output": "本を読んだ感想を書く。", "left_context": "", "meta": {"category": "memo"}}
@@ -31,7 +31,7 @@
 {"romaji": "omoitsuitaaidea:shisenderimokonwosousasuru.", "output": "思いついたアイデア：視線でリモコンを操作する。", "left_context": "", "meta": {"category": "memo", "alternatives": ["思いついたアイデア:視線でリモコンを操作する。"]}}
 {"romaji": "10ji30funnidenshaninotta.", "output": "10時30分に電車に乗った。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "kibungaochikonderunodesanponideta.", "output": "気分が落ち込んでるので散歩に出た。", "left_context": "", "meta": {"category": "memo"}}
-{"romaji": "ronbunnodai2shouwokakiowatta.", "output": "論文の第2章を書き終わった。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "ronbunnnodai2shouwokakiowatta.", "output": "論文の第2章を書き終わった。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "kyouhaosokunarisoudalara,sakinitabetwoite.", "output": "今日は遅くなりそうだから、先に食べておいて。", "left_context": "", "meta": {"category": "typo"}}
 {"romaji": "jikkennokekka,yuuisagamitomeraretq.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "typo"}}
 {"romaji": "githibnipushshiteoite.", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "typo", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"]}}

@@ -91,16 +91,11 @@ def romaji_to_katakana(text: str) -> str:
         nxt = text[i + 1] if i + 1 < n else ""
 
         if ch == "n":
-            # 「n」の扱い: 母音・y が続くなら na 行。nn は、その後ろが母音・y でなければ 2 文字で「ン」
-            # （「nna」は「ンナ」、「nnn+a」「nn+子音」は「ン」+次）。n' も「ン」
+            # 「n」の扱い: 母音・y が続くなら na 行。nn は常に 2 文字で「ン」（Microsoft IME・Google 日本語入力と
+            # 同じ。「nna」は「ンア」、「んな」は nnna）。n' も「ン」
             if nxt == "n":
-                after = text[i + 2] if i + 2 < n else ""
-                if after and (after in _V or after == "y"):
-                    out.append("ン")
-                    i += 1
-                else:
-                    out.append("ン")
-                    i += 2
+                out.append("ン")
+                i += 2
                 continue
             if nxt == "'":
                 out.append("ン")
