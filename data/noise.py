@@ -2,16 +2,8 @@
 
 import random
 
-_ROWS = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"]
-_POS = {c: (r, i + (0.0, 0.5, 0.75, 1.25)[r]) for r, row in enumerate(_ROWS) for i, c in enumerate(row)}
-
-
-def _neighbors(c: str) -> list[str]:
-    if c not in _POS:
-        return []
-    r, x = _POS[c]
-    return [d for d, (r2, x2) in _POS.items() if d != c and abs(r2 - r) <= 1 and abs(x2 - x) <= 1.0]
-
+from core.keyboard import POS as _POS
+from core.keyboard import neighbors as _neighbors
 
 _OPS = (("sub", .35), ("drop", .25), ("insert", .2), ("swap", .2))
 
