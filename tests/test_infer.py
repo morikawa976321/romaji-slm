@@ -117,7 +117,8 @@ def _run_cli(args: list[str], stdin: str) -> list[str]:
     p = subprocess.run([sys.executable, "-m", "infer", *args], input=stdin.encode(), capture_output=True,
                        cwd=ROOT, env=env, timeout=300)
     assert p.returncode == 0, p.stderr.decode(errors="replace")
-    return p.stdout.decode().split("\n")[:-1]
+    # Windows のテキストモードは改行を \r\n で書くので splitlines で割る
+    return p.stdout.decode("utf-8").splitlines()
 
 
 def test_cli_hf_stdin(tiny_model):
