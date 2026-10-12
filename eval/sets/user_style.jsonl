@@ -38,3 +38,36 @@
 {"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonata.", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "typo"}}
 {"romaji": "ryoukai!arigatpu.", "output": "了解！ありがとう。", "left_context": "", "meta": {"category": "typo", "alternatives": ["了解!ありがとう。"]}}
 {"romaji": "raishuunogetsuyobinihaishanoyoyaku.", "output": "来週の月曜日に歯医者の予約。", "left_context": "", "meta": {"category": "typo"}}
+{"romaji": "konobranchwomainnimergeshite.", "output": "このbranchをmainにmergeして。", "left_context": "", "meta": {"category": "tech", "alternatives": ["このブランチをmainにマージして。"]}}
+{"romaji": "dockerfilewokoushinshita.", "output": "dockerfileを更新した。", "left_context": "", "meta": {"category": "tech", "alternatives": ["Dockerfileを更新した。"]}}
+{"romaji": "kubernetesnoclusterwotateru.", "output": "kubernetesのclusterを立てる。", "left_context": "", "meta": {"category": "tech", "alternatives": ["Kubernetesのclusterを立てる。", "Kubernetesのクラスタを立てる。"]}}
+{"romaji": "sonocodeworefactorshitekudasai.", "output": "そのcodeをrefactorしてください。", "left_context": "", "meta": {"category": "tech", "alternatives": ["そのコードをリファクタしてください。"]}}
+{"romaji": "ciganaotta.", "output": "CIが直った。", "left_context": "", "meta": {"category": "tech", "alternatives": ["ciが直った。"]}}
+{"romaji": "jsonnoschemawokakunin.", "output": "JSONのschemaを確認。", "left_context": "", "meta": {"category": "tech", "alternatives": ["jsonのschemaを確認。", "JSONのスキーマを確認。"]}}
+{"romaji": "promptwomijikakushite,tokenwosetsuyakusuru.", "output": "promptを短くして、tokenを節約する。", "left_context": "", "meta": {"category": "tech", "alternatives": ["プロンプトを短くして、トークンを節約する。"]}}
+{"romaji": "gpunomemorigatarinai.", "output": "GPUのmemoryが足りない。", "left_context": "", "meta": {"category": "tech", "alternatives": ["GPUのメモリが足りない。", "gpuのメモリが足りない。"]}}
+{"romaji": "readmenimodelnosetsumeiwotsuika.", "output": "READMEにmodelの説明を追加。", "left_context": "", "meta": {"category": "tech", "alternatives": ["READMEにモデルの説明を追加。"]}}
+{"romaji": "ashitanomeetingha3jikara.", "output": "明日のmeetingは3時から。", "left_context": "", "meta": {"category": "tech", "alternatives": ["明日のミーティングは3時から。"]}}
+{"romaji": "sushigatabetai.", "output": "寿司が食べたい。", "left_context": "", "meta": {"category": "collision", "alternatives": ["すしが食べたい。"]}}
+{"romaji": "panwokattekite.", "output": "パンを買ってきて。", "left_context": "", "meta": {"category": "collision"}}
+{"romaji": "tokyoniiku.", "output": "東京に行く。", "left_context": "", "meta": {"category": "collision"}}
+{"romaji": "animegasuki.", "output": "アニメが好き。", "left_context": "", "meta": {"category": "collision"}}
+{"romaji": "kokonimotteitte.", "output": "ここに持って行って。", "left_context": "", "meta": {"category": "collision", "alternatives": ["ここに持っていって。"]}}
+{"romaji": "henshuushanimeiruwookutta.", "output": "編集者にメールを送った。", "left_context": "", "meta": {"category": "collision"}}
+{"romaji": "kongetsunoyosanhamoukatsukatsuda.", "output": "今月の予算はもうカツカツだ。", "left_context": "", "meta": {"category": "collision", "alternatives": ["今月の予算はもうかつかつだ。"]}}
+{"romaji": "itsumoarigatou!tasukatteru.", "output": "いつもありがとう！助かってる。", "left_context": "", "meta": {"category": "chat", "alternatives": ["いつもありがとう!助かってる。"]}}
+{"romaji": "sorenarakyoudaijoubudayo.", "output": "それなら今日大丈夫だよ。", "left_context": "", "meta": {"category": "chat"}}
+{"romaji": "kaerinikonbiniyorukedo,nanikairu?", "output": "帰りにコンビニ寄るけど、何かいる？", "left_context": "", "meta": {"category": "chat", "alternatives": ["帰りにコンビニ寄るけど、何かいる?"]}}
+{"romaji": "ohayou.kyouhaameda.", "output": "おはよう。今日は雨だ。", "left_context": "", "meta": {"category": "chat"}}
+{"romaji": "konokenkyuunomokutekiha,ninchifukawoherasukotodearu.", "output": "この研究の目的は、認知負荷を減らすことである。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "jikkenhaikanotejundeokonatta.", "output": "実験は以下の手順で行った。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "hikenshanouchi12meigachuudanshita.", "output": "被験者のうち12名が中断した。", "left_context": "", "meta": {"category": "academic"}}
+{"romaji": "denshanonakadehonwoyonda.", "output": "電車の中で本を読んだ。", "left_context": "", "meta": {"category": "memo"}}
+{"romaji": "raigetsunoshimekiriwowasurenai.", "output": "来月の締め切りを忘れない。", "left_context": "", "meta": {"category": "memo", "alternatives": ["来月の締切を忘れない。"]}}
+{"romaji": "ashitanokaigi,nanjikarafakke?", "output": "明日の会議、何時からだっけ？", "left_context": "", "meta": {"category": "typo", "alternatives": ["明日の会議、何時からだっけ?"]}}
+{"romaji": "shashinnookuttekuretearigatpu.", "output": "写真送ってくれてありがとう。", "left_context": "", "meta": {"category": "typo"}}
+{"romaji": "konobranchwomainnimergwshite.", "output": "このbranchをmainにmergeして。", "left_context": "", "meta": {"category": "typo", "alternatives": ["このブランチをmainにマージして。"]}}
+{"romaji": "raishuuhayadumidesu.", "output": "来週は休みです。", "left_context": "", "meta": {"category": "typo"}}
+{"romaji": "denwashitemoiifesuka?", "output": "電話してもいいですか？", "left_context": "", "meta": {"category": "typo", "alternatives": ["電話してもいいですか?"]}}
+{"romaji": "jikkennnokekkawobunsekisita.", "output": "実験の結果を分析した。", "left_context": "", "meta": {"category": "variant"}}
+{"romaji": "kyouhatukareta.", "output": "今日は疲れた。", "left_context": "", "meta": {"category": "variant"}}

@@ -8,7 +8,7 @@ import sys
 
 from .converters import Converter, make_converter, timed
 from .datasets import Item, load_set
-from .metrics import score
+from .metrics import english_kept, score
 from .report import env_info, render_markdown, write_results
 
 
@@ -19,6 +19,9 @@ def evaluate(conv: Converter, items: list[Item]) -> list[dict]:
         rows.append({
             "id": it.id, "category": it.category, "romaji": it.romaji, "left_context": it.left_context,
             "refs": it.refs, "output": res.text, **score(it.refs, res.text),
+            "oracle": any(c in it.refs for c in res.candidates) if res.candidates else None,
+            "en_kept": english_kept(it.refs[0], res.text),
+            "edited": res.edited,
             "ms": ms, "n_prompt_tokens": res.n_prompt_tokens, "n_gen_tokens": res.n_gen_tokens,
             "prompt": res.prompt,
         })

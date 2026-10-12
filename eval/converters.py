@@ -20,6 +20,8 @@ class Result:
     n_prompt_tokens: int = 0
     n_gen_tokens: int = 0
     prompt: str = ""
+    candidates: tuple[str, ...] = ()  # 候補を出す変換器だけ: 順位順の候補（oracle の計算に使う）
+    edited: bool | None = None  # 打鍵を補正する変換器だけ: 1位が打鍵の補正を含むか（誤補正率の計算に使う）
 
 
 class Converter(Protocol):

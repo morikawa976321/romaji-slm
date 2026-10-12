@@ -41,3 +41,26 @@ def test_loose_does_not_ignore_kanji_diff():
 @pytest.mark.parametrize("a, b", [("ABC", "abc"), ("ａ", "a")])
 def test_case_and_width(a, b):
     assert loose_normalize(a) == loose_normalize(b)
+
+
+def test_english_kept():
+    from eval.metrics import english_kept
+    assert english_kept("GitHubにpushしておいて。", "githubにpushしておいて。") == 1.0
+    assert english_kept("GitHubにpushしておいて。", "ぎてゅbにpushしておいて。") == 0.5
+    assert english_kept("llama.cppでモデルを動かす。", "llama.cppでモデルを動かす。") == 1.0
+    assert english_kept("pull requestを作って", "pullrequestを作って") == 1.0
+    assert english_kept("今日は雨だ。", "今日は雨だ。") is None
+
+
+def test_aggregate_optional_metrics():
+    from eval.report import aggregate
+    base = {"exact": True, "loose": True, "min_cer": 0.0, "ms": 1.0, "n_gen_tokens": 1}
+    rows = [
+        {**base, "category": "chat", "oracle": True, "en_kept": None, "edited": False},
+        {**base, "category": "chat", "oracle": False, "en_kept": 1.0, "edited": True},
+        {**base, "category": "typo", "oracle": True, "en_kept": None, "edited": True},
+    ]
+    a = {x["category"]: x for x in aggregate(rows)}
+    assert a["ALL"]["oracle"] == 2 / 3 and a["ALL"]["en_kept"] == 1.0
+    assert a["ALL"]["miscorrect"] == 0.5  # typo は誤補正率の母数に入れない
+    assert aggregate([{**base, "category": "x"}])[0]["oracle"] is None

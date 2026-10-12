@@ -1,5 +1,6 @@
 """評価指標: 完全一致・ゆるい一致・MinCER。参照は複数あってよい（どれか1つに合えば正解）。"""
 
+import re
 import unicodedata
 
 # ゆるい一致で無視する文字: 句読点・記号(P*)、空白(Z*)、制御・書式(C*)、長音「ー」、チルダ類
@@ -31,6 +32,21 @@ def cer(ref: str, hyp: str) -> float:
 
 def min_cer(refs: list[str], hyp: str) -> float:
     return min(cer(r, hyp) for r in refs)
+
+
+_EN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[.\-][A-Za-z0-9]+)*")
+
+
+def english_kept(ref: str, hyp: str) -> float | None:
+    """正解に含まれる英単語（llama.cpp・gpt-2 のような塊を1語とする）のうち、出力にそのまま残った割合。
+
+    大文字小文字と空白は無視する（本人は大小を重視しない。2026-10-12）。正解に英単語が無ければ None。
+    """
+    words = [w.lower() for w in _EN_WORD.findall(unicodedata.normalize("NFKC", ref))]
+    if not words:
+        return None
+    h = unicodedata.normalize("NFKC", hyp).lower().replace(" ", "")
+    return sum(w.replace(" ", "") in h for w in words) / len(words)
 
 
 def score(refs: list[str], hyp: str) -> dict:

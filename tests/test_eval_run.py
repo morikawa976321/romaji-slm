@@ -32,7 +32,7 @@ def test_load_jsonl_shared_format(tmp_path):
 
 def test_user_style_set_is_valid():
     items = datasets.load_set("user_style")
-    assert len(items) == 40
+    assert len(items) == 73
     assert all(i.romaji and i.refs[0] and i.romaji == i.romaji.lower() for i in items)
 
 
