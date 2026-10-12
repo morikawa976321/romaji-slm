@@ -9,6 +9,9 @@ dependencies = [
     "transformers>=5.19.0",
 ]
 
+[tool.uv]
+default-groups = ["dev", "core"]
+
 [tool.uv.sources]
 torch = { index = "pytorch" }
 
@@ -26,6 +29,9 @@ dev = [
 ]
 eval = [
     "pytest>=8.0",
+]
+core = [
+    "wordfreq>=3.1.1",
 ]
 data = [
     "datasets>=4.0.0",
