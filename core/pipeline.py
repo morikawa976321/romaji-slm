@@ -18,8 +18,9 @@ from .select import ZenzScorer, fluency
 
 
 class CorePipeline:
-    def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu", k: int = 3,
-                 n_read: int = 20, w_read: float = 1.0, w_flu: float = 0.0, name: str | None = None):
+    # 既定値は user_style・gen_test・AJIMEE で比べて決めた（docs/EVAL.md「完成文の自然さ」。w_read/w_flu の比が効く）
+    def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu", k: int = 5,
+                 n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None):
         self.dic = Dictionary.load()
         self.scorer = ZenzScorer(model, device)
         self.cz = ConstrainedZenz(self.scorer)
