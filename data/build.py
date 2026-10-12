@@ -113,6 +113,14 @@ def segment_pieces(tokens: list[Token], omit_punct: bool = False) -> list[tuple[
     return pieces
 
 
+def segment_reading(tokens: list[Token]) -> str:
+    """zenz の input と同じ形の読み: 和文はカタカナ、英数字・記号・空白は表記のまま。
+
+    打鍵で句読点を省いたサンプルでも、読みには句読点を残す（モデルが読みの段階で句読点を補う）。
+    """
+    return "".join(t.reading if t.kind == "ja" else t.surface for t in tokens).strip()
+
+
 def process_record(rec: dict, args: argparse.Namespace, stats: Counter) -> list[dict]:
     """元データ1件 → 学習サンプル0件以上。除外は stats["excluded:理由"] に数える。"""
     zenz_in, output = rec["input"], rec["output"].strip()
@@ -170,7 +178,7 @@ def process_record(rec: dict, args: argparse.Namespace, stats: Counter) -> list[
             "output": text,
             "left_context": ctx[-args.max_left:] if args.max_left else ctx,
             "meta": {"source": rec.get("source", HF_DATASET), "noise": notes, "reading_from": reading_from,
-                     "omit_punct": omit},
+                     "omit_punct": omit, "reading": segment_reading(seg)},
         })
         stats["omit_punct"] += omit
         ctx += text

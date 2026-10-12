@@ -23,6 +23,8 @@ def test_omit_punct_drops_japanese_symbols_but_keeps_ascii_in_literals():
     out, _ = run({"input": "ショウ、ヲツカウ。", "output": "llama.cppを使う。", "left_context": ""}, omit_punct_rate=1.0)
     assert [s["romaji"] for s in out] == ["llama.cppwotsukau"]
     assert out[0]["output"] == "llama.cppを使う。" and out[0]["meta"]["omit_punct"] is True
+    # 読みは打鍵で省いた句読点も残し、英字区間は表記のまま
+    assert out[0]["meta"]["reading"] == "llama.cppヲツカウ。"
 
 
 def run(rec, **kw):
@@ -128,7 +130,7 @@ def test_build_cli_reproducible_and_contract(tmp_path):
     assert len(rows) == 100
     for r in rows:
         assert set(r) == {"romaji", "output", "left_context", "meta"}
-        assert set(r["meta"]) == {"source", "noise", "reading_from", "omit_punct"}
+        assert set(r["meta"]) == {"source", "noise", "reading_from", "omit_punct", "reading"}
         assert r["meta"]["reading_from"] in ("zenz", "analyzer")
         assert r["romaji"] and all("!" <= c <= "~" and not c.isupper() for c in r["romaji"])
     assert any(r["meta"]["noise"] for r in rows)

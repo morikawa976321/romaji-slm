@@ -15,6 +15,8 @@ from .romaji_kana import romaji_to_katakana
 INPUT = ""    # 入力（カタカナ読み）の開始
 OUTPUT = ""   # 出力の開始（生成の起点）
 CONTEXT = ""  # 左文脈の開始
+# ローマ字の打鍵列の開始（このリポジトリで足した印。zenz の語彙に無い私用領域の字で、UTF-8 の3バイトに分かれる）
+ROMAJI = "\uEE10"
 
 # romaji2ja 配布元 code/normalization.py と同じ規則（NFKC・小文字化のうえ、空白とこの記号群を捨てる）
 _SOFT_SEP = frozenset("-_'`\\/|.,;:!?()[]{}<>\"‐‑‒–—―−")
@@ -44,6 +46,11 @@ def _zenz(source: Callable[[str], str]) -> Callable[[str, str], str]:
     return render
 
 
+def _reading(romaji: str, left_context: str) -> str:
+    head = CONTEXT + left_context if left_context else ""
+    return f"{head}{ROMAJI}{romaji}{INPUT}"
+
+
 TEMPLATES: dict[str, Template] = {t.name: t for t in [
     Template("romaji2ja", lambda r, c: r, "romaji2ja 形式 `{romaji}`（左文脈は使わない）"),
     Template("romaji2ja-normalized", lambda r, c: normalize_like_romaji2ja(r),
@@ -52,7 +59,19 @@ TEMPLATES: dict[str, Template] = {t.name: t for t in [
              "zenz-v3 形式 `EE02{left_context}EE00{kana}EE01`。ローマ字は規則でカタカナにして渡す"),
     Template("zenz-v3-romaji", _zenz(lambda r: r),
              "ローマ字版 zenz-v3 形式 `EE02{left_context}EE00{romaji}EE01`。微調整後のモデル用"),
+    Template("zenz-v3-romaji-reading", _reading,
+             "二段形式 `EE02{left_context}EE10{romaji}EE00`。モデルが読み→EE01→出力の順に書く。"
+             "読みより後ろは元の zenz-v3 形式そのもの"),
 ]}
+
+# 雛形のうち、生成がまず読みを書き、OUTPUT の後ろだけが変換結果になるもの
+TWO_STAGE = {"zenz-v3-romaji-reading"}
+
+
+def split_two_stage(generated: str) -> tuple[str, str]:
+    """二段形式の生成を (読み, 変換結果) に分ける。OUTPUT が出なければ全体を変換結果とみなす。"""
+    reading, sep, text = generated.partition(OUTPUT)
+    return (reading, text) if sep else ("", generated)
 
 
 def build_prompt(template: str, romaji: str, left_context: str = "") -> str:

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from .prompts import TEMPLATES, build_prompt
+from .prompts import TEMPLATES, TWO_STAGE, build_prompt, split_two_stage
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -55,14 +55,19 @@ class HFCausalLM:
         enc = tok(prompt, return_tensors="pt", add_special_tokens=self.add_special_tokens).to(self.device)
         n_prompt = enc.input_ids.shape[1]
         max_pos = getattr(self.model.config, "max_position_embeddings", 1024)
-        cap = max(1, min(2 * len(romaji) + 16, max_pos - n_prompt))
+        # 二段形式は読みも書くので、上限を読みの分（入力のローマ字より短い）だけ広げる
+        per_char = 3 if self.template in TWO_STAGE else 2
+        cap = max(1, min(per_char * len(romaji) + 16, max_pos - n_prompt))
         with torch.no_grad():
             out = self.model.generate(
                 enc.input_ids, attention_mask=enc.attention_mask, max_new_tokens=cap, do_sample=False,
                 eos_token_id=tok.eos_token_id, pad_token_id=tok.pad_token_id or tok.eos_token_id,
             )
         gen = out[0][n_prompt:]
-        return Result(tok.decode(gen, skip_special_tokens=True), n_prompt, len(gen), prompt)
+        text = tok.decode(gen, skip_special_tokens=True)
+        if self.template in TWO_STAGE:
+            text = split_two_stage(text)[1]
+        return Result(text, n_prompt, len(gen), prompt)
 
     def convert(self, romaji: str, left_context: str = "") -> str:
         return self.convert_detailed(romaji, left_context).text
@@ -86,6 +91,7 @@ PRESETS = {
     "zenz-baseline": (lambda: "Miwa-Keita/zenz-v3.1-small", "zenz-v3"),
     "zenz-xsmall-baseline": (lambda: "Miwa-Keita/zenz-v3.1-xsmall", "zenz-v3"),
     "zenz-romaji": (None, "zenz-v3-romaji"),  # 微調整後のモデルを --model で指す
+    "zenz-romaji-reading": (None, "zenz-v3-romaji-reading"),  # 二段形式で微調整したモデル
 }
 
 

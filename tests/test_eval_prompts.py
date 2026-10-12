@@ -34,3 +34,12 @@ def test_unknown_template():
 
 def test_all_templates_documented():
     assert all(t.description for t in TEMPLATES.values())
+
+
+def test_two_stage_reading_template_and_split():
+    from eval.prompts import CONTEXT, INPUT, OUTPUT, ROMAJI, TWO_STAGE, split_two_stage
+    assert "zenz-v3-romaji-reading" in TWO_STAGE
+    assert build_prompt("zenz-v3-romaji-reading", "kyou", "") == ROMAJI + "kyou" + INPUT
+    assert build_prompt("zenz-v3-romaji-reading", "kyou", "前") == CONTEXT + "前" + ROMAJI + "kyou" + INPUT
+    assert split_two_stage("キョウ" + OUTPUT + "今日") == ("キョウ", "今日")
+    assert split_two_stage("今日") == ("", "今日")

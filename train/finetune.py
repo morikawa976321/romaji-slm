@@ -19,9 +19,8 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from eval.prompts import build_prompt  # noqa: E402
+from eval.prompts import OUTPUT, TWO_STAGE, build_prompt  # noqa: E402
 
-TEMPLATE = "zenz-v3-romaji"
 
 
 def load_jsonl(path: str) -> list[dict]:
@@ -29,12 +28,21 @@ def load_jsonl(path: str) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def encode(tok, rec: dict, max_len: int) -> tuple[list[int], list[int]] | None:
-    """(input_ids, labels)。長すぎるときは左文脈を先頭側から削る。それでも入らなければ None。"""
-    out_ids = tok(rec["output"], add_special_tokens=False).input_ids + [tok.eos_token_id]
+def encode(tok, rec: dict, max_len: int, template: str) -> tuple[list[int], list[int]] | None:
+    """(input_ids, labels)。長すぎるときは左文脈を先頭側から削る。それでも入らなければ None。
+
+    二段形式（TWO_STAGE）では、生成させる部分を「読み + OUTPUT + 出力」にする。読みは meta.reading（docs/DATA.md）。
+    """
+    target = rec["output"]
+    if template in TWO_STAGE:
+        reading = (rec.get("meta") or {}).get("reading")
+        if not reading:
+            return None
+        target = reading + OUTPUT + target
+    out_ids = tok(target, add_special_tokens=False).input_ids + [tok.eos_token_id]
     ctx = rec.get("left_context") or ""
     while True:
-        p_ids = tok(build_prompt(TEMPLATE, rec["romaji"], ctx), add_special_tokens=False).input_ids
+        p_ids = tok(build_prompt(template, rec["romaji"], ctx), add_special_tokens=False).input_ids
         if len(p_ids) + len(out_ids) <= max_len:
             return p_ids + out_ids, [-100] * len(p_ids) + out_ids
         if not ctx:
@@ -96,6 +104,7 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="Miwa-Keita/zenz-v3.1-small")
+    ap.add_argument("--template", default="zenz-v3-romaji", help="eval/prompts.py の雛形。二段形式は zenz-v3-romaji-reading")
     ap.add_argument("--train", required=True)
     ap.add_argument("--valid", required=True)
     ap.add_argument("--out", required=True)
@@ -121,7 +130,7 @@ def main():
         recs = load_jsonl(path)
         if limit:
             recs = recs[:limit]
-        enc = [encode(tok, r, args.max_len) for r in recs]
+        enc = [encode(tok, r, args.max_len, args.template) for r in recs]
         kept = [e for e in enc if e]
         print(f"{path}: {len(kept)}/{len(recs)} 件（長すぎて捨てた {len(recs) - len(kept)}）", flush=True)
         return kept
