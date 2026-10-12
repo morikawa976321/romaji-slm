@@ -4,3 +4,4 @@ __pycache__/
 eval/out/
 
 data/out/
+data/out300k/

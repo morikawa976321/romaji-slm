@@ -2,6 +2,10 @@
 
 ローマ字の打鍵列を、ローカルの小型言語モデルで日本語に変換する変換コア。
 
+**2026-10-13 から休止中。再開するときは [docs/STATUS.md](docs/STATUS.md)（現状・次にやること・環境の作り直し）から読む。**
+
+- 方式の決定（学習なし・辞書ラティス＋凍結 zenz）と先行例: [docs/REDESIGN.md](docs/REDESIGN.md)。変換コアは `core/`（`python -m eval.run --converter core`）
+
 - 要件・先行例・方式・進め方: [docs/DESIGN.md](docs/DESIGN.md)
 - 評価ハーネスの使い方・指標・結果: [docs/EVAL.md](docs/EVAL.md)
 - 学習データ生成（ローマ字化・打鍵ミス・読み付与）: [docs/DATA.md](docs/DATA.md)、`python -m data.build`
