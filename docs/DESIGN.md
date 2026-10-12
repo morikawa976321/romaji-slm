@@ -95,12 +95,13 @@ ThinkPad は 2028-01 頃まで Windows、その後 Debian 13 に移る予定。�
    - 学習データ生成パイプライン（読み付与・ローマ字化・打鍵ミス注入・英字区間と記号の扱い）— 実装済み。実データで2万件生成（[DATA.md](DATA.md)）
    - 評価の仕組み（文字誤り率・完全一致・AJIMEE-Bench のローマ字版）— ハーネスは実装済み。方式1のベースラインは AJIMEE 87.0%・user_style 57.5%（英単語を含む文 10%・打鍵ミス 17%）（[EVAL.md](EVAL.md)）
    - 微調整スクリプト（CPU で小さい設定が通るところまで。本学習は 5060 Ti）
-   - 推論 CLI（GGUF 変換、llama.cpp で `ローマ字 → 日本語`）
+   - 推論 CLI（GGUF 変換、llama.cpp で `ローマ字 → 日本語`）— 実装済み。llama.cpp は llama-server を子プロセスで使う（[INFER.md](INFER.md)）
 4. **本学習と実用試験**（ローカル）
 
 ## 確認済みの論点
 
 - zenz-v3.1-small のトークナイザ（GPT2Tokenizer、バイト単位 BPE、語彙 6000）は、ラテン小文字・数字・ASCII 記号をすべて単独トークンとして持つ。**微調整に語彙の拡張は要らない**（2026-10-12、[EVAL.md](EVAL.md)）
+- zenz 系のトークナイザは、GGUF の pre-tokenizer を `gpt-2` にすれば公式 llama.cpp で HF と同じトークン列になる。配布 GGUF の `gpt2-small-japanese-char` は azooKey のフォーク独自の名前で、中身は GPT-2 と同じ正規表現（2026-10-12、[INFER.md](INFER.md)）
 
 ## 未確認の論点
 
