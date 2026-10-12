@@ -175,3 +175,8 @@ LLAMA_CPP_DIR=<llama.cpp のチェックアウト（build/bin にビルド済み
 確認環境（2026-10-12）: Linux x86_64（4コア）、Python 3.12、torch 2.14.1（PyPI）、transformers 5.19.0、
 llama.cpp b11562（commit b2f036c、CPU のみでビルド）。この環境は download.pytorch.org に届かないので、
 pyproject.toml の cu128 版ではなく、別の仮想環境に PyPI の torch を入れて動かした。
+
+## llama.cpp の版による差（2026-10-12、ローカルの Windows で確認）
+
+- llama.cpp b10549 の `llama-server` は、生成結果が UTF-8 として壊れていると `/completion` が HTTP 500（`The model produced output that does not match the expected Content-only format`）を返す。`tests/test_infer.py` の極小ランダムモデルはでたらめなバイト列を出すので、b10549 では llama.cpp を使うテストが落ちる（クラウドで確かめた b11562 では通る）。学習済みのモデル（`models/zenz-romaji-v2-Q5_K_M.gguf`）では起きなかった。
+- 二段形式（`zenz-v3-romaji-reading`）は、`infer` の llama 経由でも読みを切り落として変換結果だけを返す。
