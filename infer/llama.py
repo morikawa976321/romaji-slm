@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from eval.converters import Result
-from eval.prompts import TEMPLATES, build_prompt
+from eval.prompts import TEMPLATES, TWO_STAGE, build_prompt, split_two_stage
 
 ENV_BIN = "LLAMA_CPP_BIN"  # llama-server などの実行ファイルがあるディレクトリ
 ENV_DIR = "LLAMA_CPP_DIR"  # llama.cpp のソースのチェックアウト（変換スクリプトとビルド結果）
@@ -85,8 +85,14 @@ class LlamaServer:
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(self.url + path, data=data, method=method,
                                      headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode())
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            # サーバーはエラーの理由を本文に書く。そのままだと「500」しか見えないので理由に足す。
+            # 型は HTTPError のまま（_wait_ready が読み込み中の 503 を URLError として待つ）
+            detail = e.read().decode(errors="replace")[:500]
+            raise urllib.error.HTTPError(e.url, e.code, f"{e.msg}: {path} {detail}", e.hdrs, None) from e
 
     def _wait_ready(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
@@ -158,7 +164,7 @@ class LlamaCppLM:
 
     def convert_detailed(self, romaji: str, left_context: str = "") -> Result:
         prompt = build_prompt(self.template, romaji, left_context)
-        cap = 2 * len(romaji) + 16  # HFCausalLM と同じ上限
+        cap = (3 if self.template in TWO_STAGE else 2) * len(romaji) + 16  # HFCausalLM と同じ上限
         n_ctx = self.server.n_ctx
         # バイト単位 BPE なのでトークン数 ≤ UTF-8 のバイト数。収まらないおそれがあるときだけ実際に数える
         if n_ctx and len(prompt.encode()) + cap > n_ctx:
@@ -168,7 +174,10 @@ class LlamaCppLM:
                 raise ValueError(f"プロンプトが文脈長 {n_ctx} を超える（{n_prompt} トークン）")
         r = self.server.complete(prompt, cap)
         n_gen = int(r.get("tokens_predicted", len(r.get("tokens", []))))
-        return Result(r["content"], int(r.get("tokens_evaluated", 0)), n_gen, prompt)
+        text = r["content"]
+        if self.template in TWO_STAGE:
+            text = split_two_stage(text)[1]
+        return Result(text, int(r.get("tokens_evaluated", 0)), n_gen, prompt)
 
     def convert(self, romaji: str, left_context: str = "") -> str:
         return self.convert_detailed(romaji, left_context).text
