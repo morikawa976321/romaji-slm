@@ -24,6 +24,8 @@
 - **句読点 B**: 語の切れ目に読点、末尾に句点・疑問符を補う候補を完成文の自然さで選ぶ。閾値は user_style（句読点を打たない版 `eval/sets/user_style_nopunct.jsonl`）で決め、gen_test の omit_punct で検証（EVAL.md）。
 - **llama-server は grammar 付きでも制約前の対数確率を返す**（D6）: CPU で 1 トークン 2.1 ms（torch は 13 ms）。本番実行系の候補として、ラティス→GBNF・並列スロット・自然さの強制生成をクラウド（PR 予定、ブランチ `claude/llama-backend*`）で作成中。
 - **体験版（V0）**: `trial/`（PR #6 取り込み済み）。`uv run python -m trial.server --open` で比較ページ。配布 zip は `tools/pack-trial.ps1`。
+- **llama-server 実行系**（PR #8 取り込み済み、2026-10-15）: `core/gbnf.py`（ラティス→GBNF）、`core/llama_backend.py`（並列スロット・自然さの強制生成）、`--converter core-llama:np=5,t=8 --model <GGUF>`、`eval/bench_backend.py`。極小モデルで HF 版と同等（docs/LLAMA_BACKEND.md）。実モデルの CPU 実測は EVAL.md「工程6」。
+- **Codex（QA 役）のレビュー**で見つかった 5 件（バッチ生成の位置、ja の行き止まり、英字置換の誤マッチ、トークン内部の語境界、max_tries）を修正済み（D11）。
 - **評価の道具**（PR #7 取り込み済み）: `eval/diff.py`（変更前後の差分）、`clean_exact`・`pair_consistent` 列、`eval/punct_eval.py`（句読点 B）、gen_test の dev/val 分割（`--set gen_dev` / `gen_val`）。
 
 使い方:
