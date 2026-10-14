@@ -16,6 +16,15 @@ def loose_normalize(s: str) -> str:
     )
 
 
+# 句読点の自動挿入の評価で扱う句読点。ゆるい一致と違い、長音やその他の記号は残す
+PUNCT = frozenset("、。？！?!,.")
+
+
+def strip_punct(s: str) -> str:
+    """句読点（、。？！?!,.）だけを捨てる。"""
+    return "".join(ch for ch in s if ch not in PUNCT)
+
+
 def levenshtein(a: str, b: str) -> int:
     prev = list(range(len(b) + 1))
     for i, ca in enumerate(a, 1):
