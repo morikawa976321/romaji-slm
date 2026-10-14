@@ -21,13 +21,13 @@ _TYPED_PUNCT = frozenset(",.?!")  # 打鍵列に句読点として打たれう�
 _PUNCT = frozenset("、。？！?!,.")
 
 
-def punct_variants(text: str, bounds: tuple[int, ...]) -> list[tuple[str, int, str]]:
-    """句読点 B の候補: (文, 読点を足した数, 足した文末の記号 "" / "。" / "？")。無挿入を必ず含む。
+def punct_variants(text: str, bounds: tuple[int, ...]) -> list[tuple[str, int, str, int | None]]:
+    """句読点 B の候補: (文, 読点を足した数, 足した文末の記号 "" / "。" / "？", 読点を入れた文字位置)。無挿入を必ず含む。
 
     読点は語の切れ目（制約付き生成が通ったラティスの節点）に1つまで、文末は末尾に句読点が無いときだけ。
     """
     if not text:
-        return [(text, 0, "")]
+        return [(text, 0, "", None)]
     ends = ["", "。", "？"] if text[-1] not in _PUNCT else [""]
     commas: list[int | None] = [None] + [b for b in bounds if 0 < b < len(text)
                                          and text[b - 1] not in _PUNCT and text[b] not in _PUNCT]
@@ -35,7 +35,7 @@ def punct_variants(text: str, bounds: tuple[int, ...]) -> list[tuple[str, int, s
     for e in ends:
         for b in commas:
             t = text if b is None else text[:b] + "、" + text[b:]
-            out.append((t + e, int(b is not None), e))
+            out.append((t + e, int(b is not None), e, b))
     return out
 
 
@@ -56,7 +56,7 @@ def en_surface(seg, en_case: str) -> str:
     return registered
 
 
-def render_en_case(text: str, reading, en_case: str) -> str:
+def render_en_case(text: str, reading, en_case: str, bounds: tuple[int, ...] = ()) -> str:
     """選んだ後に英字の表記を置き換える（registered / auto）。
 
     ラティスでは英語区間を打った綴りのまま生成させているので、出力には各 en 区間の綴りが区間の順に現れる。
@@ -65,12 +65,17 @@ def render_en_case(text: str, reading, en_case: str) -> str:
     """
     if en_case in ("typed", "zenz"):
         return text
+    # 辞書語の表層にも ASCII がある（アイフォン→iPhone）ので、語の切れ目（bounds）に揃う出現だけを英語区間とみなす
+    ok_start = {0, *bounds}
+    ok_end = {len(text), *bounds}
     pos = 0
     out = []
     for seg in reading.segs:
         if seg.kind != "en":
             continue
         i = text.find(seg.text, pos)
+        while i >= 0 and bounds and not (i in ok_start and i + len(seg.text) in ok_end):
+            i = text.find(seg.text, i + 1)
         if i < 0:
             continue
         out.append(text[pos:i])
@@ -131,26 +136,38 @@ class CorePipeline:
                 c["score"] += self.w_flu * f
         return sorted(out, key=lambda c: -c["score"])
 
-    def insert_punct(self, text: str, bounds: tuple[int, ...], left_context: str = "") -> str:
-        """句読点 B: punct_variants の候補を完成文の自然さで比べ、閾値を引いて最良のものを返す。"""
+    def insert_punct(self, text: str, bounds: tuple[int, ...], left_context: str = "") -> tuple[str, tuple[int, ...]]:
+        """句読点 B: punct_variants の候補を完成文の自然さで比べ、閾値を引いて最良のものを返す。
+
+        戻り値は (文, 挿入後の文字位置に直した語の切れ目)。切れ目は render_en_case が使う。
+        """
         vs = punct_variants(text, bounds)
         if len(vs) == 1:
-            return text
-        fl = fluency(self.scorer, [v[0] for v in vs], left_context)
+            return text, bounds
         tau_end = {"": 0.0, "。": self.tau_end, "？": self.tau_q}
-        best = max(zip(vs, fl), key=lambda vf: vf[1] - self.tau_comma * vf[0][1] - tau_end[vf[0][2]])
-        return best[0][0]
+
+        def pick(cands):
+            fl = fluency(self.scorer, [v[0] for v in cands], left_context)
+            return max(zip(cands, fl), key=lambda vf: vf[1] - self.tau_comma * vf[0][1] - tau_end[vf[0][2]])[0]
+
+        # 2 段で選ぶ（まず文末の 3 候補、次にその文末で読点の位置）。全組合せ（3 × 切れ目の数）を1バッチで採点すると
+        # CPU で 1 件 300 ms ほど増えた（user_style_nopunct で中央値 379 → 703 ms）。段階に分けると採点する文が約 1/3 になる
+        end = pick([v for v in vs if v[3] is None])[2]
+        new_text, _, _, b = pick([v for v in vs if v[2] == end])
+        if b is not None:
+            bounds = tuple(sorted({x if x < b else x + 1 for x in bounds} | {b, b + 1}))
+        return new_text, bounds
 
     def convert_detailed(self, romaji: str, left_context: str = "") -> Result:
         cands = self.candidates(romaji, left_context)
         if not cands:
             return Result("", prompt=romaji)
         best = cands[0]
-        text = best["text"]
+        text, bounds = best["text"], best["bounds"]
         if self.punct == "insert" and not (_TYPED_PUNCT & set(romaji)) and best["score"] != float("-inf"):
             # 句読点を打った入力には足さない（打った句読点の種類と幅だけ決める = 句読点 A と同じ振る舞い）
-            text = self.insert_punct(text, best["bounds"], left_context)
-        text = render_en_case(text, best["reading_obj"], self.en_case)
+            text, bounds = self.insert_punct(text, bounds, left_context)
+        text = render_en_case(text, best["reading_obj"], self.en_case, bounds)
         return Result(text, prompt=best["reading"], candidates=tuple(c["text"] for c in cands),
                       edited=bool(best["edits"]))
 

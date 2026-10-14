@@ -66,9 +66,8 @@ class LatticeMatcher:
             # 辞書に無いかなの断片は、小書き・長音・ンで始まると語として不自然（「時速4時ュウゴ」のような崩れ）
             if src == "kana" and rd[:1] in _BAD_HEAD:
                 continue
-            if src == "sym" and punct != "auto" and punct != "insert":
-                if (punct == "ja") == surf.isascii():
-                    continue
+            if src == "sym" and punct in ("ja", "ascii") and surf not in _sym_surfaces(reading.segs[si], punct):
+                continue
             if src == "en" and en_case != "zenz":
                 seg = reading.segs[si]
                 surf = _en_surface(seg, en_case)
@@ -77,13 +76,21 @@ class LatticeMatcher:
                 seen.add((s, b, e))
                 self.out.setdefault(s, []).append((b, e))
 
-
     def start(self) -> frozenset[State]:
         return frozenset({(0, b"")})
 
     def advance(self, states: frozenset[State], data: bytes) -> frozenset[State]:
+        return self.advance_bounds(states, data)[0]
+
+    def advance_bounds(self, states: frozenset[State], data: bytes) -> tuple[frozenset[State], list[int]]:
+        """data を1バイトずつ進め、(進めた状態, 節点の上に状態があったバイト位置（1 始まり）) を返す。
+
+        語の切れ目はトークンの途中にもある（複数文字のトークンで「今日は」を1つで出すときの「今日|は」）ので、
+        トークンの末尾だけでなくバイトごとに記録する。
+        """
         cur = set(states)
-        for byte in data:
+        bounds: list[int] = []
+        for k, byte in enumerate(data, 1):
             nxt: set[State] = set()
             for node, rest in cur:
                 if rest:
@@ -95,16 +102,29 @@ class LatticeMatcher:
                         nxt.add((end, b[1:]))
             cur = {(n, r) if r else (n, b"") for n, r in nxt}
             if not cur:
-                return frozenset()
-        return frozenset(cur)
+                return frozenset(), []
+            if any(not rest for _, rest in cur):
+                bounds.append(k)
+        return frozenset(cur), bounds
 
     def accepting(self, states: frozenset[State]) -> bool:
         return (self.final, b"") in states
 
-    @staticmethod
-    def at_boundary(states: frozenset[State]) -> bool:
-        """いずれかの状態がラティスの節点の上にいる（＝ここまでが語の切れ目になりうる）。"""
-        return any(not rest for _, rest in states)
+
+def _sym_surfaces(seg, punct: str) -> frozenset[str]:
+    """記号区間で許す表層。ja なら全角、ascii なら打ったまま。該当が無い記号（@ + & % など全角候補の無いもの）は
+    全部許す（絞ると行き止まりになり、変換が完走しない）。"""
+    surfaces = seg.surfaces or (seg.text,)
+    want = [s for s in surfaces if (punct == "ja") != s.isascii()]
+    return frozenset(want or surfaces)
+
+
+def bounds_from_text(matcher: LatticeMatcher, text: str) -> tuple[int, ...]:
+    """出力の文字列をラティスで先頭から辿り直し、語の切れ目になりうる文字位置を返す（Decoded.bounds と同じ定義）。
+    llama-server など、生成時に状態を追えない実行系のために使う。"""
+    data = scoring_text(text).encode()
+    states, bounds = matcher.advance_bounds(matcher.start(), data)
+    return _char_bounds(data, bounds)
 
 
 class Decoded(NamedTuple):
@@ -157,6 +177,7 @@ class ConstrainedZenz:
                 r = model(input_ids=step_ids, past_key_values=past, use_cache=True)
             past = r.past_key_values
             logits = r.logits[0, -1].float()
+            prev_states = states
             chosen, states = self._pick(logits, m, states)
             if chosen is None:
                 break
@@ -164,9 +185,9 @@ class ConstrainedZenz:
             if chosen == self.eos:
                 finished = True
                 break
+            base = len(out)
             out += self.tok_bytes[chosen]
-            if m.at_boundary(states):
-                bounds.append(len(out))
+            bounds.extend(base + k for k in m.advance_bounds(prev_states, self.tok_bytes[chosen])[1])
             step_ids = torch.tensor([[chosen]], device=self.s.device)
         return Decoded(out.decode("utf-8", errors="replace"), logp_sum, finished, _char_bounds(bytes(out), bounds))
 
@@ -224,17 +245,18 @@ class ConstrainedZenz:
                     finished[i] = True
                     alive[i] = False
                     continue
+                base = len(outs[i])
+                bounds[i].extend(base + k for k in matchers[i].advance_bounds(states[i], self.tok_bytes[chosen])[1])
                 states[i] = ns
                 outs[i] += self.tok_bytes[chosen]
-                if matchers[i].at_boundary(ns):
-                    bounds[i].append(len(outs[i]))
                 nxt[i] = chosen
             if not any(alive):
                 break
-            # 終わった系列にはパディングを食わせ続ける（結果は使わない。他の系列には影響しない）
+            # 終わった系列にはパディングを食わせ続ける（結果は使わない。他の系列には影響しない）。位置は進めない
+            # （進め続けると、長いプロンプトの系列が先に終わったとき位置埋め込みの上限 n_positions を超えうる）
             step_ids = torch.tensor(nxt, device=dev).unsqueeze(1)
             mask = torch.cat([mask, torch.ones((B, 1), dtype=torch.long, device=dev)], dim=1)
-            step_pos = step_pos[:, -1:] + 1
+            step_pos = step_pos[:, -1:] + torch.tensor([[int(a)] for a in alive], device=dev)
         return [Decoded(o.decode("utf-8", errors="replace"), lp, f, _char_bounds(bytes(o), bd))
                 for o, lp, f, bd in zip(outs, logp_sum, finished, bounds)]
 
@@ -243,11 +265,12 @@ class ConstrainedZenz:
     def _pick(self, logits, m: LatticeMatcher, states: frozenset[State]):
         """制約を満たす最も確率の高いトークンと、進めた状態。無ければ (None, None)。"""
         torch = self.s._torch
-        top = torch.topk(logits, min(self._TOP, logits.shape[-1])).indices.tolist()
+        n_top = min(self._TOP, self.max_tries, logits.shape[-1])
+        top = torch.topk(logits, n_top).indices.tolist()
         t, ns = self._scan(top, m, states)
-        if t is not None or self.max_tries <= self._TOP:
+        if t is not None or self.max_tries <= n_top:
             return t, ns
-        order = torch.argsort(logits, descending=True).tolist()[self._TOP:self.max_tries]
+        order = torch.argsort(logits, descending=True).tolist()[n_top:self.max_tries]
         return self._scan(order, m, states)
 
     def _scan(self, order, m: LatticeMatcher, states: frozenset[State]):

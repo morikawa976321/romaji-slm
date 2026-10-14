@@ -28,13 +28,11 @@ CORPUS = ["キョウハイイテンキデスネ", "今日は良い天気です�
           "キョウ", "テンキ", "イイ", "デス", "。", "、", INPUT + CONTEXT + OUTPUT, "abcdefghijklmnopqrstuvwxyz"]
 
 
-@pytest.fixture(scope="module")
-def tiny_model(tmp_path_factory) -> str:
+def _make_tiny(path, n_positions: int) -> str:
     import torch
     from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
     from transformers import GPT2Config, GPT2LMHeadModel
 
-    path = tmp_path_factory.mktemp("zenz-like-constrained")
     alphabet = [c for c in pre_tokenizers.ByteLevel.alphabet() if c not in ("Ġ", "Ċ", "č")]
     tk = Tokenizer(models.BPE())
     tk.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
@@ -47,11 +45,16 @@ def tiny_model(tmp_path_factory) -> str:
     (path / "tokenizer_config.json").write_text(json.dumps({
         "tokenizer_class": "GPT2Tokenizer", "add_bos_token": False, "add_prefix_space": False,
         "unk_token": "[UNK]", "pad_token": "[PAD]", "bos_token": "<s>", "eos_token": "</s>"}))
-    cfg = GPT2Config(vocab_size=tk.get_vocab_size(), n_embd=64, n_layer=2, n_head=4, n_positions=256,
+    cfg = GPT2Config(vocab_size=tk.get_vocab_size(), n_embd=64, n_layer=2, n_head=4, n_positions=n_positions,
                      bos_token_id=2, eos_token_id=3, pad_token_id=1)
     torch.manual_seed(0)
     GPT2LMHeadModel(cfg).save_pretrained(path)
     return str(path)
+
+
+@pytest.fixture(scope="module")
+def tiny_model(tmp_path_factory) -> str:
+    return _make_tiny(tmp_path_factory.mktemp("zenz-like-constrained"), 256)
 
 
 @pytest.fixture(scope="module")
@@ -93,10 +96,46 @@ def test_outputs_stay_on_lattice(cz, dic):
 
 
 def test_bounds_are_word_boundaries(cz, dic):
-    d = cz.decode_batch([READINGS[1]], dic)[0]
-    # 切れ目は 0 と末尾を除く昇順の文字位置
-    assert list(d.bounds) == sorted(set(d.bounds))
-    assert all(0 < b < len(d.text) for b in d.bounds)
+    from core.constrained import LatticeMatcher, bounds_from_text
+
+    for r, d in zip(READINGS, cz.decode_batch(READINGS, dic)):
+        # 切れ目は 0 と末尾を除く昇順の文字位置で、出力を辿り直したものと一致する（トークン内部の切れ目も含む）
+        assert list(d.bounds) == sorted(set(d.bounds))
+        assert all(0 < b < len(d.text) for b in d.bounds)
+        assert d.bounds == bounds_from_text(LatticeMatcher(r, dic), d.text)
+
+
+def test_bounds_inside_multichar_token(dic):
+    # 「今日は」が1トークンでも、今日|は の切れ目（文字位置 2）を落とさない
+    from core.constrained import LatticeMatcher, bounds_from_text
+
+    m = LatticeMatcher(_kana("キョウハ"), dic)
+    assert 2 in bounds_from_text(m, "今日は")
+
+
+def test_finished_rows_do_not_advance_position(tmp_path_factory, dic):
+    # 位置埋め込みが短いモデルで、長いプロンプトの系列が先に終わっても、残りの系列の生成で上限を超えない
+    short = ConstrainedZenz(ZenzScorer(_make_tiny(tmp_path_factory.mktemp("short"), 40), "cpu"))
+    long_ctx = "今日は良い天気ですね" * 2  # プロンプトが長い系列（すぐ終わる短い読み）と、短い系列（長い読み）を混ぜる
+    rs = [_kana("キ"), _kana("テンキハキョウハイイテンキ")]
+    single = [short.decode_scored(rs[0], dic, long_ctx), short.decode_scored(rs[1], dic, "")]
+    # バッチでは左文脈は共通なので、長い文脈で両方を回す（1件ずつも同じ条件で）
+    single = [short.decode_scored(r, dic, long_ctx) for r in rs]
+    batch = short.decode_batch(rs, dic, long_ctx)
+    assert [d.text for d in batch] == [d.text for d in single]
+
+
+def test_pick_respects_max_tries(tiny_model, dic):
+    import torch
+
+    cz1 = ConstrainedZenz(ZenzScorer(tiny_model, "cpu"), max_tries=1)
+    m = __import__("core.constrained", fromlist=["LatticeMatcher"]).LatticeMatcher(_kana("キョウ"), dic)
+    logits = torch.full((len(cz1.tok_bytes),), -10.0)
+    bad = [t for t, b in enumerate(cz1.tok_bytes) if b == b"x"][0]  # ラティスに無いトークンを 1 位に
+    good = [t for t, b in enumerate(cz1.tok_bytes) if b == "今".encode()][0]
+    logits[bad], logits[good] = 1.0, 0.5
+    assert cz1._pick(logits, m, m.start())[0] is None  # max_tries=1 では 1 位だけ見る
+    assert ConstrainedZenz(ZenzScorer(tiny_model, "cpu"), max_tries=2)._pick(logits, m, m.start())[0] == good
 
 
 def test_batch_order_and_empty(cz, dic):
@@ -125,6 +164,13 @@ def test_punct_modes(cz, dic):
         cz.decode_scored(SYM_READING, dic, punct="full")
 
 
+def test_punct_ja_keeps_symbols_without_fullwidth(cz, dic):
+    # 全角候補の無い記号（@）は ja でも行き止まりにしない
+    r = Reading((Seg("kana", 0, 3, "キョウ"), Seg("sym", 3, 4, "@", ("@",))))
+    d = cz.decode_scored(r, dic, punct="ja")
+    assert d.finished and d.text.endswith("@")
+
+
 def test_en_case_modes_in_lattice(cz, dic):
     # ラティスでは zenz 以外のモードは打った綴りだけ（登録表記への置き換えは core.pipeline.render_en_case）
     for m in ("typed", "registered", "auto"):
@@ -148,3 +194,6 @@ def test_render_en_case():
     assert render_en_case(text, reading, "auto") == "GitHubにpushしておいてJR"
     # 出力に綴りが見つからない区間（かなに変換された英語）は飛ばす
     assert render_en_case("ギットハブにpushしておいてjr", reading, "registered") == "ギットハブにpushしておいてjr"
+    # 辞書語の表層（アイフォン→iPhone）の中の同じ綴りは拾わない: 語の切れ目に揃う出現だけを置き換える
+    r2 = Reading((Seg("kana", 0, 5, "アイフォン"), Seg("en", 5, 6, "i", ("i",))))
+    assert render_en_case("iPhonei", r2, "auto", bounds=(6,)) == "iPhoneI"
