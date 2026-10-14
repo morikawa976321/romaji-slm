@@ -12,8 +12,15 @@ uv run python -m eval.run --converter zenz-baseline --set ajimee --limit 20     
 uv run python -m eval.run --converter romaji2ja --set user_style                # 配布元の正規化あり
 uv run python -m eval.run --converter hf --model <パス|HF ID> --template zenz-v3-romaji --set file:data/test.jsonl
 uv run python -m eval.tokenizer_survey --model Miwa-Keita/zenz-v3.1-small       # 語彙調査
+uv run python -m eval.diff eval/out/<before>__user_style.jsonl eval/out/<after>__user_style.jsonl --show 20 [--md <path>]
+uv run python -m eval.punct_eval eval/out/<変換器>__gen_val.jsonl [--category omit_punct] [--show 10]
+uv run python -m eval.split_gen                                                  # gen_dev / gen_val を作り直す
 uv run pytest
 ```
+
+**採否は最低目安との比較ではなく、現在値との差分で決める。** `eval.diff` は同じセットの結果2つを id で突き合わせ、改善（完全一致 0→1）・悪化（1→0）・変わらずの件数、
+正常入力（typo・noisy 以外）で新たに壊れた件数、正常入力の完全一致・誤補正・英語保持・ms 中央値の変化をカテゴリ別に出し、改善・悪化の文を並べる。片方にしか無い id は数えずに警告する。
+閾値や重みの調整は `gen_dev` で行い、`gen_val` は最終確認にだけ使う。
 
 ### 変換器
 
@@ -61,7 +68,9 @@ ASCII 記号は全角にする（`,`→`、` `.`→`。` `-`→`ー` `?`→`？`
 |---|---|---|
 | `ajimee` | [AJIMEE-Bench](https://github.com/ensan-hcl/AJIMEE-Bench) `JWTD_v2/v1/evaluation_items.json`。カタカナ input を `kana.py` でローマ字にし、**`context_text` を左文脈に渡す** | 200 |
 | `ajimee-noctx` | 同じ項目で左文脈を渡さない | 200 |
-| `user_style` | 本人の用途を模した文（`eval/sets/user_style.jsonl`） | 40 |
+| `user_style` | 本人の用途を模した文（`eval/sets/user_style.jsonl`） | 73 |
+| `gen_test` | 生成した試験分割（`eval/sets/gen_test.jsonl`。clean 121・noisy 96・omit_punct 120） | 337 |
+| `gen_dev` / `gen_val` | gen_test を「カテゴリ × 正解に句読点があるか」の層ごとに romaji の SHA-256 順で半分に分けたもの（`eval/split_gen.py`）。dev は clean 61・noisy 48・omit_punct 61（35.9% / 28.2% / 35.9%）、val は 60・48・59（35.9% / 28.7% / 35.3%）。omit_punct の陽性・陰性は dev 35・26、val 34・25 | 170 / 167 |
 | `file:<path>` | 共有 JSONL 形式の任意のファイル（学習データ側の test 分割など） | — |
 
 AJIMEE のカテゴリは、元の項目が文脈を持つか（`with_context` 100 / `without_context` 100）。文脈を渡すかどうかに依らず同じ。
@@ -74,6 +83,7 @@ AJIMEE のデータは CC BY-SA 3.0（コード CC0）。初回実行時に `raw
 ```
 
 `left_context` と `meta` は省略可。`meta.category` はカテゴリ別集計に、`meta.alternatives` は追加の正解に使う（`output` と合わせて複数正解）。
+`meta.pair_of` は打鍵ミス版の文に付ける、対になる正常入力の id（id は読み込み時の行番号。user_style の typo 11 文のうち 9 文に付けた）。行を挿入・削除すると id がずれるので、そのときは付け直す。
 
 ## 指標
 
@@ -84,6 +94,10 @@ AJIMEE のデータは CC BY-SA 3.0（コード CC0）。初回実行時に `raw
 | MinCER | 正解ごとの文字誤り率（編集距離 ÷ 正解の文字数）の最小。表は件ごとの値の平均 |
 | ms/件 | `convert_detailed` 1回の所要時間（時計時間）。平均と中央値。計測前に2回空回しする |
 | 生成トークン | EOS までに生成したトークン数（EOS を含む）の平均 |
+| 誤補正 | 正常入力（typo・noisy 以外）で、1位が打鍵を補正した割合。編集経路を通った割合であって、出力が間違った割合ではない |
+| 正常入力の完全一致 | 正常入力（typo・noisy 以外）だけの完全一致率（`clean_exact`） |
+| 対の一致 | `meta.pair_of` を持つ打鍵ミス版のうち、出力が正常版の出力と一致した割合（`pair_consistent`）。正常版が間違っていても一致なら数える |
+| 句読点（`eval.punct_eval`） | 入力に句読点が無い件（omit_punct）だけ。本文の保持（句読点 `、。？！?!,.` だけを除いて一致）、種類別（読点・句点・疑問符・感嘆符）の適合率・再現率・F1（位置は句読点を除いた本文の何文字目の後ろか。本文が一致した件だけ）、不要な挿入率（正解に `、。？?` が無い件で句読点を入れた割合）、文末の句点と文中の読点の再現率 |
 
 速度（ms）は**測った機械での参考値**で、要件（ThinkPad P14s Gen 6、Core Ultra 7 255H 上で 20〜30字を1秒以内）の判定には使わない。
 各 `.md` に CPU 名・論理 CPU 数・torch のスレッド数を記録する。
@@ -201,5 +215,5 @@ score = zenz の変換の対数確率 + f × 完成文の自然さ − w × 読�
 - 1件の時間が中央値 約1秒（GPU、k=5 回の制約付き生成を順に実行）。ThinkPad の CPU では未測定。k 件の生成の並列化・読みのコストでの足切り・プロンプトの共有が必要（工程6）。
 ## テスト
 
-`uv run pytest`（`tests/test_eval_*.py`）: ローマ字 → カタカナ（nn・促音・揺れ・往復）、指標、プロンプト雛形、データ読み込み・集計・書き出し、
+`uv run pytest`（`tests/test_eval_*.py`）: ローマ字 → カタカナ（nn・促音・揺れ・往復）、指標、プロンプト雛形、データ読み込み・集計・書き出し、結果の差分（`eval.diff`）・句読点の評価（`eval.punct_eval`）・dev/val の分割、
 `HFCausalLM`（ランダム初期化の極小 GPT-2 と文字単位トークナイザ。torch と transformers が入っているときだけ）。

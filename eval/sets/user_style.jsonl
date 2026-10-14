@@ -32,12 +32,12 @@
 {"romaji": "10ji30funnnidenshaninotta.", "output": "10時30分に電車に乗った。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "kibungaochikonderunodesanponideta.", "output": "気分が落ち込んでるので散歩に出た。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "ronbunnnodai2shouwokakiowatta.", "output": "論文の第2章を書き終わった。", "left_context": "", "meta": {"category": "memo"}}
-{"romaji": "kyouhaosokunarisoudalara,sakinitabetwoite.", "output": "今日は遅くなりそうだから、先に食べておいて。", "left_context": "", "meta": {"category": "typo"}}
-{"romaji": "jikkennnokekka,yuuisagamitomeraretq.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "typo"}}
-{"romaji": "githibnipushshiteoite.", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "typo", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"]}}
-{"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonata.", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "typo"}}
-{"romaji": "ryoukai!arigatpu.", "output": "了解！ありがとう。", "left_context": "", "meta": {"category": "typo", "alternatives": ["了解!ありがとう。"]}}
-{"romaji": "raishuunogetsuyobinihaishanoyoyaku.", "output": "来週の月曜日に歯医者の予約。", "left_context": "", "meta": {"category": "typo"}}
+{"romaji": "kyouhaosokunarisoudalara,sakinitabetwoite.", "output": "今日は遅くなりそうだから、先に食べておいて。", "left_context": "", "meta": {"category": "typo", "pair_of": "0"}}
+{"romaji": "jikkennnokekka,yuuisagamitomeraretq.", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "typo", "pair_of": "19"}}
+{"romaji": "githibnipushshiteoite.", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "typo", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"], "pair_of": "8"}}
+{"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonata.", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "typo", "pair_of": "18"}}
+{"romaji": "ryoukai!arigatpu.", "output": "了解！ありがとう。", "left_context": "", "meta": {"category": "typo", "alternatives": ["了解!ありがとう。"], "pair_of": "2"}}
+{"romaji": "raishuunogetsuyobinihaishanoyoyaku.", "output": "来週の月曜日に歯医者の予約。", "left_context": "", "meta": {"category": "typo", "pair_of": "29"}}
 {"romaji": "konobranchwomainnimergeshite.", "output": "このbranchをmainにmergeして。", "left_context": "", "meta": {"category": "tech", "alternatives": ["このブランチをmainにマージして。"]}}
 {"romaji": "dockerfilewokoushinshita.", "output": "dockerfileを更新した。", "left_context": "", "meta": {"category": "tech", "alternatives": ["Dockerfileを更新した。"]}}
 {"romaji": "kubernetesnoclusterwotateru.", "output": "kubernetesのclusterを立てる。", "left_context": "", "meta": {"category": "tech", "alternatives": ["Kubernetesのclusterを立てる。", "Kubernetesのクラスタを立てる。"]}}
@@ -64,9 +64,9 @@
 {"romaji": "hikenshanouchi12meigachuudanshita.", "output": "被験者のうち12名が中断した。", "left_context": "", "meta": {"category": "academic"}}
 {"romaji": "denshanonakadehonwoyonda.", "output": "電車の中で本を読んだ。", "left_context": "", "meta": {"category": "memo"}}
 {"romaji": "raigetsunoshimekiriwowasurenai.", "output": "来月の締め切りを忘れない。", "left_context": "", "meta": {"category": "memo", "alternatives": ["来月の締切を忘れない。"]}}
-{"romaji": "ashitanokaigi,nanjikarafakke?", "output": "明日の会議、何時からだっけ？", "left_context": "", "meta": {"category": "typo", "alternatives": ["明日の会議、何時からだっけ?"]}}
-{"romaji": "shashinnookuttekuretearigatpu.", "output": "写真送ってくれてありがとう。", "left_context": "", "meta": {"category": "typo"}}
-{"romaji": "konobranchwomainnimergwshite.", "output": "このbranchをmainにmergeして。", "left_context": "", "meta": {"category": "typo", "alternatives": ["このブランチをmainにマージして。"]}}
+{"romaji": "ashitanokaigi,nanjikarafakke?", "output": "明日の会議、何時からだっけ？", "left_context": "", "meta": {"category": "typo", "alternatives": ["明日の会議、何時からだっけ?"], "pair_of": "1"}}
+{"romaji": "shashinnookuttekuretearigatpu.", "output": "写真送ってくれてありがとう。", "left_context": "", "meta": {"category": "typo", "pair_of": "6"}}
+{"romaji": "konobranchwomainnimergwshite.", "output": "このbranchをmainにmergeして。", "left_context": "", "meta": {"category": "typo", "alternatives": ["このブランチをmainにマージして。"], "pair_of": "40"}}
 {"romaji": "raishuuhayadumidesu.", "output": "来週は休みです。", "left_context": "", "meta": {"category": "typo"}}
 {"romaji": "denwashitemoiifesuka?", "output": "電話してもいいですか？", "left_context": "", "meta": {"category": "typo", "alternatives": ["電話してもいいですか?"]}}
 {"romaji": "jikkennnokekkawobunsekisita.", "output": "実験の結果を分析した。", "left_context": "", "meta": {"category": "variant"}}

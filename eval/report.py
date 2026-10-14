@@ -32,7 +32,11 @@ def env_info(device: str) -> dict:
     return info
 
 
-def aggregate(rows: list[dict]) -> list[dict]:
+def aggregate(rows: list[dict], pairs: dict[str, str] | None = None) -> list[dict]:
+    """pairs: 打鍵ミス版の id → 対になる正常版の id。省略時は行の pair_of を使う。"""
+    if pairs is None:
+        pairs = {r["id"]: r["pair_of"] for r in rows if r.get("pair_of")}
+    out_by_id = {r["id"]: r["output"] for r in rows if "id" in r}
     cats = sorted({r["category"] for r in rows})
     out = []
     for c in [*cats, "ALL"]:
@@ -51,6 +55,10 @@ def aggregate(rows: list[dict]) -> list[dict]:
             "en_kept": _mean(r.get("en_kept") for r in rs),
             # 打鍵ミスの無い件だけ（カテゴリ typo / noisy 以外）: 1位が打鍵を補正した割合
             "miscorrect": _mean(r.get("edited") for r in rs if r["category"] not in _TYPO_CATS),
+            "clean_exact": _mean(r["exact"] for r in rs if r["category"] not in _TYPO_CATS),
+            # 対になる正常版がある打鍵ミス版だけ: 出力が正常版の出力と一致した割合
+            "pair_consistent": _mean(r["output"] == out_by_id[pairs[r["id"]]] for r in rs
+                                     if pairs.get(r.get("id")) in out_by_id),
         })
     return out
 
@@ -67,6 +75,17 @@ def _pct(v: float | None) -> str:
     return "—" if v is None else f"{v:.1%}"
 
 
+def set_pairs(set_name: str) -> dict[str, str]:
+    """手元にあるセットの meta.pair_of（id → 正常版の id）。取得が要るセット（ajimee）や読めないファイルは空。"""
+    from .datasets import GEN_SETS, load_set
+    if set_name != "user_style" and set_name not in GEN_SETS and not set_name.startswith("file:"):
+        return {}
+    try:
+        return {it.id: it.pair_of for it in load_set(set_name) if it.pair_of}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
 def render_markdown(converter: str, set_name: str, rows: list[dict], env: dict) -> str:
     lines = [
         f"# {converter} / {set_name}", "",
@@ -74,13 +93,15 @@ def render_markdown(converter: str, set_name: str, rows: list[dict], env: dict) 
         "- 環境: " + "、".join(f"{k}={v}" for k, v in env.items()),
         "- 速度（ms）は上の環境での参考値。要件判定は ThinkPad（Core Ultra 7 255H）上の値だけで行う。", "",
         "| カテゴリ | 件数 | 完全一致 | ゆるい一致 | 平均 MinCER | oracle | 英語保持 | 誤補正 "
-        "| ms/件（平均） | ms/件（中央値） | 生成トークン |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| ms/件（平均） | ms/件（中央値） | 生成トークン | 正常入力の完全一致 | 対の一致 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
-    for a in aggregate(rows):
+    pairs = {r["id"]: r["pair_of"] for r in rows if r.get("pair_of")} or set_pairs(set_name)
+    for a in aggregate(rows, pairs):
         lines.append(f"| {a['category']} | {a['n']} | {a['exact']:.1%} | {a['loose']:.1%} | {a['min_cer']:.3f} "
                      f"| {_pct(a['oracle'])} | {_pct(a['en_kept'])} | {_pct(a['miscorrect'])} "
-                     f"| {a['ms_mean']:.0f} | {a['ms_median']:.0f} | {a['gen_tokens']:.1f} |")
+                     f"| {a['ms_mean']:.0f} | {a['ms_median']:.0f} | {a['gen_tokens']:.1f} "
+                     f"| {_pct(a['clean_exact'])} | {_pct(a['pair_consistent'])} |")
     return "\n".join(lines) + "\n"
 
 

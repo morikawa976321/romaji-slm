@@ -3,7 +3,7 @@
 共有 JSONL 形式（学習データ生成側と同じ）:
     {"romaji": str, "output": str, "left_context": str, "meta": {...}}
 `meta.alternatives`（文字列のリスト）があれば、それらも正解に数える。`meta.category` はカテゴリ別集計に使う。
-`left_context` と `meta` は省略可。
+`left_context` と `meta` は省略可。`meta.pair_of` は対になる正常入力の id（打鍵ミス版の文に付ける）。
 """
 
 import json
@@ -17,7 +17,10 @@ ROOT = Path(__file__).resolve().parent.parent
 AJIMEE_URL = ("https://raw.githubusercontent.com/ensan-hcl/AJIMEE-Bench/main/"
               "JWTD_v2/v1/evaluation_items.json")
 AJIMEE_PATH = ROOT / "models" / "ajimee" / "evaluation_items.json"
-USER_STYLE_PATH = ROOT / "eval" / "sets" / "user_style.jsonl"
+SETS = ROOT / "eval" / "sets"
+USER_STYLE_PATH = SETS / "user_style.jsonl"
+# gen_test を dev（閾値・重みの調整用）と val（最終確認用）に分けたもの。eval/split_gen.py が作る
+GEN_SETS = ("gen_test", "gen_dev", "gen_val")
 
 
 @dataclass
@@ -28,6 +31,10 @@ class Item:
     left_context: str = ""
     category: str = "all"
     meta: dict = field(default_factory=dict)
+
+    @property
+    def pair_of(self) -> str | None:
+        return self.meta.get("pair_of")
 
 
 def download_ajimee(path: Path = AJIMEE_PATH) -> Path:
@@ -72,15 +79,17 @@ def load_ajimee(use_context: bool, path: Path = AJIMEE_PATH) -> list[Item]:
 
 
 def load_set(name: str, limit: int | None = None) -> list[Item]:
-    """name: ajimee（左文脈あり）/ ajimee-noctx / user_style / file:<jsonl のパス>"""
+    """name: ajimee（左文脈あり）/ ajimee-noctx / user_style / gen_test / gen_dev / gen_val / file:<jsonl のパス>"""
     if name == "ajimee":
         items = load_ajimee(True)
     elif name == "ajimee-noctx":
         items = load_ajimee(False)
     elif name == "user_style":
         items = load_jsonl(USER_STYLE_PATH)
+    elif name in GEN_SETS:
+        items = load_jsonl(SETS / f"{name}.jsonl")
     elif name.startswith("file:"):
         items = load_jsonl(name[5:])
     else:
-        raise ValueError(f"未知のセット: {name}（ajimee / ajimee-noctx / user_style / file:<path>）")
+        raise ValueError(f"未知のセット: {name}（ajimee / ajimee-noctx / user_style / gen_test / gen_dev / gen_val / file:<path>）")
     return items[:limit] if limit else items
