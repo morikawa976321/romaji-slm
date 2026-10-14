@@ -180,3 +180,4 @@ pyproject.toml の cu128 版ではなく、別の仮想環境に PyPI の torch 
 
 - llama.cpp b10549 の `llama-server` は、生成結果が UTF-8 として壊れていると `/completion` が HTTP 500（`The model produced output that does not match the expected Content-only format`）を返す。`tests/test_infer.py` の極小ランダムモデルはでたらめなバイト列を出すので、b10549 では llama.cpp を使うテストが落ちる（クラウドで確かめた b11562 では通る）。学習済みのモデル（`models/zenz-romaji-v2-Q5_K_M.gguf`）では起きなかった。
 - 二段形式（`zenz-v3-romaji-reading`）は、`infer` の llama 経由でも読みを切り落として変換結果だけを返す。
+- llama.cpp 62df181（2026-10-14）は `[PAD]` という名前のトークンを EOG とみなす（FIM_PAD の表）。zenz の語彙も `[PAD]` を持つので、生成が `[PAD]` で止まりうる。変換コアの llama 実行系での扱いは [LLAMA_BACKEND.md](LLAMA_BACKEND.md)。
