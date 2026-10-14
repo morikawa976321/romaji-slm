@@ -116,7 +116,9 @@ def test_order_coverage_and_breakdown():
     keys = "apiki-hakankyouhensuukarayomikomu."
     rs = top(keys)
     costs = [r.cost for r in rs]
-    assert costs == sorted(costs)
+    # 1位はコスト最小。上位5件とその後ろは、それぞれの中でコスト順（上位5件は直し方の違う候補を広く選ぶ）
+    assert costs[0] == min(costs)
+    assert costs[:5] == sorted(costs[:5]) and costs[5:] == sorted(costs[5:])
     assert len({tuple((s.kind, s.text, s.end) for s in r.segs) for r in rs}) == len(rs)
     for r in rs:
         assert r.segs[0].start == 0 and r.segs[-1].end == len(keys)
@@ -124,11 +126,88 @@ def test_order_coverage_and_breakdown():
         assert abs(sum(r.breakdown.values()) - r.cost) < 0.01
 
 
+def test_same_reading_keeps_cheapest_path():
+    # ジッケンノケッカは nn の揺れ（編集なし）でも脱字 n（編集あり）でも作れる。安いほうのコストと内訳を返す
+    alt = next(r for r in top("jikkennokekka") if r.zenz_input() == "ジッケンノケッカ")
+    assert alt.edits == () and alt.cost < 1.0
+
+
+def test_top5_keeps_unedited_and_first_is_cheapest():
+    # 探索で編集を安く数えても、1位は元のコストの最小で、編集なしの最良も上位5に残る
+    for keys in ("dyi", "noiraiakuuyouni", "kyouhaosokunarisoudalara,sakinitabetwoite."):
+        rs = top(keys)
+        assert rs[0].cost == min(r.cost for r in rs)
+        assert any(r.edits == () for r in rs[:5])
+
+
+@pytest.mark.parametrize("keys, reading, token", [
+    ("jrnoekimadearuku", "jrノエキマデアルク", "jr"),
+    ("githubnipushshitejrnoapiwotamesu", "githubニpushシテjrノapiヲタメス", "jr"),
+    ("cdmanokikakuwoshiraberu", "cdmaノキカクヲシラベル", "cdma"),
+    ("scc-0210womitsukete", "scc-0210ヲミツケテ", "scc"),
+    ("int8deryoushikasuru", "int8デリョウシカスル", "int8"),
+    ("bf16tofp16nochigai", "bf16トfp16ノチガイ", "fp16"),  # 英字列の間の助詞（to）で切る
+])
+def test_raw_token_kept_in_top5(keys, reading, token):
+    rs = top(keys)
+    assert reading in inputs(rs[:5])
+    r = next(r for r in rs if r.zenz_input() == reading)
+    # 辞書に無い英字列は綴りのまま1区間
+    assert any(s.kind == "en" and s.text == token and s.surfaces == (token,) for s in r.segs)
+
+
+def test_raw_token_not_for_clean_romaji():
+    # 正しいローマ字は英字のまま残さない（kai はカイ）
+    for keys in ("kaigininaru", "sonotokinosoto", "kyouhaiitenkidesune"):
+        r = top(keys, 5)[0]
+        assert all(s.kind == "kana" for s in r.segs) and r.edits == ()
+
+
+def test_sokuon_typo_arcs():
+    assert "シュクショトシテツクッタシロ" in inputs(top("shukushotoshitetsuku6tashiro")[:5])  # t→6
+    assert "タイトルロゴヲイッシン" in inputs(top("taitorurogowoiesshinn")[:5])  # 促音の前に余計な e
+
+
+def test_gc_restored():
+    import gc
+
+    assert gc.isenabled()
+    top("kyouhaiitenkidesune")
+    assert gc.isenabled()
+    gc.disable()
+    try:
+        top("kyouhaiitenkidesune")
+        assert not gc.isenabled()
+    finally:
+        gc.enable()
+
+
 def test_every_table_syllable_parses_alone():
     for key, kana in TABLE.items():
         if key[0] in "xl" or key == "xn":
             continue
         assert kana in inputs(top(key, 5)), key
+
+
+def test_kana_lm_context_after_english():
+    from core.kana_lm import AFTER_EN, BOS, ORDER, load
+
+    lm = load()
+    # 英字の語の直後は助詞が来やすい（文頭よりノ・ヲの確率が高い）
+    for c in "ノヲ":
+        assert lm.logp(BOS * (ORDER - 2) + AFTER_EN, c) > lm.logp(BOS * (ORDER - 1), c)
+
+
+def test_kana_lm_marked_runs_do_not_change_plain_contexts():
+    import math
+
+    from core.kana_lm import AFTER_EN, BOS, ORDER, train
+
+    plain = train({"アイウ": 1.0, "ノアイ": 1.0})
+    marked = train({"アイウ": 1.0, "ノアイ": 1.0, AFTER_EN + "ノア": 1.0})
+    for hist, c in [(BOS * (ORDER - 1), "ア"), ("アイ", "ウ"), ("ノア", "イ")]:
+        assert math.isclose(plain.logp(hist, c), marked.logp(hist, c))
+    assert marked.logp(BOS * (ORDER - 2) + AFTER_EN, "ノ") > plain.logp(BOS * (ORDER - 2) + AFTER_EN, "ノ")
 
 
 def test_kana_lm_is_normalized():
