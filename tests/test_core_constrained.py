@@ -125,13 +125,26 @@ def test_punct_modes(cz, dic):
         cz.decode_scored(SYM_READING, dic, punct="full")
 
 
-def test_en_case_modes(cz, dic):
-    pytest.importorskip("wordfreq")
-    texts = {m: [cz.decode_scored(r, dic, en_case=m).text for r in EN_READINGS]
-             for m in ("typed", "registered", "auto", "zenz")}
-    assert texts["typed"] == ["github", "jr", "push"]
-    assert texts["registered"] == ["GitHub", "jr", "push"]
-    assert texts["auto"] == ["GitHub", "JR", "push"]
-    assert texts["zenz"][0] in ("GitHub", "github") and texts["zenz"][1:] == ["jr", "push"]
+def test_en_case_modes_in_lattice(cz, dic):
+    # ラティスでは zenz 以外のモードは打った綴りだけ（登録表記への置き換えは core.pipeline.render_en_case）
+    for m in ("typed", "registered", "auto"):
+        assert [cz.decode_scored(r, dic, en_case=m).text for r in EN_READINGS] == ["github", "jr", "push"]
+    z = [cz.decode_scored(r, dic, en_case="zenz").text for r in EN_READINGS]
+    assert z[0] in ("GitHub", "github") and z[1:] == ["jr", "push"]
     with pytest.raises(ValueError):
         cz.decode_scored(EN_READINGS[0], dic, en_case="upper")
+
+
+def test_render_en_case():
+    pytest.importorskip("wordfreq")
+    from core.pipeline import render_en_case
+
+    reading = Reading((Seg("en", 0, 6, "github", ("GitHub", "github")), Seg("kana", 6, 8, "ニ"),
+                       Seg("en", 8, 12, "push", ("push",)), Seg("kana", 12, 20, "シテオイテ"),
+                       Seg("en", 20, 22, "jr", ("jr",))))
+    text = "githubにpushしておいてjr"
+    assert render_en_case(text, reading, "typed") == text
+    assert render_en_case(text, reading, "registered") == "GitHubにpushしておいてjr"
+    assert render_en_case(text, reading, "auto") == "GitHubにpushしておいてJR"
+    # 出力に綴りが見つからない区間（かなに変換された英語）は飛ばす
+    assert render_en_case("ギットハブにpushしておいてjr", reading, "registered") == "ギットハブにpushしておいてjr"

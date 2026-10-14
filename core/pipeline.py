@@ -21,33 +21,74 @@ _TYPED_PUNCT = frozenset(",.?!")  # 打鍵列に句読点として打たれう�
 _PUNCT = frozenset("、。？！?!,.")
 
 
-def punct_variants(text: str, bounds: tuple[int, ...]) -> list[tuple[str, int, int]]:
-    """句読点 B の候補: (文, 読点を足した数, 句点を足した数)。無挿入を必ず含む。
+def punct_variants(text: str, bounds: tuple[int, ...]) -> list[tuple[str, int, str]]:
+    """句読点 B の候補: (文, 読点を足した数, 足した文末の記号 "" / "。" / "？")。無挿入を必ず含む。
 
-    読点は語の切れ目（制約付き生成が通ったラティスの節点）に1つまで、句点は末尾に句読点が無いときだけ。
+    読点は語の切れ目（制約付き生成が通ったラティスの節点）に1つまで、文末は末尾に句読点が無いときだけ。
     """
     if not text:
-        return [(text, 0, 0)]
-    ends = [""] + (["。"] if text[-1] not in _PUNCT else [])
+        return [(text, 0, "")]
+    ends = ["", "。", "？"] if text[-1] not in _PUNCT else [""]
     commas: list[int | None] = [None] + [b for b in bounds if 0 < b < len(text)
                                          and text[b - 1] not in _PUNCT and text[b] not in _PUNCT]
     out = []
     for e in ends:
         for b in commas:
             t = text if b is None else text[:b] + "、" + text[b:]
-            out.append((t + e, int(b is not None), int(bool(e))))
+            out.append((t + e, int(b is not None), e))
     return out
+
+
+_AUTO_UPPER_MAX = 4  # en_case=auto: 辞書に無いこの長さ以下の英字列は頭字語とみなして大文字にする（jr→JR、scc→SCC）
+
+
+def en_surface(seg, en_case: str) -> str:
+    """英語区間1つの表記。Seg.surfaces は（登録表記, 綴り）か（綴り,）。"""
+    if en_case in ("typed", "zenz"):
+        return seg.text
+    registered = seg.surfaces[0] if seg.surfaces else seg.text
+    if en_case == "auto" and registered == seg.text and seg.text.isalpha() and len(seg.text) <= _AUTO_UPPER_MAX:
+        from .english import SHORT_OK, lexicon
+        # 読みラティスが英語の弧にしない英字列（辞書に無い、または許可リスト外の2字）は頭字語とみなす。
+        # wordfreq は jr のような略語も小文字で持つので「辞書に無い」だけでは足りない
+        if lexicon().get(seg.text) is None or not (len(seg.text) >= 3 or seg.text in SHORT_OK):
+            return seg.text.upper()
+    return registered
+
+
+def render_en_case(text: str, reading, en_case: str) -> str:
+    """選んだ後に英字の表記を置き換える（registered / auto）。
+
+    ラティスでは英語区間を打った綴りのまま生成させているので、出力には各 en 区間の綴りが区間の順に現れる。
+    順に探して置き換える。zenz に大文字を採点させない（REDESIGN.md「選ばれた弧から表記を描画」。採点させると
+    その読みの尤度が下がり、打鍵ミスを直すか・英語かかなかの比較が歪む）。
+    """
+    if en_case in ("typed", "zenz"):
+        return text
+    pos = 0
+    out = []
+    for seg in reading.segs:
+        if seg.kind != "en":
+            continue
+        i = text.find(seg.text, pos)
+        if i < 0:
+            continue
+        out.append(text[pos:i])
+        out.append(en_surface(seg, en_case))
+        pos = i + len(seg.text)
+    out.append(text[pos:])
+    return "".join(out)
 
 
 class CorePipeline:
     # 既定値は user_style・gen_test・AJIMEE で比べて決めた（docs/EVAL.md「完成文の自然さ」。w_read/w_flu の比が効く）
     def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu", k: int = 5,
                  n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None,
-                 batched: bool = True, punct: str = "auto", en_case: str = "zenz",
-                 tau_comma: float = 0.0, tau_end: float = 0.0):
-        """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher）。punct="insert" は
-        句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
-        tau_comma / tau_end: 挿入1つあたりに自然さから引く閾値（大きいほど挿入しにくい）。
+                 batched: bool = True, punct: str = "auto", en_case: str = "typed",
+                 tau_comma: float = 0.0, tau_end: float = 0.0, tau_q: float = 0.0):
+        """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
+        punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
+        tau_comma / tau_end / tau_q: 読点・句点・疑問符の挿入1つあたりに自然さから引く閾値（負なら挿入を促す）。
         """
         self.dic = Dictionary.load()
         self.scorer = ZenzScorer(model, device)
@@ -55,7 +96,7 @@ class CorePipeline:
         self.k, self.n_read, self.w_read, self.w_flu = k, n_read, w_read, w_flu
         self.batched = batched  # k 件の制約付き生成を1バッチで回す（False は1件ずつ。速度の比較用）
         self.punct, self.en_case = punct, en_case
-        self.tau_comma, self.tau_end = tau_comma, tau_end
+        self.tau_comma, self.tau_end, self.tau_q = tau_comma, tau_end, tau_q
         self.name = name or f"core(k={k},w_read={w_read})"
         self.n_params = sum(p.numel() for p in self.scorer.model.parameters())
 
@@ -78,7 +119,7 @@ class CorePipeline:
             out.append({
                 "text": d.text, "score": d.logp - self.w_read * r.cost if d.finished else float("-inf"),
                 "lm": d.logp, "read_cost": r.cost, "reading": r.zenz_input(), "edits": [e.detail for e in r.edits],
-                "bounds": d.bounds,
+                "bounds": d.bounds, "reading_obj": r,
                 "ms": decode_ms,  # k 件まとめての生成時間（候補ごとには分けられない）
             })
         if self.w_flu and out:
@@ -94,7 +135,8 @@ class CorePipeline:
         if len(vs) == 1:
             return text
         fl = fluency(self.scorer, [v[0] for v in vs], left_context)
-        best = max(zip(vs, fl), key=lambda vf: vf[1] - self.tau_comma * vf[0][1] - self.tau_end * vf[0][2])
+        tau_end = {"": 0.0, "。": self.tau_end, "？": self.tau_q}
+        best = max(zip(vs, fl), key=lambda vf: vf[1] - self.tau_comma * vf[0][1] - tau_end[vf[0][2]])
         return best[0][0]
 
     def convert_detailed(self, romaji: str, left_context: str = "") -> Result:
@@ -106,6 +148,7 @@ class CorePipeline:
         if self.punct == "insert" and not (_TYPED_PUNCT & set(romaji)) and best["score"] != float("-inf"):
             # 句読点を打った入力には足さない（打った句読点の種類と幅だけ決める = 句読点 A と同じ振る舞い）
             text = self.insert_punct(text, best["bounds"], left_context)
+        text = render_en_case(text, best["reading_obj"], self.en_case)
         return Result(text, prompt=best["reading"], candidates=tuple(c["text"] for c in cands),
                       edited=bool(best["edits"]))
 

@@ -1,0 +1,73 @@
+{"romaji": "kyouhaosokunarisoudakarasakinitabeteoite", "output": "今日は遅くなりそうだから、先に食べておいて。", "left_context": "", "meta": {"category": "nopunct", "source_category": "chat"}}
+{"romaji": "ashitanokaiginanjikaradakke", "output": "明日の会議、何時からだっけ？", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["明日の会議、何時からだっけ?"], "source_category": "chat"}}
+{"romaji": "ryoukaiarigatou", "output": "了解！ありがとう。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["了解!ありがとう。"], "source_category": "chat"}}
+{"romaji": "sonokenhamatakondohanasou", "output": "その件はまた今度話そう。", "left_context": "", "meta": {"category": "nopunct", "source_category": "chat"}}
+{"romaji": "ekimaenokafedemachiawaseshiyou", "output": "駅前のカフェで待ち合わせしよう。", "left_context": "", "meta": {"category": "nopunct", "source_category": "chat"}}
+{"romaji": "chottookurerukamogomen", "output": "ちょっと遅れるかも。ごめん！", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["ちょっと遅れるかも。ごめん!"], "source_category": "chat"}}
+{"romaji": "shashinnookuttekuretearigatou", "output": "写真送ってくれてありがとう。", "left_context": "", "meta": {"category": "nopunct", "source_category": "chat"}}
+{"romaji": "konshuumatsuhahimadesuka", "output": "今週末は暇ですか？", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["今週末は暇ですか?"], "source_category": "chat"}}
+{"romaji": "githubnipushshiteoite", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"], "source_category": "tech"}}
+{"romaji": "konofunctionnotesutowokaite", "output": "このfunctionのテストを書いて。", "left_context": "", "meta": {"category": "nopunct", "source_category": "tech"}}
+{"romaji": "claudemdnikomittonokisokuwotsuikashite", "output": "CLAUDE.mdにコミットの規則を追加して。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["claude.mdにコミットの規則を追加して。"], "source_category": "tech"}}
+{"romaji": "era-gadetararoguwomisete", "output": "エラーが出たらログを見せて。", "left_context": "", "meta": {"category": "nopunct", "source_category": "tech"}}
+{"romaji": "llamacppdemoderuwougokasu", "output": "llama.cppでモデルを動かす。", "left_context": "", "meta": {"category": "nopunct", "source_category": "tech"}}
+{"romaji": "pythonnoba-jonwo312niageta", "output": "Pythonのバージョンを3.12に上げた。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["pythonのバージョンを3.12に上げた。"], "source_category": "tech"}}
+{"romaji": "konoissuehamadashuuseishinaide", "output": "このissueはまだ修正しないで。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["このイシューはまだ修正しないで。"], "source_category": "tech"}}
+{"romaji": "apiki-hakankyouhensuukarayomikomu", "output": "APIキーは環境変数から読み込む。", "left_context": "", "meta": {"category": "nopunct", "source_category": "tech"}}
+{"romaji": "oksorededeployshite", "output": "OK、それでdeployして。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["ok、それでdeployして。", "OK、それでデプロイして。"], "source_category": "tech"}}
+{"romaji": "pullrequestwotsukuttekure", "output": "pull requestを作ってくれ。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["プルリクエストを作ってくれ。", "Pull Requestを作ってくれ。"], "source_category": "tech"}}
+{"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonatta", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "jikkennnokekkayuuisagamitomerareta", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "hikenshahadaigakusei20nindearu", "output": "被験者は大学生20人である。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["被験者は大学生20名である。"], "source_category": "academic"}}
+{"romaji": "senkoukenkyuunogenkaiwotsuginishimesu", "output": "先行研究の限界を次に示す。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "teianshuhouhajuuraishuhounikurabetesagyoujikanwotanshukushita", "output": "提案手法は従来手法に比べて作業時間を短縮した。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "shitsumonshichousanokaitouwobunsekishita", "output": "質問紙調査の回答を分析した。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "kanouseigaarukotowoshisasuru", "output": "可能性があることを示唆する。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "honronbunnnokouseihaikanotooridearu", "output": "本論文の構成は以下の通りである。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["本論文の構成は以下のとおりである。"], "source_category": "academic"}}
+{"romaji": "kyouhaasakaraatamagaitakatta", "output": "今日は朝から頭が痛かった。", "left_context": "", "meta": {"category": "nopunct", "source_category": "memo"}}
+{"romaji": "kaimono:gyuunyuutamagopan", "output": "買い物：牛乳、卵、パン", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["買い物:牛乳、卵、パン"], "source_category": "memo"}}
+{"romaji": "honwoyondakansouwokaku", "output": "本を読んだ感想を書く。", "left_context": "", "meta": {"category": "nopunct", "source_category": "memo"}}
+{"romaji": "raishuunogetsuyoubinihaishanoyoyaku", "output": "来週の月曜日に歯医者の予約。", "left_context": "", "meta": {"category": "nopunct", "source_category": "memo"}}
+{"romaji": "omoitsuitaaidea:shisenderimokonwosousasuru", "output": "思いついたアイデア：視線でリモコンを操作する。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["思いついたアイデア:視線でリモコンを操作する。"], "source_category": "memo"}}
+{"romaji": "10ji30funnnidenshaninotta", "output": "10時30分に電車に乗った。", "left_context": "", "meta": {"category": "nopunct", "source_category": "memo"}}
+{"romaji": "kibungaochikonderunodesanponideta", "output": "気分が落ち込んでるので散歩に出た。", "left_context": "", "meta": {"category": "nopunct", "source_category": "memo"}}
+{"romaji": "ronbunnnodai2shouwokakiowatta", "output": "論文の第2章を書き終わった。", "left_context": "", "meta": {"category": "nopunct", "source_category": "memo"}}
+{"romaji": "kyouhaosokunarisoudalarasakinitabetwoite", "output": "今日は遅くなりそうだから、先に食べておいて。", "left_context": "", "meta": {"category": "nopunct", "source_category": "typo"}}
+{"romaji": "jikkennnokekkayuuisagamitomeraretq", "output": "実験の結果、有意差が認められた。", "left_context": "", "meta": {"category": "nopunct", "source_category": "typo"}}
+{"romaji": "githibnipushshiteoite", "output": "GitHubにpushしておいて。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["githubにpushしておいて。", "GitHubにプッシュしておいて。"], "source_category": "typo"}}
+{"romaji": "honkenkyuudehashisenkeisokuwomochiitayu-zabiriti-hyoukawookonata", "output": "本研究では視線計測を用いたユーザビリティ評価を行った。", "left_context": "", "meta": {"category": "nopunct", "source_category": "typo"}}
+{"romaji": "ryoukaiarigatpu", "output": "了解！ありがとう。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["了解!ありがとう。"], "source_category": "typo"}}
+{"romaji": "raishuunogetsuyobinihaishanoyoyaku", "output": "来週の月曜日に歯医者の予約。", "left_context": "", "meta": {"category": "nopunct", "source_category": "typo"}}
+{"romaji": "konobranchwomainnimergeshite", "output": "このbranchをmainにmergeして。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["このブランチをmainにマージして。"], "source_category": "tech"}}
+{"romaji": "dockerfilewokoushinshita", "output": "dockerfileを更新した。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["Dockerfileを更新した。"], "source_category": "tech"}}
+{"romaji": "kubernetesnoclusterwotateru", "output": "kubernetesのclusterを立てる。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["Kubernetesのclusterを立てる。", "Kubernetesのクラスタを立てる。"], "source_category": "tech"}}
+{"romaji": "sonocodeworefactorshitekudasai", "output": "そのcodeをrefactorしてください。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["そのコードをリファクタしてください。"], "source_category": "tech"}}
+{"romaji": "ciganaotta", "output": "CIが直った。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["ciが直った。"], "source_category": "tech"}}
+{"romaji": "jsonnoschemawokakunin", "output": "JSONのschemaを確認。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["jsonのschemaを確認。", "JSONのスキーマを確認。"], "source_category": "tech"}}
+{"romaji": "promptwomijikakushitetokenwosetsuyakusuru", "output": "promptを短くして、tokenを節約する。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["プロンプトを短くして、トークンを節約する。"], "source_category": "tech"}}
+{"romaji": "gpunomemorigatarinai", "output": "GPUのmemoryが足りない。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["GPUのメモリが足りない。", "gpuのメモリが足りない。"], "source_category": "tech"}}
+{"romaji": "readmenimodelnosetsumeiwotsuika", "output": "READMEにmodelの説明を追加。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["READMEにモデルの説明を追加。"], "source_category": "tech"}}
+{"romaji": "ashitanomeetingha3jikara", "output": "明日のmeetingは3時から。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["明日のミーティングは3時から。"], "source_category": "tech"}}
+{"romaji": "sushigatabetai", "output": "寿司が食べたい。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["すしが食べたい。"], "source_category": "collision"}}
+{"romaji": "panwokattekite", "output": "パンを買ってきて。", "left_context": "", "meta": {"category": "nopunct", "source_category": "collision"}}
+{"romaji": "tokyoniiku", "output": "東京に行く。", "left_context": "", "meta": {"category": "nopunct", "source_category": "collision"}}
+{"romaji": "animegasuki", "output": "アニメが好き。", "left_context": "", "meta": {"category": "nopunct", "source_category": "collision"}}
+{"romaji": "kokonimotteitte", "output": "ここに持って行って。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["ここに持っていって。"], "source_category": "collision"}}
+{"romaji": "henshuushanimeiruwookutta", "output": "編集者にメールを送った。", "left_context": "", "meta": {"category": "nopunct", "source_category": "collision"}}
+{"romaji": "kongetsunoyosanhamoukatsukatsuda", "output": "今月の予算はもうカツカツだ。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["今月の予算はもうかつかつだ。"], "source_category": "collision"}}
+{"romaji": "itsumoarigatoutasukatteru", "output": "いつもありがとう！助かってる。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["いつもありがとう!助かってる。"], "source_category": "chat"}}
+{"romaji": "sorenarakyoudaijoubudayo", "output": "それなら今日大丈夫だよ。", "left_context": "", "meta": {"category": "nopunct", "source_category": "chat"}}
+{"romaji": "kaerinikonbiniyorukedonanikairu", "output": "帰りにコンビニ寄るけど、何かいる？", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["帰りにコンビニ寄るけど、何かいる?"], "source_category": "chat"}}
+{"romaji": "ohayoukyouhaameda", "output": "おはよう。今日は雨だ。", "left_context": "", "meta": {"category": "nopunct", "source_category": "chat"}}
+{"romaji": "konokenkyuunomokutekihaninchifukawoherasukotodearu", "output": "この研究の目的は、認知負荷を減らすことである。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "jikkenhaikanotejundeokonatta", "output": "実験は以下の手順で行った。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "hikenshanouchi12meigachuudanshita", "output": "被験者のうち12名が中断した。", "left_context": "", "meta": {"category": "nopunct", "source_category": "academic"}}
+{"romaji": "denshanonakadehonwoyonda", "output": "電車の中で本を読んだ。", "left_context": "", "meta": {"category": "nopunct", "source_category": "memo"}}
+{"romaji": "raigetsunoshimekiriwowasurenai", "output": "来月の締め切りを忘れない。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["来月の締切を忘れない。"], "source_category": "memo"}}
+{"romaji": "ashitanokaiginanjikarafakke", "output": "明日の会議、何時からだっけ？", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["明日の会議、何時からだっけ?"], "source_category": "typo"}}
+{"romaji": "shashinnookuttekuretearigatpu", "output": "写真送ってくれてありがとう。", "left_context": "", "meta": {"category": "nopunct", "source_category": "typo"}}
+{"romaji": "konobranchwomainnimergwshite", "output": "このbranchをmainにmergeして。", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["このブランチをmainにマージして。"], "source_category": "typo"}}
+{"romaji": "raishuuhayadumidesu", "output": "来週は休みです。", "left_context": "", "meta": {"category": "nopunct", "source_category": "typo"}}
+{"romaji": "denwashitemoiifesuka", "output": "電話してもいいですか？", "left_context": "", "meta": {"category": "nopunct", "alternatives": ["電話してもいいですか?"], "source_category": "typo"}}
+{"romaji": "jikkennnokekkawobunsekisita", "output": "実験の結果を分析した。", "left_context": "", "meta": {"category": "nopunct", "source_category": "variant"}}
+{"romaji": "kyouhatukareta", "output": "今日は疲れた。", "left_context": "", "meta": {"category": "nopunct", "source_category": "variant"}}

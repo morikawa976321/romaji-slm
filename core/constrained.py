@@ -35,29 +35,23 @@ State = tuple[int, bytes]
 
 PUNCT_MODES = ("auto", "ja", "ascii", "insert")  # insert はラティスでは auto と同じ（挿入は core.pipeline が後段で行う）
 EN_CASE_MODES = ("zenz", "typed", "registered", "auto")
-_AUTO_UPPER_MAX = 4  # en_case=auto: 辞書に無いこの長さ以下の英字列は頭字語とみなして大文字にする（jr→JR、scc→SCC）
 
 
 def _en_surface(seg, en_case: str) -> str:
-    """英語区間1つの表記（en_case が zenz 以外のとき）。Seg.surfaces は（登録表記, 綴り）か（綴り,）。"""
-    if en_case == "typed":
-        return seg.text
-    registered = seg.surfaces[0] if seg.surfaces else seg.text
-    if en_case == "auto" and registered == seg.text and seg.text.isalpha() and len(seg.text) <= _AUTO_UPPER_MAX:
-        from .english import SHORT_OK, lexicon
-        # 読みラティスが英語の弧にしない英字列（辞書に無い、または許可リスト外の2字）は頭字語とみなす。
-        # wordfreq は jr のような略語も小文字で持つので「辞書に無い」だけでは足りない
-        w = seg.text
-        if lexicon().get(w) is None or not (len(w) >= 3 or w in SHORT_OK):
-            return w.upper()
-    return registered
+    """ラティスに置く英語区間の表層。zenz 以外のモードでは打った綴りだけにする。
+
+    登録表記（GitHub）を zenz に採点させると、大文字の分だけその読みの尤度が下がり、読みの比較（打鍵ミスを
+    直すか・英語かかなか）が歪む（user_style で誤補正 4.8%→9.7%、typo 63.6%→54.5%）。表記は選んだ後に
+    core.pipeline.render_en_case が置き換える（REDESIGN.md「選ばれた弧から表記を描画。zenz には出させない」）。
+    """
+    return seg.text
 
 
 class LatticeMatcher:
     def __init__(self, reading: Reading, dic: Dictionary, punct: str = "auto", en_case: str = "zenz"):
         """punct: 記号の表記。auto=全角/半角の両方を候補に残して zenz に選ばせる、ja=全角だけ、ascii=打ったまま。
-        en_case: 英字の表記。zenz=登録表記と綴りの両方を残して zenz に選ばせる、typed=打ったまま、
-        registered=登録表記があればそれ（無ければ打ったまま）、auto=registered に加えて辞書に無い短い英字列を大文字に。
+        en_case: 英字の表記。zenz=登録表記と綴りの両方を残して zenz に選ばせる（旧来の振る舞い）。それ以外
+        （typed / registered / auto）はラティスでは打った綴りだけにし、表記の置き換えは後段（core.pipeline.render_en_case）。
         """
         if punct not in PUNCT_MODES:
             raise ValueError(f"punct は {PUNCT_MODES} のどれか: {punct}")
