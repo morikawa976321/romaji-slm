@@ -161,11 +161,12 @@ def make_converter(name: str, device: str = "cpu", model: str | None = None,
             raise ValueError("hf には --model と --template が要る")
         return HFCausalLM(model, template, device, name=f"hf:{Path(model).name}+{template}")
     if name.startswith("core"):
-        # core / core:k=3 / core:k=3,w=1.0
+        # core / core:k=3 / core:k=3,w=1.0,f=1,b=0（b=0 は k 件を1件ずつ生成。速度の比較用）
         from core.pipeline import CorePipeline
         opts = dict(kv.split("=") for kv in name.partition(":")[2].split(",") if kv)
         return CorePipeline(model or "Miwa-Keita/zenz-v3.1-small", device, k=int(opts.get("k", 5)),
-                            w_read=float(opts.get("w", 4.0)), w_flu=float(opts.get("f", 1.0)), name=name)
+                            w_read=float(opts.get("w", 4.0)), w_flu=float(opts.get("f", 1.0)), name=name,
+                            batched=opts.get("b", "1") != "0")
     if name == "reader+zenz":
         if not model:
             raise ValueError("reader+zenz には --model（読みを書く二段形式のモデル）が要る")

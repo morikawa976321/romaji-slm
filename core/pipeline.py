@@ -20,11 +20,13 @@ from .select import ZenzScorer, fluency
 class CorePipeline:
     # 既定値は user_style・gen_test・AJIMEE で比べて決めた（docs/EVAL.md「完成文の自然さ」。w_read/w_flu の比が効く）
     def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu", k: int = 5,
-                 n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None):
+                 n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None,
+                 batched: bool = True):
         self.dic = Dictionary.load()
         self.scorer = ZenzScorer(model, device)
         self.cz = ConstrainedZenz(self.scorer)
         self.k, self.n_read, self.w_read, self.w_flu = k, n_read, w_read, w_flu
+        self.batched = batched  # k 件の制約付き生成を1バッチで回す（False は1件ずつ。速度の比較用）
         self.name = name or f"core(k={k},w_read={w_read})"
         self.n_params = sum(p.numel() for p in self.scorer.model.parameters())
 
@@ -36,13 +38,17 @@ class CorePipeline:
             # 打鍵を直さない読みも必ず比べる。辞書に無い略語・型番（cdma, jr, scc-0210）は、読みの段では
             # 直す経路のほうが安くなりやすい。直すかどうかは zenz の尤度との比較に任せる
             rs += readings(romaji, n=1, max_edits=0)
-        for r in rs:
-            t0 = time.perf_counter()
-            text, lp, finished = self.cz.decode_scored(r, self.dic, left_context)
+        t0 = time.perf_counter()
+        if self.batched:
+            decoded = self.cz.decode_batch(rs, self.dic, left_context)
+        else:
+            decoded = [self.cz.decode_scored(r, self.dic, left_context) for r in rs]
+        decode_ms = (time.perf_counter() - t0) * 1000
+        for r, (text, lp, finished) in zip(rs, decoded):
             out.append({
                 "text": text, "score": lp - self.w_read * r.cost if finished else float("-inf"),
                 "lm": lp, "read_cost": r.cost, "reading": r.zenz_input(), "edits": [e.detail for e in r.edits],
-                "ms": (time.perf_counter() - t0) * 1000,
+                "ms": decode_ms,  # k 件まとめての生成時間（候補ごとには分けられない）
             })
         if self.w_flu and out:
             # 完成文としての自然さを足す（core.select.fluency）。zenz の変換の確率は読みの良し悪しを比べられないため
