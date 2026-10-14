@@ -90,22 +90,29 @@ class CorePipeline:
     def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu", k: int = 5,
                  n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None,
                  batched: bool = True, punct: str = "auto", en_case: str = "typed",
-                 tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0):
+                 tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None):
         """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
         punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
         tau_comma / tau_end / tau_q: 読点・句点・疑問符の挿入1つあたりに自然さから引く閾値（負なら挿入を促す）。
         既定値は user_style の句読点を打たない版で決めた（EVAL.md「句読点 B」。te=-6 で句点の再現率 0.79・適合率 0.98。
         Wikipedia の断片（gen_test omit_punct）では文末に句点を付けすぎるが、本人の用途は完結した文なのでこちらに寄せた）。
+        backend: 生成と採点の差し替え（core.llama_backend.LlamaBackend）。decode_batch と fluency を持つもの。
+        None なら model を transformers で読む。
         """
         self.dic = Dictionary.load()
-        self.scorer = ZenzScorer(model, device)
-        self.cz = ConstrainedZenz(self.scorer)
+        self.backend = backend
+        if backend is None:
+            self.scorer = ZenzScorer(model, device)
+            self.cz = ConstrainedZenz(self.scorer)
         self.k, self.n_read, self.w_read, self.w_flu = k, n_read, w_read, w_flu
         self.batched = batched  # k 件の制約付き生成を1バッチで回す（False は1件ずつ。速度の比較用）
         self.punct, self.en_case = punct, en_case
         self.tau_comma, self.tau_end, self.tau_q = tau_comma, tau_end, tau_q
         self.name = name or f"core(k={k},w_read={w_read})"
-        self.n_params = sum(p.numel() for p in self.scorer.model.parameters())
+        if backend is not None:
+            self.n_params = backend.n_params
+        else:
+            self.n_params = sum(p.numel() for p in self.scorer.model.parameters())
 
     def candidates(self, romaji: str, left_context: str = "") -> list[dict]:
         """読みの上位 k 件の変換と点数（点数の高い順）。"""
@@ -117,7 +124,9 @@ class CorePipeline:
             rs += readings(romaji, n=1, max_edits=0)
         t0 = time.perf_counter()
         modes = dict(punct=self.punct, en_case=self.en_case)
-        if self.batched:
+        if self.backend is not None:
+            decoded = self.backend.decode_batch(rs, self.dic, left_context, **modes)
+        elif self.batched:
             decoded = self.cz.decode_batch(rs, self.dic, left_context, **modes)
         else:
             decoded = [self.cz.decode_scored(r, self.dic, left_context, **modes) for r in rs]
@@ -131,10 +140,15 @@ class CorePipeline:
             })
         if self.w_flu and out:
             # 完成文としての自然さを足す（core.select.fluency）。zenz の変換の確率は読みの良し悪しを比べられないため
-            for c, f in zip(out, fluency(self.scorer, [c["text"] for c in out], left_context)):
+            for c, f in zip(out, self._fluency([c["text"] for c in out], left_context)):
                 c["fluency"] = f
                 c["score"] += self.w_flu * f
         return sorted(out, key=lambda c: -c["score"])
+
+    def _fluency(self, texts: list[str], left_context: str) -> list[float]:
+        if self.backend is not None:
+            return self.backend.fluency(texts, left_context)
+        return fluency(self.scorer, texts, left_context)
 
     def insert_punct(self, text: str, bounds: tuple[int, ...], left_context: str = "") -> tuple[str, tuple[int, ...]]:
         """句読点 B: punct_variants の候補を完成文の自然さで比べ、閾値を引いて最良のものを返す。
@@ -147,7 +161,7 @@ class CorePipeline:
         tau_end = {"": 0.0, "。": self.tau_end, "？": self.tau_q}
 
         def pick(cands):
-            fl = fluency(self.scorer, [v[0] for v in cands], left_context)
+            fl = self._fluency([v[0] for v in cands], left_context)
             return max(zip(cands, fl), key=lambda vf: vf[1] - self.tau_comma * vf[0][1] - tau_end[vf[0][2]])[0]
 
         # 2 段で選ぶ（まず文末の 3 候補、次にその文末で読点の位置）。全組合せ（3 × 切れ目の数）を1バッチで採点すると

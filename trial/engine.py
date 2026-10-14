@@ -198,7 +198,7 @@ class MockEngine:
             return {"text": text, "ms": ms, "finished": False, "candidates": [], "error": UNFINISHED}
         out = _to_hiragana(text)
         # 比べる軸の設定どうしで見た目が変わるように、config の値ごとに規則を変える
-        if config.get("k", 5) < 5:
+        if config.get("k", 5) < 5 or "xsmall" in str(config.get("model", "")):
             out = "".join(chr(ord(ch) + 0x60) if "ぁ" <= ch <= "ゖ" else ch for ch in out)
         if config.get("punct") == "ja" and not out.endswith(("。", "？", "！")):
             out += "。"
