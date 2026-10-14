@@ -45,6 +45,9 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     }
 }
 
+# uv の利用者設定で Python の自動取得が manual になっていても、ここでは取る（開発機の空の環境で
+# 「No interpreter found for Python >=3.12 in managed installations」で止まった。2026-10-15）
+$env:UV_PYTHON_DOWNLOADS = 'automatic'
 $env:TRIAL_LAUNCH_T0 = "$t0"
 $env:TRIAL_LAUNCH_FIRST = if (Test-Path (Join-Path $Root '.venv')) { '0' } else { '1' }
 $env:PYTHONUTF8 = '1'
@@ -68,6 +71,7 @@ if ((Test-Path (Join-Path $Hf 'hub\models--Miwa-Keita--zenz-v3.1-small')) -and
 }
 
 Write-Host '[3/3] サーバを起動します。ブラウザが開きます。'
+Write-Host '      開かないときは、下に出る http://127.0.0.1:... をブラウザのアドレス欄に貼る（trial\out\url.txt にも書かれる）。'
 Write-Host '      このウィンドウを閉じると終了します。'
 cmd /c "uv run --no-sync python -m trial.server --open 2>> ""$Log"""  # 標準出力（URL など）は画面に出す
 if ($LASTEXITCODE -ne 0) {

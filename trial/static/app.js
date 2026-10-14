@@ -1,21 +1,36 @@
 "use strict";
-// romaji-slm 体験版のページ。サーバは状態を持たないので、左文脈と画面の状態はここで持つ。
-// 記録は選択のたびに /api/record に送る（同じ試行は同じ id で、最後の行が最終の状態）。
+// romaji-slm 体験版（V0.2）のステップ式ページ。docs/TRIAL.md「画面」。
+// 画面の状態は記録（kind=compare/answer/feel）から組み立てる。記録は押した時点で /api/record に送り、
+// 保存の完了を待ってから次へ進む。送れなかった記録は localStorage に残し、結果ブロックに *未保存 で出す。
 
 const $ = (id) => document.getElementById(id);
 const CTX_MAX = 60;
-const LABELS = "ABCDEFGH";
+const RETRY_MS = [500, 1000, 2000];
+const STEP_NAMES = ["準備", "句読点", "英字", "体感", "結果"];
 
-let info = null;
-let axisId = null;
-let singleId = null;
-let exampleIdx = 0;
-let trial = null; // 比べる: いま表示中の試行
-let ctxStart = 0; // 打ってみる: 確定欄のこの位置より後ろだけを左文脈にする
+const S = {
+  info: null, cfg: null, ex: null, session: null,
+  recs: {},        // id → 記録（最新の版）
+  pending: [],     // サーバに保存できていない記録の id（送る順）
+  started: false,  // 準備の画面で「はじめる」を押した
+  step: 0,
+  measures: [],
+  busy: null,      // 変換中の例のキー
+  measuring: false,
+  stale: false,    // サーバが再起動してセッションが変わった
+};
 
-function newId() {
-  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+// ---- 小物 ------------------------------------------------------------------
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children) if (c !== null && c !== undefined) e.append(c);
+  return e;
 }
 
 function shuffle(xs) {
@@ -27,327 +42,526 @@ function shuffle(xs) {
   return a;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+class ApiError extends Error {
+  constructor(msg, status) { super(msg); this.status = status; }
+}
+
 async function api(path, body) {
   const opt = body === undefined ? {} : {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   };
-  const r = await fetch(path, opt);
+  let r;
+  try {
+    r = await fetch(path, opt);
+  } catch (e) {
+    throw new ApiError(`サーバにつながらない（黒いウィンドウが閉じていないか確かめてください）: ${e.message}`, 0);
+  }
   const ct = r.headers.get("Content-Type") || "";
   const data = ct.includes("json") ? await r.json() : await r.text();
-  if (!r.ok) throw new Error((data && data.error) || `HTTP ${r.status}`);
+  if (r.status === 409) markStale();
+  if (!r.ok) throw new ApiError((data && data.error) || `HTTP ${r.status}`, r.status);
   return data;
 }
 
 function setStatus(id, text, isError) {
-  const el = $(id);
-  el.textContent = text;
-  el.classList.toggle("error", !!isError);
+  const e = $(id);
+  e.textContent = text || "";
+  e.classList.toggle("error", !!isError);
 }
 
-function el(tag, attrs, ...children) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})) {
-    if (k === "class") e.className = v;
-    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
-    else e.setAttribute(k, v);
+function banner(text, kind, action) {
+  const b = $("banner");
+  b.replaceChildren();
+  if (!text) { b.classList.add("hidden"); return; }
+  b.append(text);
+  if (action) b.append(" ", el("button", { onclick: action.fn }, action.label));
+  b.className = `banner ${kind || ""}`;
+}
+
+function markStale() {
+  S.stale = true;
+  banner("サーバが再起動しました。ページを再読込してください（今回の選択は新しいセッションとして始まります）。", "error",
+    { label: "再読込", fn: () => location.reload() });
+}
+
+// ---- 保存（localStorage と /api/record） ------------------------------------
+const lsKey = () => `romaji-slm-trial:${S.session}`;
+
+function saveLocal() {
+  try {
+    localStorage.setItem(lsKey(), JSON.stringify({ recs: S.recs, pending: S.pending, started: S.started, step: S.step }));
+  } catch (_) { /* 使えないブラウザでもサーバ側の記録で続けられる */ }
+}
+
+function loadLocal() {
+  try {
+    return JSON.parse(localStorage.getItem(lsKey()) || "null");
+  } catch (_) {
+    return null;
   }
-  for (const c of children) e.append(c);
-  return e;
 }
 
-async function copyText(text, statusId) {
+async function postWithRetry(path, body) {
+  let last;
+  for (let i = 0; i <= RETRY_MS.length; i++) {
+    try {
+      return await api(path, body);
+    } catch (e) {
+      last = e;
+      if (e.status === 409 || e.status === 400 || i === RETRY_MS.length) break;
+      await sleep(RETRY_MS[i]);
+    }
+  }
+  throw last;
+}
+
+let flushing = Promise.resolve(true);
+
+function flushPending() {
+  // 送る順を守るため、前の送信が終わってから次を送る
+  flushing = flushing.then(async () => {
+    while (S.pending.length) {
+      const id = S.pending[0];
+      try {
+        await postWithRetry("/api/record", S.recs[id]);
+      } catch (e) {
+        if (!S.stale) {
+          banner(`保存に失敗しました（${e.message}）。選択はこのブラウザに残しているので、結果ブロックにも出ます。`, "error",
+            { label: "もう一度保存", fn: () => flushPending().then((ok) => ok && banner("")) });
+        }
+        return false;
+      }
+      S.pending.shift();
+      saveLocal();
+    }
+    return true;
+  });
+  return flushing;
+}
+
+async function save(rec) {
+  const prev = S.recs[rec.id];
+  const r = { ...rec, session: S.session, rev: ((prev && prev.rev) || 0) + 1, client_time: new Date().toISOString() };
+  S.recs[r.id] = r;
+  if (!S.pending.includes(r.id)) S.pending.push(r.id);
+  saveLocal();
+  return flushPending();
+}
+
+// ---- 記録から読む ------------------------------------------------------------
+function answers() {
+  const a = {};
+  for (const r of Object.values(S.recs)) if (r.kind === "answer") a[r.question] = r.value;
+  return a;
+}
+
+function option(q, value) {
+  return S.cfg.questions[q].options.find((o) => o.value === value) || null;
+}
+
+function comboId(base) {
+  // 未回答は最後の選択肢（まだ決められない＝暫定値）の値（trial/summary.py の combo_id と同じ）
+  const a = answers();
+  const parts = [base];
+  for (const key of ["punct", "en_case"]) {
+    const opts = S.cfg.questions[key].options;
+    parts.push((option(key, a[key]) || opts[opts.length - 1])[key]);
+  }
+  return parts.join("/");
+}
+
+const withBase = (cid, base) => [base, ...cid.split("/").slice(1)].join("/");
+
+const cmpId = (stepId, i) => `cmp-${stepId}-${i}`;
+
+function cmpDone(r) {
+  return !!(r && r.choice && (r.choice !== "neither" || r.reason));
+}
+
+function feelRecs() {
+  return Object.values(S.recs).filter((r) => r.kind === "feel").sort((a, b) => a.seq - b.seq);
+}
+
+function committedText() {
+  return feelRecs().filter((r) => r.source !== "speed").map((r) => r.text).join("");
+}
+
+function stepDone(n) {
+  const a = answers();
+  if (n === 0) return S.started || Object.keys(S.recs).length > 0;
+  if (n === 1) return "punct" in a;
+  if (n === 2) return "en_case" in a;
+  if (n === 3) return "use" in a;
+  return false;
+}
+
+function firstOpenStep() {
+  for (let n = 0; n < 4; n++) if (!stepDone(n)) return n;
+  return 4;
+}
+
+// ---- 画面の切り替え ------------------------------------------------------------
+function goStep(n) {
+  S.step = Math.max(0, Math.min(4, n));
+  saveLocal();
+  render();
+  window.scrollTo(0, 0);
+  if (S.step === 4) runMeasure();
+}
+
+function render() {
+  for (let n = 0; n <= 4; n++) $(`step-${n}`).classList.toggle("hidden", n !== S.step);
+  $("stepper").replaceChildren(...STEP_NAMES.map((name, n) => el("li", {
+    class: [n === S.step ? "current" : "", stepDone(n) ? "done" : ""].join(" "),
+  }, `${n === 0 ? "" : n + ". "}${name}${stepDone(n) && n !== S.step ? " ✓" : ""}`)));
+  $("back").classList.toggle("hidden", S.step === 0);
+  const canNext = S.step >= 1 && S.step < 4 && stepDone(S.step);
+  $("next").classList.toggle("hidden", !canNext);
+  if (S.step === 1) renderCompare("punct", $("cmp-punct"), $("q-punct"));
+  if (S.step === 2) renderCompare("en_case", $("cmp-en_case"), $("q-en_case"));
+  if (S.step === 3) renderFeel();
+}
+
+// ---- ステップ 1・2: 比較 -----------------------------------------------------
+function renderCompare(stepId, box, qbox) {
+  const step = S.cfg.steps[stepId];
+  const exs = S.ex[stepId];
+  const two = step.configs.length === 2;
+  box.replaceChildren();
+  let allDone = true;
+  for (let i = 0; i < exs.length; i++) {
+    const r = S.recs[cmpId(stepId, i)];
+    box.append(renderExample(stepId, step, exs, i, r, two));
+    if (!cmpDone(r)) { allDone = false; break; }
+  }
+  qbox.replaceChildren();
+  if (allDone) qbox.append(renderQuestion(step.question));
+}
+
+function renderExample(stepId, step, exs, i, r, two) {
+  const key = cmpId(stepId, i);
+  const ex = exs[i];
+  const head = el("div", { class: "ex-head" }, `例 ${i + 1}/${exs.length}`, ex.kind ? el("span", { class: "kind" }, `（${ex.kind}）`) : null);
+  const input = el("div", { class: "ex-input" }, ex.romaji);
+  const block = el("div", { class: `example${cmpDone(r) ? " done" : ""}`, id: `ex-${key}` }, head, input);
+  const cards = r && r.cards;
+  const allFailed = cards && cards.every((c) => c.error);
+  if (!cards || allFailed) {
+    const busy = S.busy === key;
+    block.append(el("div", { class: "row" }, el("button", {
+      class: "big primary", disabled: busy || !!S.busy,
+      onclick: () => convertExample(stepId, i),
+    }, busy ? "変換中…" : allFailed ? "もう一度変換" : "この例を変換")));
+    if (busy) block.append(el("p", { class: "status" }, "変換しています（数秒かかることがあります）"));
+  }
+  block.append(el("p", { class: "status error", id: `err-${key}` }));
+  if (!cards) return block;
+
+  const grid = el("div", { class: "cards" });
+  for (const c of cards) {
+    const chosen = r.choice === c.config_id;
+    grid.append(el("div", { class: `card${chosen ? " best" : ""}` },
+      el("div", { class: "label" }, c.label),
+      el("div", { class: `out${c.error ? " error" : ""}` }, c.text),
+      c.error ? el("div", { class: "err" }, `変換できませんでした: ${c.error}`) : null,
+      el("button", { class: `pick${chosen ? " selected" : ""}`, onclick: () => choose(stepId, i, c.config_id) }, "こちらがいい")));
+  }
+  block.append(grid);
+  block.append(el("div", { class: "row center" },
+    el("button", { class: r.choice === "all_ok" ? "selected" : "", onclick: () => choose(stepId, i, "all_ok") },
+      two ? "どちらも問題ない" : "どれも問題ない"),
+    el("button", { class: `fatal${r.choice === "neither" ? " selected" : ""}`, onclick: () => choose(stepId, i, "neither") },
+      two ? "どちらも使えない" : "どれも使えない")));
+  if (r.choice === "neither") {
+    block.append(el("div", { class: "row center reasons" }, el("span", {}, "使えない理由:"),
+      ...S.cfg.reasons.map((x) => el("button", {
+        class: r.reason === x.value ? "selected" : "", onclick: () => choose(stepId, i, "neither", x.value),
+      }, x.label))));
+  }
+  return block;
+}
+
+async function convertExample(stepId, i) {
+  const key = cmpId(stepId, i);
+  const step = S.cfg.steps[stepId];
+  const ex = S.ex[stepId][i];
+  S.busy = key;
+  render();
+  try {
+    // 実行順も並びも毎回入れ替える（待ち時間や位置から設定を当てられないように）
+    const res = await api("/api/convert", { text: ex.romaji, left_context: "", config_ids: shuffle(step.configs) });
+    const cards = shuffle(res.results).map((x, j) => ({
+      label: `案${j + 1}`, config_id: x.config_id, text: x.text, ms: x.ms, error: x.error,
+    }));
+    S.busy = null;
+    await save({ kind: "compare", id: key, step: stepId, index: i, total: S.ex[stepId].length, input: ex.romaji,
+      cards, choice: null, reason: null });
+    render();
+  } catch (e) {
+    S.busy = null;
+    render();
+    setStatus(`err-${key}`, `変換に失敗しました: ${e.message}`, true);
+  }
+}
+
+async function choose(stepId, i, choice, reason) {
+  const key = cmpId(stepId, i);
+  const r = S.recs[key];
+  const wasDone = cmpDone(r);
+  render();
+  setStatus(`err-${key}`, "保存しています…");
+  await save({ ...r, choice, reason: reason || null });
+  render();
+  // 新しく決まったときだけ次の例（なければ質問カード）へ送る
+  if (!wasDone && cmpDone(S.recs[key])) {
+    const next = $(`ex-${cmpId(stepId, i + 1)}`) || $(`q-${S.cfg.steps[stepId].question}`);
+    if (next) next.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+// ---- 質問カード ---------------------------------------------------------------
+function renderQuestion(qid) {
+  const q = S.cfg.questions[qid];
+  const cur = answers()[qid];
+  return el("div", { class: "qcard" },
+    el("p", { class: "qtext" }, q.text),
+    el("div", { class: "row" }, ...q.options.map((o) => el("button", {
+      class: `big${cur === o.value ? " selected" : ""}`, onclick: () => answer(qid, o.value),
+    }, o.label))),
+    q.note ? el("p", { class: "note" }, q.note) : null,
+    el("p", { class: "status", id: `qs-${qid}` }));
+}
+
+async function answer(qid, value) {
+  setStatus(`qs-${qid}`, "保存しています…");
+  await save({ kind: "answer", id: `answer-${qid}`, question: qid, value });
+  if (qid === "en_case") {
+    // 体感と計測で使う組合せを先に作って空回ししておく（応答は待たない）
+    const cid = comboId(S.cfg.feel_base);
+    api("/api/prepare", { config_ids: [cid, withBase(cid, S.cfg.speed_base)] }).catch(() => {});
+  }
+  goStep(S.step + 1);
+}
+
+// ---- ステップ 3: 体感 -----------------------------------------------------------
+function comboText() {
+  const a = answers();
+  const part = (key) => {
+    const q = S.cfg.questions[key];
+    const o = option(key, a[key]);
+    const fallback = q.options[q.options.length - 1];
+    const chosen = o || fallback;
+    const set = q.options.find((x) => !x.provisional && x[key] === chosen[key]);
+    return chosen.provisional || !o ? `${set ? set.label : chosen[key]}（暫定）` : chosen.label;
+  };
+  return `この設定で変換します — 句読点: ${part("punct")} ／ 英字: ${part("en_case")}`;
+}
+
+function feelInput(i) {
+  const form = comboId(S.cfg.feel_base).split("/")[1] === "insert" ? "nopunct" : "punct";
+  return S.ex.feel[i][form];
+}
+
+function renderFeel() {
+  $("feel-combo").textContent = comboText();
+  const recs = feelRecs();
+  const box = $("feel-examples");
+  box.replaceChildren();
+  let examplesDone = true;
+  for (let i = 0; i < S.ex.feel.length; i++) {
+    const src = `example${i + 1}`;
+    const done = recs.some((r) => r.source === src);
+    const busy = S.busy === src;
+    box.append(el("div", { class: `example${done ? " done" : ""}` },
+      el("div", { class: "ex-head" }, i === 0 ? "例 1" : `例 ${i + 1}（前の文の続き。左文脈あり）`),
+      el("div", { class: "ex-input" }, feelInput(i)),
+      done ? null : el("div", { class: "row" }, el("button", {
+        class: "big primary", disabled: !!S.busy, onclick: () => convertFeel(feelInput(i), src),
+      }, busy ? "変換中…" : "変換"))));
+    if (!done) { examplesDone = false; break; }
+  }
+  $("committed").value = committedText();
+  $("feel-more").classList.toggle("hidden", !examplesDone);
+  $("own-convert").disabled = !!S.busy;
+  $("try-speed").disabled = !!S.busy || !recs.some((r) => r.source !== "speed");
+  $("feel-history").replaceChildren(...recs.map((r) => el("li", {},
+    el("span", { class: "in" }, r.input),
+    el("span", { class: `res${r.error ? " error" : ""}` }, r.text),
+    el("span", { class: "ms" }, `${Math.round(r.ms)} ms${r.source === "speed" ? "（速度優先 xsmall）" : ""}`),
+    r.error ? el("span", { class: "error" }, ` ${r.error}`) : null)));
+  $("q-use").replaceChildren();
+  if (examplesDone) $("q-use").append(renderQuestion("use"));
+}
+
+async function convertFeel(text, source) {
+  if (S.busy) return;
+  text = text.trim();
+  const recs = feelRecs();
+  let cid = comboId(S.cfg.feel_base);
+  let ctx = committedText().slice(-CTX_MAX);
+  if (source === "speed") {
+    // 直前に変換した文を、同じ左文脈で速度優先の設定にかける
+    const last = recs.filter((r) => r.source !== "speed").pop();
+    if (!last) return;
+    text = last.input;
+    ctx = last.left_context;
+    cid = withBase(last.config_id, S.cfg.speed_base);
+  }
+  if (!text) return;
+  S.busy = source;
+  setStatus("feel-status", "変換しています…");
+  render();
+  try {
+    const res = await api("/api/convert", { text, left_context: ctx, config_ids: [cid] });
+    const x = res.results[0];
+    const seq = recs.length ? recs[recs.length - 1].seq + 1 : 1;
+    S.busy = null;
+    await save({ kind: "feel", id: `feel-${seq}`, seq, source, config_id: cid, input: text, left_context: ctx,
+      text: x.text, ms: x.ms, error: x.error });
+    setStatus("feel-status", x.error ? `変換できませんでした（入力をそのまま残しました）: ${x.error}` : "", !!x.error);
+    if (source === "own") $("own-input").value = "";
+  } catch (e) {
+    S.busy = null;
+    setStatus("feel-status", `変換に失敗しました: ${e.message}`, true);
+  }
+  render();
+}
+
+// ---- ステップ 4: 計測と結果 -----------------------------------------------------
+function measurePlan() {
+  const fin = comboId(S.cfg.feel_base);
+  const fast = withBase(fin, S.cfg.speed_base);
+  const m = S.ex.measure;
+  return [
+    ...m.final.map((text, index) => ({ phase: "final", config_id: fin, index, text })),
+    ...m.speed.map((text, index) => ({ phase: "speed", config_id: fin, index, text })),
+    ...m.speed.map((text, index) => ({ phase: "speed", config_id: fast, index, text })),
+  ];
+}
+
+const sameItem = (a, b) => a.phase === b.phase && a.config_id === b.config_id && a.index === b.index;
+
+async function runMeasure() {
+  if (S.measuring) return;
+  S.measuring = true;
+  const plan = measurePlan();
+  const todo = plan.filter((p) => !S.measures.some((m) => sameItem(m, p) && m.input === p.text));
+  const bar = $("measure-progress");
+  bar.max = plan.length;
+  bar.value = plan.length - todo.length;
+  bar.classList.remove("hidden");
+  $("measure-lead").textContent = "短い計測をしています。そのままお待ちください（操作は要りません）。";
+  const warmed = new Set();
+  try {
+    for (const p of todo) {
+      if (S.step !== 4) return; // 戻ったら止める（続きは次に開いたとき）
+      const label = p.config_id.split("/")[0];
+      if (!warmed.has(p.config_id)) {
+        setStatus("measure-status", `計測の準備（${label}）…`);
+        await postWithRetry("/api/measure", { session: S.session, ...p, warmup: true });
+        warmed.add(p.config_id);
+      }
+      setStatus("measure-status", `計測中 ${bar.value + 1}/${plan.length}（${label}）`);
+      const res = await postWithRetry("/api/measure", { session: S.session, ...p });
+      S.measures.push({ ...p, input: p.text, ...res.result });
+      bar.value += 1;
+    }
+    setStatus("measure-status", `計測が終わりました（${plan.length} 文）。`);
+    $("measure-lead").textContent = "終わりました。「結果をコピー」を押して、そのまま貼って返してください。";
+  } catch (e) {
+    setStatus("measure-status", `計測に失敗しました: ${e.message}（結果ブロックには計測できた分だけ出ます）`, true);
+  } finally {
+    S.measuring = false;
+  }
+  if (S.step === 4) await showSummary();
+}
+
+async function showSummary() {
+  await flushPending();
+  try {
+    const text = await api("/api/summary", { session: S.session, client_records: Object.values(S.recs) });
+    $("summary").value = text;
+  } catch (e) {
+    $("summary").value = `結果ブロックを作れませんでした: ${e.message}\n\n` + JSON.stringify(Object.values(S.recs));
+  }
+  $("result-box").classList.remove("hidden");
+}
+
+async function copySummary() {
+  const text = $("summary").value;
   try {
     await navigator.clipboard.writeText(text);
   } catch (_) {
-    const t = el("textarea", {});
-    t.value = text;
-    document.body.append(t);
-    t.select();
+    $("summary").select();
     document.execCommand("copy");
-    t.remove();
   }
-  setStatus(statusId, "コピーしました");
+  setStatus("copy-status", "コピーしました。貼って返してください。");
 }
 
-function record(obj) {
-  return api("/api/record", obj).catch((e) => setStatus("cmp-status", `記録に失敗: ${e.message}`, true));
-}
-
-// ---- タブ ---------------------------------------------------------------
-function showTab(name) {
-  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${name}`));
-  if (name === "summary") refreshSummary();
-  if (name === "compare") $("cmp-input").focus();
-  if (name === "try") $("try-input").focus();
-}
-
-// ---- 起動・読み込み待ち ------------------------------------------------
-async function loadInfo() {
-  info = await api("/api/info");
-  $("version").textContent = `${info.version}（${info.engine.name}）`;
-  const b = $("banner");
-  if (info.load_error) {
-    b.textContent = `モデルの読み込みに失敗しました: ${info.load_error}（変換するとエラーが出ます）`;
-    b.className = "banner error";
-  } else if (!info.ready) {
-    b.textContent = "モデルを読み込み中です。終わるまで変換は待たされます…";
-    b.className = "banner";
-    setTimeout(loadInfo, 1000);
-  } else {
-    b.className = "banner hidden";
-  }
-}
-
-// ---- 比べる -------------------------------------------------------------
-function renderAxes() {
-  const box = $("axes");
-  box.replaceChildren();
-  for (const a of info.configs.axes) {
-    box.append(el("button", {
-      class: a.id === axisId ? "selected" : "",
-      onclick: () => { axisId = a.id; renderAxes(); clearCards(); $("cmp-input").focus(); },
-    }, a.label));
-  }
-  const axis = currentAxis();
-  const ignored = new Set();
-  for (const c of axis.configs) for (const k of info.engine.ignored[c] || []) ignored.add(k);
-  $("axis-note").textContent = ignored.size
-    ? `注意: この版の変換コアは ${[...ignored].join(", ")} の設定をまだ受け付けません。この軸のカードは同じ動作になることがあります。`
-    : "";
-}
-
-function currentAxis() {
-  return info.configs.axes.find((a) => a.id === axisId);
-}
-
-function clearCards() {
-  trial = null;
-  $("cards").replaceChildren();
-  $("all-ok").classList.add("hidden");
-  setStatus("cmp-status", "");
-}
-
-async function compareConvert() {
-  const text = $("cmp-input").value.trim();
-  if (!text) return;
-  const axis = currentAxis();
-  $("cmp-convert").disabled = true;
-  setStatus("cmp-status", `変換中…（${axis.configs.length} 設定を順に実行）`);
-  try {
-    const res = await api("/api/convert", { text, left_context: "", config_ids: axis.configs });
-    const cards = shuffle(res.results).map((r, i) => ({
-      label: LABELS[i], config_id: r.config_id, text: r.text, ms: r.ms, error: r.error,
-    }));
-    trial = { kind: "compare", id: newId(), axis: axis.id, input: text, left_context: "", cards,
-              best: null, fatal: [], all_ok: false, total_ms: res.total_ms };
-    renderCards();
-    setStatus("cmp-status", `待ち時間 合計 ${Math.round(res.total_ms)} ms。いちばん良いもの・致命的なものを押してください。`);
-  } catch (e) {
-    setStatus("cmp-status", `変換できませんでした: ${e.message}`, true);
-  } finally {
-    $("cmp-convert").disabled = false;
-  }
-}
-
-function renderCards() {
-  const box = $("cards");
-  box.replaceChildren();
-  for (const c of trial.cards) {
-    const out = el("div", { class: "out" + (c.error ? " error" : "") }, c.text);
-    const card = el("div", { class: "card" + (trial.best === c.label ? " best" : "") },
-      el("div", { class: "head" },
-        el("span", { class: "label" }, c.label),
-        el("span", { class: "ms" }, `${Math.round(c.ms)} ms`)),
-      out);
-    if (c.error) card.append(el("div", { class: "err" }, `変換失敗（原入力のまま）: ${c.error}`));
-    card.append(el("div", { class: "btns" },
-      el("button", { class: "pick" + (trial.best === c.label ? " selected" : ""), onclick: () => choose("best", c.label) },
-        "一番いい"),
-      el("button", { class: "fatal" + (trial.fatal.includes(c.label) ? " selected" : ""),
-                     onclick: () => choose("fatal", c.label) }, "致命的")));
-    box.append(card);
-  }
-  const ok = $("all-ok");
-  ok.classList.remove("hidden");
-  ok.classList.toggle("selected", trial.all_ok);
-}
-
-function choose(kind, label) {
-  if (!trial) return;
-  if (kind === "best") {
-    trial.best = trial.best === label ? null : label;
-    trial.all_ok = false;
-  } else if (kind === "fatal") {
-    const i = trial.fatal.indexOf(label);
-    if (i >= 0) trial.fatal.splice(i, 1); else trial.fatal.push(label);
-    trial.all_ok = false;
-  } else {
-    trial.all_ok = !trial.all_ok;
-    if (trial.all_ok) { trial.best = null; trial.fatal = []; }
-  }
-  renderCards();
-  const { total_ms, ...rec } = trial;
-  record(rec).then(() => setStatus("cmp-status", "記録しました。次の文をどうぞ（選び直しもできます）。"));
-  $("cmp-input").value = "";
-  $("cmp-input").focus();
-}
-
-function putExample() {
-  const ex = info.bench_sentences.slice(0, 10);
-  if (!ex.length) return;
-  $("cmp-input").value = ex[exampleIdx % ex.length].romaji;
-  exampleIdx++;
-  $("cmp-input").focus();
-}
-
-// ---- 打ってみる ---------------------------------------------------------
-function renderSingles() {
-  const box = $("singles");
-  box.replaceChildren();
-  for (const [cid, c] of Object.entries(info.configs.configs)) {
-    box.append(el("button", {
-      class: cid === singleId ? "selected" : "",
-      onclick: () => { singleId = cid; renderSingles(); $("try-input").focus(); },
-    }, c.label || cid));
-  }
-}
-
-function leftContext() {
-  const v = $("committed").value;
-  if (ctxStart > v.length) ctxStart = v.length;
-  return v.slice(ctxStart).slice(-CTX_MAX);
-}
-
-function renderCtx() {
-  const c = leftContext();
-  $("ctx-view").textContent = c ? `左文脈: …${c.slice(-20)}` : "左文脈: なし";
-}
-
-async function tryConvert() {
-  const text = $("try-input").value.trim();
-  if (!text) return;
-  const cid = singleId;
-  const ctx = leftContext();
-  $("try-convert").disabled = true;
-  setStatus("try-status", "変換中…");
-  try {
-    const res = await api("/api/convert", { text, left_context: ctx, config_ids: [cid] });
-    const r = res.results[0];
-    const rec = { kind: "single", id: newId(), config_id: cid, input: text, left_context: ctx,
-                  text: r.text, ms: r.ms, error: r.error, verdict: null };
-    $("committed").value += r.text;
-    $("try-input").value = "";
-    addHistory(rec);
-    record(rec);
-    setStatus("try-status", r.error ? `変換失敗（原入力のまま追記）: ${r.error}` : `${Math.round(r.ms)} ms`, !!r.error);
-  } catch (e) {
-    setStatus("try-status", `変換できませんでした: ${e.message}`, true);
-  } finally {
-    $("try-convert").disabled = false;
-    renderCtx();
-    $("try-input").focus();
-  }
-}
-
-function addHistory(rec) {
-  const used = el("button", {}, "使えた");
-  const fixed = el("button", {}, "直した");
-  const set = (v) => {
-    rec.verdict = rec.verdict === v ? null : v;
-    used.classList.toggle("selected", rec.verdict === "used");
-    fixed.classList.toggle("selected", rec.verdict === "fixed");
-    record(rec);
-    $("try-input").focus();
-  };
-  used.addEventListener("click", () => set("used"));
-  fixed.addEventListener("click", () => set("fixed"));
-  const label = (info.configs.configs[rec.config_id] || {}).label || rec.config_id;
-  const li = el("li", {},
-    el("div", { class: "line" },
-      el("span", { class: "res" + (rec.error ? " error" : "") }, rec.text),
-      el("span", { class: "ms" }, `${Math.round(rec.ms)} ms・${label}`),
-      used, fixed),
-    el("div", { class: "in" }, rec.input + (rec.error ? `（失敗: ${rec.error}）` : "")));
-  $("history").prepend(li);
-}
-
-// ---- まとめ -------------------------------------------------------------
-async function refreshSummary() {
-  try {
-    $("summary").value = await api("/api/summary");
-    setStatus("summary-status", "");
-  } catch (e) {
-    setStatus("summary-status", `まとめを取れませんでした: ${e.message}`, true);
-  }
-}
-
-async function runBench() {
-  const ids = [...new Set(info.configs.axes.flatMap((a) => a.configs))];
-  const prog = $("bench-progress");
-  const btn = $("bench-run");
-  btn.disabled = true;
-  prog.classList.remove("hidden");
-  prog.max = ids.length;
-  const t0 = Date.now();
-  let cur = "";
-  let done = 0;
-  const tick = () => setStatus("bench-status",
-    `${done}/${ids.length} 設定済み。計測中: ${cur}（経過 ${Math.round((Date.now() - t0) / 1000)} 秒）`);
-  const timer = setInterval(tick, 1000);
-  try {
-    for (const cid of ids) {
-      cur = cid;
-      tick();
-      await api("/api/bench", { config_ids: [cid] });
-      done++;
-      prog.value = done;
+// ---- 起動 ----------------------------------------------------------------------
+async function waitReady() {
+  for (;;) {
+    try {
+      const info = await api("/api/info");
+      if (info.session !== S.session) { markStale(); return; }
+      if (info.ready) {
+        if (info.load_error) {
+          banner(`モデルの読み込みに失敗しました: ${info.load_error}（変換は失敗として記録されます）`, "error");
+        }
+        const ignored = Object.entries(info.engine.ignored || {}).filter(([, v]) => v.length);
+        if (ignored.length) banner(`注意: 変換コアが受け付けない設定項目があります: ${ignored.map(([k, v]) => `${k}(${v})`).join(", ")}`);
+        setStatus("ready-status", "準備できました。");
+        $("start").disabled = false;
+        return;
+      }
+    } catch (e) {
+      setStatus("ready-status", `サーバの応答を待っています… ${e.message}`, true);
     }
-    setStatus("bench-status", `完了（${Math.round((Date.now() - t0) / 1000)} 秒）`);
-  } catch (e) {
-    setStatus("bench-status", `計測が止まりました: ${e.message}`, true);
-  } finally {
-    clearInterval(timer);
-    btn.disabled = false;
-    refreshSummary();
+    await sleep(1000);
   }
-}
-
-// ---- 配線 ---------------------------------------------------------------
-function onEnter(id, fn) {
-  $(id).addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); fn(); }
-  });
 }
 
 async function init() {
-  document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
-  $("cmp-convert").addEventListener("click", compareConvert);
-  $("cmp-example").addEventListener("click", putExample);
-  $("all-ok").addEventListener("click", () => choose("all_ok"));
-  onEnter("cmp-input", compareConvert);
-  $("try-convert").addEventListener("click", tryConvert);
-  onEnter("try-input", tryConvert);
-  $("try-copy").addEventListener("click", () => copyText($("committed").value, "try-status"));
-  $("try-reset").addEventListener("click", () => { ctxStart = $("committed").value.length; renderCtx(); });
-  $("committed").addEventListener("input", renderCtx);
-  $("bench-run").addEventListener("click", runBench);
-  $("summary-copy").addEventListener("click", () => copyText($("summary").value, "summary-status"));
-  $("summary-refresh").addEventListener("click", refreshSummary);
-  try {
-    await loadInfo();
-  } catch (e) {
-    const b = $("banner");
-    b.textContent = `サーバにつながりません: ${e.message}`;
-    b.className = "banner error";
-    return;
+  const info = await api("/api/info");
+  S.info = info;
+  S.cfg = info.configs;
+  S.ex = info.examples;
+  S.session = info.session;
+  $("version").textContent = `${info.version}・セッション ${info.session}${info.engine.name === "mock" ? "・偽の変換（mock）" : ""}`;
+  $("try-speed").textContent = `速度優先（${S.cfg.speed_base}）でも同じ文を試す`;
+
+  // サーバの記録とブラウザの記録を合わせる（新しい版が勝つ。ブラウザだけにある新しい版は送り直す）
+  const local = loadLocal();
+  const state = await api("/api/state");
+  for (const r of state.records) S.recs[r.id] = r;
+  if (local) {
+    for (const r of Object.values(local.recs || {})) {
+      const s = S.recs[r.id];
+      if (!s || (r.rev || 0) > (s.rev || 0)) {
+        S.recs[r.id] = r;
+        if (!S.pending.includes(r.id)) S.pending.push(r.id);
+      }
+    }
+    S.started = !!local.started;
   }
-  axisId = info.configs.axes[0].id;
-  singleId = info.configs.default_single;
-  renderAxes();
-  renderSingles();
-  renderCtx();
-  $("cmp-input").focus();
+  S.measures = state.measures;
+  S.step = local && Number.isInteger(local.step) ? Math.min(local.step, firstOpenStep()) : firstOpenStep();
+  if (S.pending.length) flushPending();
+
+  $("start").addEventListener("click", () => { S.started = true; goStep(1); });
+  $("back").addEventListener("click", () => goStep(S.step - 1));
+  $("next").addEventListener("click", () => goStep(S.step + 1));
+  $("own-convert").addEventListener("click", () => convertFeel($("own-input").value, "own"));
+  $("own-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); convertFeel($("own-input").value, "own"); }
+  });
+  $("try-speed").addEventListener("click", () => convertFeel("", "speed"));
+  $("copy").addEventListener("click", copySummary);
+
+  goStep(S.step);
+  waitReady();
 }
 
-init();
+init().catch((e) => banner(`ページを開けませんでした: ${e.message}`, "error", { label: "再読込", fn: () => location.reload() }));

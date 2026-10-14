@@ -1,4 +1,4 @@
-# 体験版（V0）の配布 zip を作る（docs/TRIAL.md「配布の作り方」）。
+# 体験版（V0.2）の配布 zip を作る（docs/TRIAL.md「配布の作り方」）。
 #
 #   pwsh -NoProfile -File tools/pack-trial.ps1 [-HfHome <HF_HOME>] [-OutDir dist]
 #
@@ -51,6 +51,13 @@ function Resolve-Real([IO.FileInfo]$f) {
     if (-not $t) { return $f.FullName }
     return [IO.Path]::GetFullPath([IO.Path]::Combine($f.DirectoryName, $t))
 }
+
+# ページに要るファイル。欠けた zip を作らないよう、無ければ止める
+$required = @('trial/server.py', 'trial/engine.py', 'trial/summary.py', 'trial/machine.py', 'trial/__init__.py',
+              'trial/configs.json', 'trial/examples.json', 'trial/static/index.html', 'trial/static/app.js',
+              'trial/static/app.css', 'trial/run.cmd', 'trial/run.ps1', 'trial/README-trial.md')
+$missing = @($required | Where-Object { -not (Test-Path $_) })
+if ($missing.Count) { throw "trial/ のファイルが無い: $($missing -join ', ')" }
 
 Write-Host "コード: core/ eval/ trial/"
 Copy-Tree core (Join-Path $stage core)

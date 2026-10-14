@@ -17,7 +17,7 @@ import zlib
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-# config の項目 → CorePipeline.__init__ の引数。受け付けない引数は渡さない（punct・en_case は core 側で追加予定）
+# config の項目 → CorePipeline.__init__ の引数。受け付けない引数は渡さない（core の版がずれても起動できるように）
 PARAM_MAP = {"model": "model", "device": "device", "k": "k", "w": "w_read", "f": "w_flu",
              "punct": "punct", "en_case": "en_case"}
 UNFINISHED = "変換が完了しなかった（候補が無いか、全候補が辞書の制約で止まった）"
@@ -168,9 +168,19 @@ def _to_hiragana(romaji: str) -> str:
     return "".join(chr(ord(ch) - 0x60) if "ァ" <= ch <= "ヶ" else ch for ch in kata)
 
 
-class MockEngine:
-    """決定的な偽の変換。config の値（k・punct・en_case）ごとに規則を変え、ms は (seed, 設定 id, 入力) から決める。
+# MockEngine が英字として残す語（登録表記つき）。None は登録語でない（en_case=auto で短ければ大文字にする）
+MOCK_EN = {"github": "GitHub", "python": "Python", "claude": "Claude", "branch": "branch", "main": "main",
+           "merge": "merge", "push": "push", "md": None, "jr": None, "scc": None}
+MOCK_EN_RE = re.compile("|".join(sorted(MOCK_EN, key=len, reverse=True)))
+TYPED_PUNCT = set(",.?!")
 
+
+class MockEngine:
+    """決定的な偽の変換。設定（model・punct・en_case）ごとに規則を変え、ms は (seed, 設定 id, 入力) から決める。
+
+    - punct=insert: 入力に句読点が無ければ、真ん中に読点、末尾に句点（`kke`・`ka` で終われば疑問符）を足す。
+    - en_case: MOCK_EN の語を英字のまま残し、registered は登録表記に、auto はさらに 4 字以下の未登録語を大文字にする。
+    - model が xsmall の設定は ms を 0.35 倍にする。
     入力に `!!err` を含むと例外、`!!unfinished` を含むと未完了を返す（失敗時の表示とテストに使う）。
     delay > 0 なら ms × delay だけ実際に待つ（進捗表示の確認用）。
     """
@@ -179,34 +189,42 @@ class MockEngine:
 
     def __init__(self, seed: int = 0, delay: float = 0.0):
         self.seed, self.delay = seed, delay
+        self.preloaded: list[str] = []
 
     def describe(self, configs: dict[str, dict]) -> dict:
         return {"name": self.name, "ignored": {cid: [] for cid in configs}}
 
     def preload(self, configs: dict[str, dict]) -> None:
-        pass
+        self.preloaded += list(configs)
+
+    def _en(self, word: str, en_case: str) -> str:
+        reg = MOCK_EN[word]
+        if en_case in ("registered", "auto") and reg:
+            return reg
+        if en_case == "auto" and reg is None and len(word) <= 4:
+            return word.upper()
+        return word
 
     def convert(self, text: str, left_context: str, config: dict) -> dict:
         cid = config.get("id", "")
         rng = random.Random(zlib.crc32(f"{self.seed}|{cid}|{text}|{left_context}".encode()))
-        ms = round(rng.uniform(40, 1200), 1)
+        ms = round(rng.uniform(150, 1300) * (0.35 if "xsmall" in str(config.get("model", "")) else 1.0), 1)
         if self.delay:
             time.sleep(ms / 1000 * self.delay)
         if "!!err" in text:
             raise RuntimeError("mock: 意図した失敗")
         if "!!unfinished" in text:
             return {"text": text, "ms": ms, "finished": False, "candidates": [], "error": UNFINISHED}
-        out = _to_hiragana(text)
-        # 比べる軸の設定どうしで見た目が変わるように、config の値ごとに規則を変える
-        if config.get("k", 5) < 5 or "xsmall" in str(config.get("model", "")):
-            out = "".join(chr(ord(ch) + 0x60) if "ぁ" <= ch <= "ゖ" else ch for ch in out)
-        if config.get("punct") == "ja" and not out.endswith(("。", "？", "！")):
-            out += "。"
-        elif config.get("punct") == "insert":
-            out = out[: len(out) // 2] + "、" + out[len(out) // 2:]
-        en = config.get("en_case")
-        if en == "registered":
-            out = re.sub(r"[a-z]+", lambda m: m.group().capitalize(), out)
-        elif en == "auto":
-            out = re.sub(r"[a-z]+", lambda m: m.group().upper(), out)
+        en_case = config.get("en_case", "typed")
+        out, pos = [], 0
+        for m in MOCK_EN_RE.finditer(text):
+            out.append(_to_hiragana(text[pos:m.start()]))
+            out.append(self._en(m.group(), en_case))
+            pos = m.end()
+        out.append(_to_hiragana(text[pos:]))
+        out = "".join(out)
+        if config.get("punct") == "insert" and not (TYPED_PUNCT & set(text)):
+            mid = len(out) // 2
+            end = "？" if text.endswith(("kke", "ka")) else "。"
+            out = out[:mid] + "、" + out[mid:] + end
         return {"text": out, "ms": ms, "finished": True, "candidates": [out], "error": None}

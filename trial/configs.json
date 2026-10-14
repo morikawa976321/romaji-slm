@@ -1,105 +1,90 @@
 {
-  "axes": [
-    {
-      "id": "speed",
-      "label": "速度優先 vs 精度優先",
-      "short": "速度/精度",
-      "configs": [
-        "fast",
-        "accurate"
-      ]
-    },
-    {
-      "id": "punct",
-      "label": "句読点: 打つ(A) vs 自動挿入(B)",
-      "short": "句読点",
-      "configs": [
-        "punct_a",
-        "punct_b"
-      ]
-    },
-    {
-      "id": "en_case",
-      "label": "英字の表記",
-      "short": "英字表記",
-      "configs": [
-        "en_typed",
-        "en_registered",
-        "en_auto"
-      ]
-    }
-  ],
-  "configs": {
-    "accurate": {
-      "label": "精度優先",
+  "models": {
+    "small": {
+      "label": "精度優先（small）",
       "model": "Miwa-Keita/zenz-v3.1-small",
       "device": "cpu",
       "k": 5,
       "w": 4.0,
-      "f": 1.0,
-      "punct": "auto",
-      "en_case": "registered"
+      "f": 1.0
     },
-    "fast": {
-      "label": "速度優先",
+    "xsmall": {
+      "label": "速度優先（xsmall）",
       "model": "Miwa-Keita/zenz-v3.1-xsmall",
       "device": "cpu",
       "k": 5,
       "w": 4.0,
-      "f": 1.0,
-      "punct": "auto",
-      "en_case": "registered"
-    },
-    "punct_a": {
-      "label": "句読点A",
-      "model": "Miwa-Keita/zenz-v3.1-small",
-      "device": "cpu",
-      "k": 5,
-      "w": 4.0,
-      "f": 1.0,
-      "punct": "ja",
-      "en_case": "registered"
-    },
-    "punct_b": {
-      "label": "句読点B",
-      "model": "Miwa-Keita/zenz-v3.1-small",
-      "device": "cpu",
-      "k": 5,
-      "w": 4.0,
-      "f": 1.0,
-      "punct": "insert",
-      "en_case": "registered"
-    },
-    "en_typed": {
-      "label": "英字: 打ったまま",
-      "model": "Miwa-Keita/zenz-v3.1-small",
-      "device": "cpu",
-      "k": 5,
-      "w": 4.0,
-      "f": 1.0,
-      "punct": "auto",
-      "en_case": "typed"
-    },
-    "en_registered": {
-      "label": "英字: 登録語だけ",
-      "model": "Miwa-Keita/zenz-v3.1-small",
-      "device": "cpu",
-      "k": 5,
-      "w": 4.0,
-      "f": 1.0,
-      "punct": "auto",
-      "en_case": "registered"
-    },
-    "en_auto": {
-      "label": "英字: 自動",
-      "model": "Miwa-Keita/zenz-v3.1-small",
-      "device": "cpu",
-      "k": 5,
-      "w": 4.0,
-      "f": 1.0,
-      "punct": "auto",
-      "en_case": "auto"
+      "f": 1.0
     }
   },
-  "default_single": "accurate"
+  "combo": {
+    "punct": ["ja", "insert"],
+    "en_case": ["typed", "registered", "auto"]
+  },
+  "configs": {
+    "punct_a": {"base": "small", "punct": "ja", "en_case": "typed"},
+    "punct_b": {"base": "small", "punct": "insert", "en_case": "typed"},
+    "en_typed": {"base": "small", "punct": "auto", "en_case": "typed"},
+    "en_registered": {"base": "small", "punct": "auto", "en_case": "registered"},
+    "en_auto": {"base": "small", "punct": "auto", "en_case": "auto"}
+  },
+  "steps": {
+    "punct": {
+      "title": "句読点",
+      "configs": ["punct_a", "punct_b"],
+      "names": {"punct_a": "A", "punct_b": "B"},
+      "question": "punct"
+    },
+    "en_case": {
+      "title": "英字",
+      "configs": ["en_typed", "en_registered", "en_auto"],
+      "names": {"en_typed": "打ったまま", "en_registered": "登録語だけ", "en_auto": "自動"},
+      "question": "en_case"
+    }
+  },
+  "questions": {
+    "punct": {
+      "title": "句読点",
+      "text": "普段は、句読点を自分で打つ形と、自動で補う形のどちらにしますか？",
+      "note": "どちらも問題なければ、意図しない追加を避けるため今回は自分で打つ設定（A）にします。自動で補う設定も後から選べます。",
+      "provisional": "A",
+      "options": [
+        {"value": "A", "label": "自分で打つ（A）", "short": "A", "punct": "ja"},
+        {"value": "B", "label": "自動で補う（B）", "short": "B", "punct": "insert"},
+        {"value": "both_ok", "label": "どちらも問題ない", "short": "どちらも問題ない", "punct": "ja", "provisional": true},
+        {"value": "undecided", "label": "まだ決められない", "short": "未決", "punct": "ja", "provisional": true}
+      ]
+    },
+    "en_case": {
+      "title": "英字",
+      "text": "英字の大文字・小文字は、普段どこまで自動で整えますか？",
+      "note": "どれも問題なければ今回は打ったままにします。",
+      "provisional": "打ったまま",
+      "options": [
+        {"value": "typed", "label": "打ったまま", "short": "打ったまま", "en_case": "typed"},
+        {"value": "registered", "label": "登録語だけ整える", "short": "登録語だけ", "en_case": "registered"},
+        {"value": "auto", "label": "短い未知語も整える（自動）", "short": "自動", "en_case": "auto"},
+        {"value": "all_ok", "label": "どれも問題ない", "short": "どれも問題ない", "en_case": "typed", "provisional": true},
+        {"value": "undecided", "label": "まだ決められない", "short": "未決", "en_case": "typed", "provisional": true}
+      ]
+    },
+    "use": {
+      "title": "使用感",
+      "text": "今試した変換を、自分の文章でも使ってみたいですか？",
+      "note": "IME 化は別途判断します。",
+      "options": [
+        {"value": "want", "label": "使ってみたい", "short": "使ってみたい"},
+        {"value": "not_now", "label": "今は使いたくない", "short": "今は使いたくない"},
+        {"value": "undecided", "label": "まだ判断できない", "short": "まだ判断できない"}
+      ]
+    }
+  },
+  "reasons": [
+    {"value": "punct", "label": "句読点"},
+    {"value": "en", "label": "英字"},
+    {"value": "content", "label": "変換内容"},
+    {"value": "other", "label": "その他"}
+  ],
+  "feel_base": "small",
+  "speed_base": "xsmall"
 }
