@@ -79,23 +79,59 @@ def test_batch_matches_sequential(cz, dic, left_context):
     single = [cz.decode_scored(r, dic, left_context) for r in READINGS]
     batch = cz.decode_batch(READINGS, dic, left_context)
     assert len(batch) == len(single)
-    for (bt, blp, bf), (st, slp, sf) in zip(batch, single):
-        assert bt == st
-        assert bf == sf
-        assert blp == pytest.approx(slp, abs=1e-3)
+    for b, s in zip(batch, single):
+        assert b.text == s.text
+        assert b.finished == s.finished
+        assert b.bounds == s.bounds
+        assert b.logp == pytest.approx(s.logp, abs=1e-3)
 
 
 def test_outputs_stay_on_lattice(cz, dic):
     # 出力は辞書の語・かなのまま・記号の候補だけでできている（読みで説明できない表層は出ない）
-    for text, _, finished in cz.decode_batch(READINGS, dic):
-        assert all(ch in "今日京は天気転機点木良いねキョウハテンキイイきょうはてんきい。." for ch in text), text
+    for d in cz.decode_batch(READINGS, dic):
+        assert all(ch in "今日京は天気転機点木良いねキョウハテンキイイきょうはてんきい。." for ch in d.text), d.text
+
+
+def test_bounds_are_word_boundaries(cz, dic):
+    d = cz.decode_batch([READINGS[1]], dic)[0]
+    # 切れ目は 0 と末尾を除く昇順の文字位置
+    assert list(d.bounds) == sorted(set(d.bounds))
+    assert all(0 < b < len(d.text) for b in d.bounds)
 
 
 def test_batch_order_and_empty(cz, dic):
     assert cz.decode_batch([], dic) == []
     one = cz.decode_batch([READINGS[1]], dic)[0]
-    assert one[0] == cz.decode_scored(READINGS[1], dic)[0]
+    assert one.text == cz.decode_scored(READINGS[1], dic).text
     # 並び順を変えても各読みの結果は変わらない
     rev = cz.decode_batch(READINGS[::-1], dic)
     fwd = cz.decode_batch(READINGS, dic)
-    assert [t for t, _, _ in rev] == [t for t, _, _ in fwd][::-1]
+    assert [d.text for d in rev] == [d.text for d in fwd][::-1]
+
+
+SYM_READING = Reading((Seg("kana", 0, 3, "キョウ"), Seg("sym", 3, 4, ".", ("。", "."))))
+EN_READINGS = [Reading((Seg("en", 0, 6, "github", ("GitHub", "github")),)),  # 登録語
+               Reading((Seg("en", 0, 2, "jr", ("jr",)),)),  # 辞書に無い短い英字列
+               Reading((Seg("en", 0, 4, "push", ("push",)),))]  # 一般語（wordfreq）
+
+
+def test_punct_modes(cz, dic):
+    ja = cz.decode_scored(SYM_READING, dic, punct="ja").text
+    ascii_ = cz.decode_scored(SYM_READING, dic, punct="ascii").text
+    assert ja.endswith("。") and ascii_.endswith(".")
+    for mode in ("auto", "insert"):
+        assert cz.decode_scored(SYM_READING, dic, punct=mode).text[-1] in "。."
+    with pytest.raises(ValueError):
+        cz.decode_scored(SYM_READING, dic, punct="full")
+
+
+def test_en_case_modes(cz, dic):
+    pytest.importorskip("wordfreq")
+    texts = {m: [cz.decode_scored(r, dic, en_case=m).text for r in EN_READINGS]
+             for m in ("typed", "registered", "auto", "zenz")}
+    assert texts["typed"] == ["github", "jr", "push"]
+    assert texts["registered"] == ["GitHub", "jr", "push"]
+    assert texts["auto"] == ["GitHub", "JR", "push"]
+    assert texts["zenz"][0] in ("GitHub", "github") and texts["zenz"][1:] == ["jr", "push"]
+    with pytest.raises(ValueError):
+        cz.decode_scored(EN_READINGS[0], dic, en_case="upper")
