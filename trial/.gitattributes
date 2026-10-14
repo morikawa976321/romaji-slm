@@ -1,0 +1,2 @@
+# cmd.exe は LF 改行だと goto・ラベルを読み違えることがある
+*.cmd text eol=crlf

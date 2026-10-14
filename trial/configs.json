@@ -1,0 +1,17 @@
+{
+  "axes": [
+    {"id": "speed", "label": "速度優先 vs 精度優先", "short": "速度/精度", "configs": ["fast", "accurate"]},
+    {"id": "punct", "label": "句読点: 打つ(A) vs 自動挿入(B)", "short": "句読点", "configs": ["punct_a", "punct_b"]},
+    {"id": "en_case", "label": "英字の表記", "short": "英字表記", "configs": ["en_typed", "en_registered", "en_auto"]}
+  ],
+  "configs": {
+    "accurate": {"label": "精度優先", "model": "Miwa-Keita/zenz-v3.1-small", "device": "cpu", "k": 5, "w": 4.0, "f": 1.0, "punct": "auto", "en_case": "registered"},
+    "fast": {"label": "速度優先", "model": "Miwa-Keita/zenz-v3.1-xsmall", "device": "cpu", "k": 3, "w": 4.0, "f": 1.0, "punct": "auto", "en_case": "registered"},
+    "punct_a": {"label": "句読点A", "model": "Miwa-Keita/zenz-v3.1-small", "device": "cpu", "k": 5, "w": 4.0, "f": 1.0, "punct": "ja", "en_case": "registered"},
+    "punct_b": {"label": "句読点B", "model": "Miwa-Keita/zenz-v3.1-small", "device": "cpu", "k": 5, "w": 4.0, "f": 1.0, "punct": "insert", "en_case": "registered"},
+    "en_typed": {"label": "英字: 打ったまま", "model": "Miwa-Keita/zenz-v3.1-small", "device": "cpu", "k": 5, "w": 4.0, "f": 1.0, "punct": "auto", "en_case": "typed"},
+    "en_registered": {"label": "英字: 登録語だけ", "model": "Miwa-Keita/zenz-v3.1-small", "device": "cpu", "k": 5, "w": 4.0, "f": 1.0, "punct": "auto", "en_case": "registered"},
+    "en_auto": {"label": "英字: 自動", "model": "Miwa-Keita/zenz-v3.1-small", "device": "cpu", "k": 5, "w": 4.0, "f": 1.0, "punct": "auto", "en_case": "auto"}
+  },
+  "default_single": "accurate"
+}
