@@ -1,17 +1,41 @@
 {
   "punct": [
-    {"romaji": "kyouhaosokunarisoudakarasakinitabeteoite", "kind": "完結した文"},
-    {"romaji": "ashitanokaiginanjikaradakke", "kind": "質問"},
-    {"romaji": "raishuunogetsuyoubinihaishanoyoyaku", "kind": "メモ・途中の節"}
+    {
+      "romaji": "kyouhaosokunarisoudakarasakinitabeteoite",
+      "kind": "完結した文"
+    },
+    {
+      "romaji": "ashitanokaiginanjikaradakke",
+      "kind": "質問"
+    },
+    {
+      "romaji": "raishuunogetsuyoubinihaishanoyoyaku",
+      "kind": "メモ・途中の節"
+    }
   ],
   "en_case": [
-    {"romaji": "githubnipushshiteoite.", "kind": "登録語"},
-    {"romaji": "jrnoekimadearuku.", "kind": "辞書に無い短い英字列"},
-    {"romaji": "claude.mdnikisokuwotsuikashite.", "kind": "識別子"}
+    {
+      "romaji": "githubnipushshiteoite.",
+      "kind": "登録語（GitHub）"
+    },
+    {
+      "romaji": "apinoki-wokankyouhennsuunioku.",
+      "kind": "略語（API）"
+    },
+    {
+      "romaji": "okdeploysite.",
+      "kind": "短い語（OK）と一般語"
+    }
   ],
   "feel": [
-    {"punct": "ashitanomi-tingunoshiryouwogithubniageteokune.", "nopunct": "ashitanomi-tingunoshiryouwogithubniageteokune"},
-    {"punct": "sorekara,pythonnoba-jonmokakuninshiteoite.", "nopunct": "sorekarapythonnoba-jonmokakuninshiteoite"}
+    {
+      "punct": "ashitanomi-tingunoshiryouwogithubniageteokune.",
+      "nopunct": "ashitanomi-tingunoshiryouwogithubniageteokune"
+    },
+    {
+      "punct": "sorekara,pythonnoba-jonmokakuninshiteoite.",
+      "nopunct": "sorekarapythonnoba-jonmokakuninshiteoite"
+    }
   ],
   "measure": {
     "final": [
