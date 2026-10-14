@@ -93,8 +93,8 @@ uv run python -m trial.server --open                  # 本物の変換コア（
 | `k` | 読みの候補数 | `k` |
 | `w` | 読みのコストの重み | `w_read` |
 | `f` | 完成文の自然さの重み | `w_flu` |
-| `punct` | `"auto"` \| `"ja"` \| `"ascii"` \| `"insert"` | `punct`（core 側で追加予定） |
-| `en_case` | `"typed"` \| `"registered"` \| `"auto"` | `en_case`（core 側で追加予定） |
+| `punct` | `"auto"` \| `"ja"` \| `"ascii"` \| `"insert"` | `punct`（core 実装済み 2026-10-15。insert = 句読点 B） |
+| `en_case` | `"typed"` \| `"registered"` \| `"auto"` | `en_case`（core 実装済み 2026-10-15。選んだ後に描画） |
 
 `CoreEngine` は `inspect.signature(CorePipeline.__init__)` を見て、受け付ける引数だけを渡す（受け付けない項目は `/api/info` の
 `engine.ignored` に出し、比べるタブにも注意書きを出す）。同じ `model` と `device` の組はモデルと辞書を1回だけ読み、
@@ -155,8 +155,7 @@ pwsh -NoProfile -File tools/pack-trial.ps1 -HfHome $env:USERPROFILE\.cache\huggi
 
 - **本物の変換（CoreEngine + zenz）はクラウドでは動かしていない**（huggingface.co に届かない）。CoreEngine は CorePipeline を
   偽物に差し替えたテストだけで確かめた。開発機で `uv run python -m trial.server --open` を一度通す必要がある。
-- **今の CorePipeline は `punct`・`en_case` を受け付けない**ので、句読点と英字表記の軸は、同じ設定を比べることになる
-  （ページに注意書きが出る）。core 側に引数が入れば自動で渡る。
+- ~~今の CorePipeline は `punct`・`en_case` を受け付けない~~ → 2026-10-15 に core 側へ実装済み（docs/EVAL.md「工程6」）。句読点 B を試すには句読点を打たない例文が要る（`bench_sentences.jsonl` の 20 文はすべて句読点を含むので、B の軸と計測には使えない。V0.2 で直す: tools/tasks/trial-page-v2.md）。
 - **ThinkPad 用の `uv.lock` が無い**（この環境から download.pytorch.org に届かない）。開発機で pack すれば作られる。
   lock が無くても初回の `uv sync` が解決するが、ネットワークが要り、版が固定されない。
 - `machine.py` の Windows 分岐（レジストリ・`GlobalMemoryStatusEx`・`SO_EXCLUSIVEADDRUSE`）と `run.cmd`→`run.ps1` は、開発機（Windows 11）で zip を展開して確認した（2026-10-15。初回 serve 5.1 s / ready 19.8 s、uv のキャッシュが温かい状態）。ThinkPad では未確認。

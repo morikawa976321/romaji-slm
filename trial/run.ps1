@@ -69,7 +69,7 @@ if ((Test-Path (Join-Path $Hf 'hub\models--Miwa-Keita--zenz-v3.1-small')) -and
 
 Write-Host '[3/3] サーバを起動します。ブラウザが開きます。'
 Write-Host '      このウィンドウを閉じると終了します。'
-cmd /c "uv run --no-sync python -m trial.server --open >> ""$Log"" 2>&1"
+cmd /c "uv run --no-sync python -m trial.server --open 2>> ""$Log"""  # 標準出力（URL など）は画面に出す
 if ($LASTEXITCODE -ne 0) {
     Show-Failure 'エラーで止まりました（サーバ）。ログの最後の部分'
     exit 1
