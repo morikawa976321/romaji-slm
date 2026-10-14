@@ -95,7 +95,13 @@ class CoreEngine:
 
     def preload(self, configs: dict[str, dict]) -> None:
         for c in configs.values():
-            self._pipeline(c)
+            pipe = self._pipeline(c)
+            # 1回目の変換は読みの言語モデル・英単語辞書・ラティスの遅延初期化で 2 倍ほど遅い（開発機で約 1000 ms 対 500 ms）。
+            # 本人の最初の1打と自動計測の前に、ここで空回しして吸収する
+            try:
+                pipe.convert("konnichiha")
+            except Exception:  # 空回しの失敗は起動を止めない（実際の変換で error として見せる）
+                pass
 
     def convert(self, text: str, left_context: str, config: dict) -> dict:
         pipe = self._pipeline(config)
