@@ -168,8 +168,8 @@ def make_converter(name: str, device: str = "cpu", model: str | None = None,
         return CorePipeline(model or "Miwa-Keita/zenz-v3.1-small", device, k=int(opts.get("k", 5)),
                             w_read=float(opts.get("w", 4.0)), w_flu=float(opts.get("f", 1.0)), name=name,
                             batched=opts.get("b", "1") != "0", punct=opts.get("p", "auto"),
-                            en_case=opts.get("e", "typed"), tau_comma=float(opts.get("tc", 0.0)),
-                            tau_end=float(opts.get("te", 0.0)), tau_q=float(opts.get("tq", 0.0)))
+                            en_case=opts.get("e", "typed"), tau_comma=float(opts.get("tc", -0.5)),
+                            tau_end=float(opts.get("te", -6.0)), tau_q=float(opts.get("tq", -5.0)))
     if name == "reader+zenz":
         if not model:
             raise ValueError("reader+zenz には --model（読みを書く二段形式のモデル）が要る")

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "trial",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-X", "utf8", "-m", "trial.server", "--port", "8765"],
+      "port": 8765
+    },
+    {
+      "name": "trial-mock",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-X", "utf8", "-m", "trial.server", "--port", "8766", "--mock"],
+      "port": 8766
+    }
+  ]
+}
