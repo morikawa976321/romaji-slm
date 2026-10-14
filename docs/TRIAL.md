@@ -17,7 +17,8 @@
 | `trial/configs.json` | 比べる設定と軸 |
 | `trial/bench_sentences.jsonl` | 自動計測と「例文を入れる」の 20 文（`eval/sets/user_style.jsonl` の typo 以外から、5 カテゴリ×4） |
 | `trial/static/` | ページ（`index.html`・`app.js`・`app.css`。外部 CDN・Web フォントなし） |
-| `trial/run.cmd` | ThinkPad で起動する。配布物ではルートに置く |
+| `trial/run.cmd` | ThinkPad で起動する。配布物ではルートに置く。ASCII だけの起動役で、実体は `trial/run.ps1`（cmd.exe は UTF-8 のバッチの日本語を正しく読めないため。2026-10-15 開発機で確認） |
+| `trial/run.ps1` | 起動の手順（uv の導入・`uv sync`・同梱モデルの指定・サーバ起動）。UTF-8 BOM 付き（Windows PowerShell 5.1 向け） |
 | `tools/pack-trial.ps1` | 配布 zip を作る |
 | `trial/out/` | 記録（`records.jsonl`・`bench.jsonl`・`launch.jsonl`・`launch.log`）。コミットしない |
 
