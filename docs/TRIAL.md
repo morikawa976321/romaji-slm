@@ -79,9 +79,9 @@ uv run python -m trial.server --open                  # 本物の変換コア（
  "text": "...", "ms": 803.1, "error": null, "verdict": "used" | "fixed" | null}
 ```
 
-`launch.jsonl` は `{"time", "first", "serve_s", "ready_s", "error", "version"}`。`run.cmd` が開始時刻（`TRIAL_LAUNCH_T0`、UNIX ミリ秒）と
+`launch.jsonl` は `{"time", "first", "serve_s", "ready_s", "error", "version"}`。`run.ps1` が開始時刻（`TRIAL_LAUNCH_T0`、UNIX ミリ秒）と
 初回か（`TRIAL_LAUNCH_FIRST`、`.venv` が無かったら 1）を環境変数で渡し、サーバがモデルの読み込みを終えた時点で書く。
-`serve_s` は run.cmd の開始からサーバが応答できるまで（uv の導入・`uv sync` を含む）、`ready_s` はモデルの読み込みが終わるまで。
+`serve_s` は run.ps1 の開始からサーバが応答できるまで（uv の導入・`uv sync` を含む）、`ready_s` はモデルの読み込みが終わるまで。
 
 ## config の項目
 
@@ -159,7 +159,7 @@ pwsh -NoProfile -File tools/pack-trial.ps1 -HfHome $env:USERPROFILE\.cache\huggi
   （ページに注意書きが出る）。core 側に引数が入れば自動で渡る。
 - **ThinkPad 用の `uv.lock` が無い**（この環境から download.pytorch.org に届かない）。開発機で pack すれば作られる。
   lock が無くても初回の `uv sync` が解決するが、ネットワークが要り、版が固定されない。
-- `run.cmd`・`machine.py` の Windows 分岐（レジストリ・`GlobalMemoryStatusEx`・`SO_EXCLUSIVEADDRUSE`）は Windows で動かしていない。
+- `machine.py` の Windows 分岐（レジストリ・`GlobalMemoryStatusEx`・`SO_EXCLUSIVEADDRUSE`）と `run.cmd`→`run.ps1` は、開発機（Windows 11）で zip を展開して確認した（2026-10-15。初回 serve 5.1 s / ready 19.8 s、uv のキャッシュが温かい状態）。ThinkPad では未確認。
 - 初回起動時間は、依頼では run.cmd が書く形だったが、モデルの読み込み完了を知っているのはサーバなので、run.cmd は開始時刻を渡し、
   サーバが `launch.jsonl` に書く形にした。
 - 比べるでの変換は軸の設定順（configs.json の順）に逐次実行する。カードの並びは無作為だが、実行順は固定。
