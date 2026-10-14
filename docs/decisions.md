@@ -110,5 +110,7 @@
 
 ### 本人の身体が要ること（判断ではなく作業）
 
+- 配布物: `C:\Users\tm976\mf\romaji-slm\dist\romaji-slm-trial-20261015-90b5564.zip`（202 MB。コード＋Mozc 辞書＋読み LM＋zenz small/xsmall。torch は初回に取得）。ThinkPad へは USB か LAN で運ぶ。
+
 - ThinkPad で体験版を 1 回動かす。初回は uv と torch（約 250 MB）の取得で数分かかる。黒いウィンドウに「Windows によって PC が保護されました」と出たら「詳細情報」→「実行」。
 - 結果ブロックには機種・初回起動時間・常駐時の各文の所要 ms が入るので、数値の転記は要らない。ThinkPad での速度要件（20〜30 字 1 秒以内）の判定はこの値で行う。

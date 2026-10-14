@@ -2,7 +2,7 @@
 
 ローマ字の打鍵列を、ローカルの小型言語モデルで日本語に変換する変換コア。
 
-**2026-10-13 から休止中。再開するときは [docs/STATUS.md](docs/STATUS.md)（現状・次にやること・環境の作り直し）から読む。**
+**2026-10-13 に休止、2026-10-14〜15 に親セッション（AI）が本人不在で工程6（速度）・表記モード・句読点 B・体験版まで進めた。現状と次にやることは [docs/STATUS.md](docs/STATUS.md)、AI の判断と本人待ちのカードは [docs/decisions.md](docs/decisions.md)、体験版は [docs/TRIAL.md](docs/TRIAL.md)。**
 
 - 方式の決定（学習なし・辞書ラティス＋凍結 zenz）と先行例: [docs/REDESIGN.md](docs/REDESIGN.md)。変換コアは `core/`（`python -m eval.run --converter core`）
 - 体験版（ThinkPad で体感評価する比較ページと配布 zip）: [docs/TRIAL.md](docs/TRIAL.md)、`python -m trial.server --mock --open`
