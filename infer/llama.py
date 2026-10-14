@@ -54,7 +54,7 @@ class LlamaServer:
 
     def __init__(self, model: str | Path | None = None, *, url: str | None = None, bin_dir: str | Path | None = None,
                  threads: int | None = None, n_gpu_layers: int | None = None, extra_args: list[str] | None = None,
-                 startup_timeout: float = 120.0):
+                 startup_timeout: float = 120.0, n_slots: int = 1):
         self.proc: subprocess.Popen | None = None
         self._log = None
         if url:
@@ -67,9 +67,10 @@ class LlamaServer:
             port = _free_port()
             self.url = f"http://127.0.0.1:{port}"
             # -c 0: 文脈長をモデルから取る。GPT-2 は位置埋め込みが学習時の長さ（zenz は 1024）しかなく、
-            # それを超える文脈長で立てると範囲外を読む。-np 1: 変換は1本ずつなのでスロットは1つで足りる
+            # それを超える文脈長で立てると範囲外を読む。-np: 並列に処理するスロットの数（infer は1本ずつなので 1、
+            # core.llama_backend は読みの k 件を並べて投げる）
             cmd = [str(find_binary("llama-server", bin_dir)), "-m", str(model), "--host", "127.0.0.1",
-                   "--port", str(port), "-c", "0", "-np", "1", "--no-webui"]
+                   "--port", str(port), "-c", "0", "-np", str(n_slots), "--no-webui"]
             if threads:
                 cmd += ["-t", str(threads)]
             if n_gpu_layers is not None:
