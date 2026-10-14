@@ -234,6 +234,20 @@ score = zenz の変換の対数確率 + f × 完成文の自然さ − w × 読�
 
 全セットの CPU 実測は精度が GPU と同じ（small: 82.2% / 34.1% / 84.5%、xsmall: 76.7% / 31.5% / 70.0%）。句読点 B の 1 バッチ採点は 2 段（文末 → 読点）に変えた（下の「句読点 B」）。
 
+#### 実行系の比較（torch 版 `core` と llama-server 版 `core-llama`、2026-10-15）
+
+`eval/bench_backend.py`、Core Ultra 5 245KF、CPU。llama-server は b10549（CUDA ビルドの CPU 実行）、zenz-v3.1-small を `infer.to_gguf` で Q8_0 にしたもの（99 MB）。入力は user_style の正解 20〜45 字の 14 件、空回し 2 回。
+
+| 変換器 | 中央値 | p95 | 正解率（14件） | 1位が core と一致 | 文法 規則/バイト | 生成 ms/tok | 生成1要求 | 自然さ1要求 |
+|---|---|---|---|---|---|---|---|---|
+| `core`（torch、k=5 バッチ） | 589 ms | 748 ms | 71.4% | 14/14 | — | — | — | — |
+| **`core-llama:np=5,t=8`** | **322 ms** | 426 ms | 71.4% | 13/14 | 22 / 10.4 KB | 2.21 | 74 ms | 168 ms |
+| `core-llama:np=1,t=8` | 889 ms | 981 ms | 71.4% | 13/14 | 22 / 10.4 KB | 0.93 | 42 ms | 118 ms |
+
+- 5 スロット並列で torch 版の約 0.55 倍。1 スロットだと候補 5 件が直列になり torch 版より遅い。時間の半分は完成文の自然さ（候補 5 文の強制生成）。
+- 文法は中央値 22 規則・10 KB で、生成 1 トークン 2.2 ms（文法なし 2.1 ms。D6）と、文法の負荷はほぼ無い。
+- logprob の取り直しが 193 回（14 件）起きた。b10549 の `completion_probabilities` の形に依る（下の D12 で調査）。取り直しの分だけ時間が上乗せされている。
+
 内訳（マイクロベンチ）: zenz-v3.1-small の KV キャッシュ付き 1 トークンの forward は B=1 で 13.3 ms、B=5 で 19.0 ms（固定費が支配的で、バッチにしても 1.4 倍にしかならない）。xsmall は 5〜6 ms。log_softmax+argsort 0.5 ms/行、ラティス照合は 1 件 5 候補の生成全体で 1〜4 ms。参考: llama-server（b10549、Q8_0、`-t 8`）は 1 トークン 2.1 ms（decisions.md D6）。
 バッチ生成の出力は逐次と同一（73文で候補の文と対数確率が一致。`tests/test_core_constrained.py`）。
 
