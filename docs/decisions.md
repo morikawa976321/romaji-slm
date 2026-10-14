@@ -35,6 +35,12 @@
 - 決めたこと: 工程4の目安（70/60/50）は満たすが誤補正が2倍なので、既定にはせず「速度優先」として比較ページに並べる。選ぶのは本人の体感。
 - 覆る条件: ThinkPad で small が 1 秒を大きく超えるなら xsmall を既定候補に繰り上げる。
 
+### D6. llama-server は grammar 付きでも制約前の対数確率を返す。本番実行系の候補として部品をクラウドで作る（2026-10-15）
+
+- 事実（Core Ultra 5 245KF、llama-server b10549、zenz-v3.1-small を `infer.to_gguf` で Q8_0 にしたもの、`-t 8`）: `/completion` の `n_probs` は既定で制約前の分布（`post_sampling_probs: true` だと再正規化されて 1.0）。文法で「今日は良い天気ですね」を強制したときの logprob の和は −1.635（HF teacher forcing −1.653）、「京は良い転機ですね」は −17.72（HF −17.48）。1 トークン 2.1 ms（prompt 1.3 ms/トークン）、11 トークンの強制生成の往復 中央値 29 ms。
+- **AIの判断**: D3 の「成立性の確認」が取れた。torch の 13 ms/トークンに対して約 6 分の 1 なので、本番実行系は llama-server＋GBNF（REDESIGN.md の fable 案）が有力。ただし文法が大きいときの llama.cpp 側の負荷と並列スロットの挙動は未測定。ラティス→文法・並列スロット・自然さの強制生成・同等性テストをクラウドに出し（依頼文 [tools/tasks/llama-backend.md](../tools/tasks/llama-backend.md)、ブランチ `claude/llama-backend`）、親が実モデルで測ってから採否を決める。V0 配布物は、llama 版の同等性と速度が確認できるまで torch 版で進める。
+- 捨てた選択肢: llama-cpp-python（PyPI は sdist のみでビルドが要る。INFER.md）。torch の量子化（支配要因が固定費なので効きが薄い。D3）。
+
 ## 本人待ち
 
 （まだ無い）
