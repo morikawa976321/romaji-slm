@@ -10,66 +10,80 @@
 <body>
 <header>
   <h1>romaji-slm 体験版 <small id="version"></small></h1>
-  <nav role="tablist">
-    <button class="tab active" data-tab="compare" role="tab">比べる</button>
-    <button class="tab" data-tab="try" role="tab">打ってみる</button>
-    <button class="tab" data-tab="summary" role="tab">まとめ</button>
-  </nav>
+  <ol id="stepper" class="stepper"></ol>
 </header>
 <div id="banner" class="banner hidden"></div>
 
 <main>
-  <!-- 比べる -->
-  <section id="tab-compare" class="panel">
-    <div class="row" id="axes"></div>
-    <p class="note" id="axis-note"></p>
-    <div class="row input-row">
-      <input id="cmp-input" type="text" autocomplete="off" spellcheck="false" placeholder="ローマ字を打って Enter">
-      <button id="cmp-convert" class="primary">変換</button>
-      <button id="cmp-example">例文を入れる</button>
-    </div>
-    <p class="status" id="cmp-status"></p>
-    <div id="cards" class="cards"></div>
-    <div class="row center">
-      <button id="all-ok" class="big hidden">全部問題ない</button>
-    </div>
-    <p class="note">A/B/C の中身は入力ごとに入れ替わります。どれがどの設定かは「まとめ」で明かします。</p>
+  <!-- 0 準備 -->
+  <section id="step-0" class="step hidden">
+    <h2>はじめに</h2>
+    <p>ローマ字かな漢字変換を、画面の順にボタンを押して試します。文字を打つ必要はありません。</p>
+    <ol class="plan">
+      <li>句読点: 例文 3 つの変換結果を見比べて、句読点の形を選ぶ</li>
+      <li>英字: 例文 3 つで、英字の大文字・小文字の整え方を選ぶ</li>
+      <li>体感: 選んだ設定で例文を変換してみる（自分の文も試せます）</li>
+      <li>結果: 自動で短い計測をして、結果をコピーする</li>
+    </ol>
+    <p class="note">選んだ内容は押した時点で保存されます。途中でページを閉じても、もう一度開けば続きからです。</p>
+    <p class="status" id="ready-status">準備中（モデルを読み込んでいます）…</p>
+    <div class="row"><button id="start" class="big primary" disabled>はじめる</button></div>
   </section>
 
-  <!-- 打ってみる -->
-  <section id="tab-try" class="panel hidden">
-    <div class="row" id="singles"></div>
-    <div class="row input-row">
-      <input id="try-input" type="text" autocomplete="off" spellcheck="false" placeholder="ローマ字を打って Enter">
-      <button id="try-convert" class="primary">変換</button>
-    </div>
-    <p class="status" id="try-status"></p>
-    <label class="field-label" for="committed">確定欄（編集できます）</label>
-    <textarea id="committed" rows="5"></textarea>
-    <div class="row">
-      <button id="try-copy">コピー</button>
-      <button id="try-reset">文脈をリセット</button>
-      <span class="note" id="ctx-view"></span>
-    </div>
-    <h2>履歴</h2>
-    <ol id="history" class="history" reversed></ol>
+  <!-- 1 句読点 / 2 英字（中身は app.js が組み立てる） -->
+  <section id="step-1" class="step hidden">
+    <h2>1. 句読点</h2>
+    <p class="lead">句読点を打たずに入力した例文です。「この例を変換」を押し、出てきた案のうち良いほうを選んでください。</p>
+    <div id="cmp-punct" class="examples"></div>
+    <div id="q-punct"></div>
   </section>
 
-  <!-- まとめ -->
-  <section id="tab-summary" class="panel hidden">
-    <div class="row">
-      <button id="bench-run" class="big primary">自動計測を実行</button>
-      <span class="status" id="bench-status"></span>
+  <section id="step-2" class="step hidden">
+    <h2>2. 英字の表記</h2>
+    <p class="lead">英字を含む例文です。「この例を変換」を押し、出てきた案のうち良いものを選んでください。</p>
+    <div id="cmp-en_case" class="examples"></div>
+    <div id="q-en_case"></div>
+  </section>
+
+  <!-- 3 体感 -->
+  <section id="step-3" class="step hidden">
+    <h2>3. 体感</h2>
+    <p class="lead" id="feel-combo"></p>
+    <div id="feel-examples" class="examples"></div>
+    <label class="field-label" for="committed">確定欄（変換した結果がここにたまります）</label>
+    <textarea id="committed" rows="3" readonly></textarea>
+    <div id="feel-more" class="hidden">
+      <p class="note">ここから先は任意です。自分の文を試すなら、ローマ字を打って Enter。</p>
+      <div class="row input-row">
+        <input id="own-input" type="text" autocomplete="off" spellcheck="false" placeholder="自分の文を試す（ローマ字で打って Enter）">
+        <button id="own-convert">変換</button>
+      </div>
+      <div class="row">
+        <button id="try-speed">速度優先（xsmall）でも同じ文を試す</button>
+      </div>
     </div>
-    <progress id="bench-progress" class="hidden" value="0" max="1"></progress>
-    <p class="note">終わったら下の枠を「コピー」して、そのまま貼って返してください。</p>
-    <textarea id="summary" rows="18" readonly></textarea>
-    <div class="row">
-      <button id="summary-copy" class="big">コピー</button>
-      <button id="summary-refresh">更新</button>
-      <span class="status" id="summary-status"></span>
+    <p class="status" id="feel-status"></p>
+    <ol id="feel-history" class="history"></ol>
+    <div id="q-use"></div>
+  </section>
+
+  <!-- 4 計測とコピー -->
+  <section id="step-4" class="step hidden">
+    <h2>4. 計測と結果</h2>
+    <p class="lead" id="measure-lead">短い計測をしています。そのままお待ちください（操作は要りません）。</p>
+    <progress id="measure-progress" value="0" max="1"></progress>
+    <p class="status" id="measure-status"></p>
+    <div id="result-box" class="hidden">
+      <div class="row"><button id="copy" class="big primary">結果をコピー</button><span class="status" id="copy-status"></span></div>
+      <p class="note">コピーしたら、そのまま貼って返してください。終わるときは黒いウィンドウを閉じます。</p>
+      <textarea id="summary" rows="20" readonly></textarea>
     </div>
   </section>
+
+  <nav class="row nav">
+    <button id="back">← 戻る</button>
+    <button id="next" class="hidden">次へ →</button>
+  </nav>
 </main>
 <script src="app.js"></script>
 </body>
