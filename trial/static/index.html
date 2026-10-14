@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>romaji-slm 体験版</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>romaji-slm 体験版 <small id="version"></small></h1>
+  <nav role="tablist">
+    <button class="tab active" data-tab="compare" role="tab">比べる</button>
+    <button class="tab" data-tab="try" role="tab">打ってみる</button>
+    <button class="tab" data-tab="summary" role="tab">まとめ</button>
+  </nav>
+</header>
+<div id="banner" class="banner hidden"></div>
+
+<main>
+  <!-- 比べる -->
+  <section id="tab-compare" class="panel">
+    <div class="row" id="axes"></div>
+    <p class="note" id="axis-note"></p>
+    <div class="row input-row">
+      <input id="cmp-input" type="text" autocomplete="off" spellcheck="false" placeholder="ローマ字を打って Enter">
+      <button id="cmp-convert" class="primary">変換</button>
+      <button id="cmp-example">例文を入れる</button>
+    </div>
+    <p class="status" id="cmp-status"></p>
+    <div id="cards" class="cards"></div>
+    <div class="row center">
+      <button id="all-ok" class="big hidden">全部問題ない</button>
+    </div>
+    <p class="note">A/B/C の中身は入力ごとに入れ替わります。どれがどの設定かは「まとめ」で明かします。</p>
+  </section>
+
+  <!-- 打ってみる -->
+  <section id="tab-try" class="panel hidden">
+    <div class="row" id="singles"></div>
+    <div class="row input-row">
+      <input id="try-input" type="text" autocomplete="off" spellcheck="false" placeholder="ローマ字を打って Enter">
+      <button id="try-convert" class="primary">変換</button>
+    </div>
+    <p class="status" id="try-status"></p>
+    <label class="field-label" for="committed">確定欄（編集できます）</label>
+    <textarea id="committed" rows="5"></textarea>
+    <div class="row">
+      <button id="try-copy">コピー</button>
+      <button id="try-reset">文脈をリセット</button>
+      <span class="note" id="ctx-view"></span>
+    </div>
+    <h2>履歴</h2>
+    <ol id="history" class="history" reversed></ol>
+  </section>
+
+  <!-- まとめ -->
+  <section id="tab-summary" class="panel hidden">
+    <div class="row">
+      <button id="bench-run" class="big primary">自動計測を実行</button>
+      <span class="status" id="bench-status"></span>
+    </div>
+    <progress id="bench-progress" class="hidden" value="0" max="1"></progress>
+    <p class="note">終わったら下の枠を「コピー」して、そのまま貼って返してください。</p>
+    <textarea id="summary" rows="18" readonly></textarea>
+    <div class="row">
+      <button id="summary-copy" class="big">コピー</button>
+      <button id="summary-refresh">更新</button>
+      <span class="status" id="summary-status"></span>
+    </div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
