@@ -320,12 +320,15 @@ def build_words(path: Path = WORDS_PATH) -> None:
 
 @lru_cache(maxsize=4)
 def word_cost(conn: float, unk: float) -> WordCost | None:
-    """marisa-trie が無ければ None（呼ぶ側は語のコストを使わずに動く）。"""
+    """marisa-trie が無いか、索引も Mozc の辞書も手元に無ければ None（呼ぶ側は語のコストを使わずに動く。
+    変換の途中で辞書を取りに行かない）。"""
     try:
         import marisa_trie
     except ImportError:
         return None
     if not WORDS_PATH.exists():
+        if not (MOZC_DIR / "dictionary09.txt").exists():
+            return None
         build_words()
     t = marisa_trie.RecordTrie("<H")
     t.load(str(WORDS_PATH))
