@@ -321,6 +321,7 @@ namespace RomajiSlm
             var accent = dark ? Color.FromArgb(109, 156, 240) : Color.FromArgb(47, 111, 222);
             var err = dark ? Color.FromArgb(229, 115, 103) : Color.FromArgb(192, 57, 43);
             var L = new List<Tuple<string, Font, Color, bool>>();
+            if (comp.FieldPending) return L;   // パスワード欄かを確かめ終わるまで、打った文字を画面に出さない
             if (!comp.Composing)
             {
                 if (comp.PendingCommits > 0) L.Add(Tuple.Create("変換中…", small, muted, false));
@@ -404,9 +405,10 @@ namespace RomajiSlm
         readonly Native.WinEventProc fgProc;
         IntPtr hook, fgHook;
         Point anchor;
-        bool wasComposing, caps, posted;
-        long flashUntil;
-        int anchorSeq;
+        bool wasComposing, caps, posted, caretAnchor;
+        long flashUntil, fieldDeadline;
+        int fieldSeq;
+        const int FieldCheckMs = 300;   // UI Automation が応答しないアプリでは、この時間でパスワード欄ではないとみなす
 
         long Now { get { return clock.ElapsedMilliseconds; } }
 
@@ -457,7 +459,13 @@ namespace RomajiSlm
             UpdateTray();
 
             timer = new System.Windows.Forms.Timer { Interval = 50 };
-            timer.Tick += (s, e) => { comp.Tick(Now); Run(); };
+            timer.Tick += (s, e) =>
+            {
+                if (fieldDeadline != 0 && Now > fieldDeadline) { fieldDeadline = 0; comp.OnFieldChecked(fieldSeq, false, Now); }
+                comp.Tick(Now);
+                Run();
+            };
+            comp.RequireFieldCheck = true;
             timer.Start();
         }
 
@@ -509,6 +517,7 @@ namespace RomajiSlm
                 else if (ime != null) { bool open = ime.Open; ThreadPool.QueueUserWorkItem(_ => Native.SetImeOpen(open)); }
                 else if (mode != null) OnMode(mode.Mode);
                 else if (stat != null) { usage.Add(stat.Name, stat.Value); usage.Save(server.Describe); }
+                else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq);
                 else if (e is AltMaskEffect) Native.SendMask();
                 else if (e is RedrawEffect) redraw = true;
             }
@@ -524,18 +533,31 @@ namespace RomajiSlm
             popup.Refresh(anchor);
         }
 
-        /// 浮き窓の位置: キャレット（取れるアプリだけ）→ UI Automation のフォーカス欄 → 前面ウィンドウの下寄り
+        /// 浮き窓の位置: キャレット（取れるアプリだけ）→ UI Automation のフォーカス欄（CheckField）→ 前面ウィンドウの下寄り
         void StartAnchor()
         {
             Point p;
-            if (Native.CaretBelow(out p)) { anchor = p; return; }
-            anchor = Native.WindowFallback();
-            int seq = ++anchorSeq;
+            caretAnchor = Native.CaretBelow(out p);
+            anchor = caretAnchor ? p : Native.WindowFallback();
+        }
+
+        /// フォーカスの欄がパスワード欄かを UI Automation で確かめる（別スレッド。応答しなければ時間切れで「違う」）
+        void CheckField(int seq)
+        {
+            fieldSeq = seq;
+            fieldDeadline = Now + FieldCheckMs;
             ThreadPool.QueueUserWorkItem(_ =>
             {
-                Point q;
-                if (!Native.FocusedElementBelow(out q)) return;
-                popup.BeginInvoke((Action)(() => { if (seq == anchorSeq) { anchor = q; Redraw(); } }));
+                bool password; Point q;
+                bool ok = Native.FocusedElement(out password, out q);
+                popup.BeginInvoke((Action)(() =>
+                {
+                    if (seq != fieldSeq || fieldDeadline == 0) return;
+                    fieldDeadline = 0;
+                    if (ok && !caretAnchor && q != Point.Empty) anchor = q;
+                    comp.OnFieldChecked(seq, ok && password, Now);
+                    Run();
+                }));
             });
         }
 
@@ -777,16 +799,20 @@ namespace RomajiSlm
             return true;
         }
 
-        public static bool FocusedElementBelow(out Point p)
+        /// フォーカスの要素がパスワード欄か、と浮き窓を置く位置（要素の左下）。取れなければ false
+        public static bool FocusedElement(out bool password, out Point below)
         {
-            p = Point.Empty;
+            password = false;
+            below = Point.Empty;
             try
             {
                 var el = System.Windows.Automation.AutomationElement.FocusedElement;
                 if (el == null) return false;
-                var r = el.Current.BoundingRectangle;
-                if (r.IsEmpty || r.Width <= 0 || double.IsInfinity(r.Left)) return false;
-                p = new Point((int)r.Left, (int)r.Bottom + 6);
+                var cur = el.Current;
+                password = cur.IsPassword;
+                var r = cur.BoundingRectangle;
+                if (!r.IsEmpty && r.Width > 0 && !double.IsInfinity(r.Left))
+                    below = new Point((int)r.Left, (int)r.Bottom + 6);
                 return true;
             }
             catch { return false; }

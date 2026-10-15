@@ -35,6 +35,7 @@ namespace RomajiSlm
     public sealed class ModeEffect : Effect { public Mode Mode; public ModeEffect(Mode m) { Mode = m; } }
     public sealed class AltMaskEffect : Effect { }   // Alt を押したまま握りつぶしたキーのあと、Alt の単押し（メニュー起動）を防ぐ
     public sealed class RedrawEffect : Effect { }
+    public sealed class CheckFieldEffect : Effect { public int Seq; public CheckFieldEffect(int s) { Seq = s; } }
     public sealed class StatEffect : Effect { public string Name; public double Value; public StatEffect(string n, double v) { Name = n; Value = v; } }
 
     public sealed class Composer
@@ -53,6 +54,12 @@ namespace RomajiSlm
         public Mode Mode = Mode.Disabled;
         public Phase Phase = Phase.Idle;
         public bool ServerReady;
+        // 打ち始めに、フォーカスの欄がパスワード欄かを呼び出し側に確かめさせる（CheckFieldEffect → OnFieldChecked）。
+        // 確かめ終わるまで変換を要求せず、浮き窓も出さない。パスワード欄なら打鍵列をそのまま入れて、その欄では素通しにする
+        public bool RequireFieldCheck;
+        public bool FieldPending { get; private set; }
+        bool passthrough;
+        int fieldSeq;
         public string Status = "";
         public int CandIndex;
 
@@ -138,6 +145,7 @@ namespace RomajiSlm
             {
                 if (Composing || Phase != Phase.Idle) CommitCurrent(now, false);
                 Mode = Mode == Mode.Japanese ? Mode.English : Mode.Japanese;
+                passthrough = false;
                 effects.Add(new SetImeEffect(false));
                 effects.Add(new ModeEffect(Mode));
                 effects.Add(new RedrawEffect());
@@ -154,12 +162,22 @@ namespace RomajiSlm
             char c = CharFor(vk, m);
             if (!Composing)
             {
+                if (passthrough)
+                {
+                    if (vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE) passthrough = false;   // 欄を離れる
+                    return false;
+                }
                 if (c != '\0')
                 {
                     buf.Append(c);
                     Phase = Phase.Raw;
                     lastKeyAt = now;
                     Status = "";
+                    if (RequireFieldCheck)
+                    {
+                        FieldPending = true;
+                        effects.Add(new CheckFieldEffect(++fieldSeq));
+                    }
                     effects.Add(new RedrawEffect());
                     return true;
                 }
@@ -297,9 +315,23 @@ namespace RomajiSlm
             Pump(now);
         }
 
+        /// 欄の確認の結果（呼び出し側が時間切れにしたときは password=false で呼ぶ）
+        public void OnFieldChecked(int seq, bool password, long now)
+        {
+            if (seq != fieldSeq || !FieldPending) return;
+            FieldPending = false;
+            if (password)
+            {
+                if (Composing) CommitRaw(now);
+                passthrough = true;
+            }
+            effects.Add(new RedrawEffect());
+            Pump(now);
+        }
+
         void Pump(long now)
         {
-            if (inflight != null || !ServerReady) return;
+            if (inflight != null || !ServerReady || FieldPending) return;
             if (commits.Count > 0 && commits[0].Text == null)
             {
                 Send(commits[0].Romaji, now);
@@ -384,6 +416,7 @@ namespace RomajiSlm
         {
             if (fg == foreground) return;
             foreground = fg;
+            passthrough = false;
             ResetContext();
             // 未確定の文は残す（クリックで別の欄に移っても失わない）。MS-IME はウィンドウごとに開閉を持つので閉じ直す
             if (Mode != Mode.Disabled) effects.Add(new SetImeEffect(false));

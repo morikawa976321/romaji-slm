@@ -271,6 +271,26 @@ namespace RomajiSlm
                 Check(c.Buffer == "a", "not added");
             });
 
+            Run("パスワード欄: 確かめ終わるまで要求も表示もせず、パスワード欄なら打鍵列のまま入れて以後は素通し", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                Type(c, "pa", 0);
+                var chk = Last<CheckFieldEffect>(c.TakeEffects());
+                Check(chk != null && c.FieldPending, "check requested");
+                c.Tick(500);
+                Check(!c.TakeEffects().OfType<RequestEffect>().Any(), "no request while checking");
+                c.OnFieldChecked(chk.Seq, true, 510);
+                Check(Injected(c.TakeEffects()) == "pa", "raw injected");
+                Check(!Type(c, "ss", 520).Any(x => x), "passthrough afterwards");
+                Press(c, Composer.VK_TAB, Mods.None, 530);
+                Check(Type(c, "a", 540).All(x => x), "tab leaves the field");
+                chk = Last<CheckFieldEffect>(c.TakeEffects());
+                c.OnFieldChecked(chk.Seq, false, 550);
+                c.Tick(800);
+                Check(Last<RequestEffect>(c.TakeEffects()) != null, "normal field converts");
+            });
+
             Console.WriteLine(failures == 0 ? "all passed" : failures + " failure(s)");
             return failures == 0 ? 0 : 1;
         }
