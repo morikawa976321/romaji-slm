@@ -73,6 +73,7 @@ namespace RomajiSlm
         public bool Enabled;
         public string Device = "auto";
         public int Port = 8767;
+        public bool History = true;
 
         public Config(string path)
         {
@@ -86,6 +87,7 @@ namespace RomajiSlm
                 if (k == "enabled") Enabled = v == "1";
                 else if (k == "device") Device = v;
                 else if (k == "port") int.TryParse(v, out Port);
+                else if (k == "history") History = v != "0";
             }
         }
 
@@ -96,7 +98,9 @@ namespace RomajiSlm
                 "enabled=" + (Enabled ? "1" : "0") + "\r\n" +
                 "# device: auto（GPU があれば GPU）/ cuda / cpu\r\n" +
                 "device=" + Device + "\r\n" +
-                "port=" + Port + "\r\n", new UTF8Encoding(false));
+                "port=" + Port + "\r\n" +
+                "# history: 1 なら確定・取り消しのたびに打鍵列・候補・確定文を history.jsonl に残す（次の改良の材料）。0 で止める\r\n" +
+                "history=" + (History ? "1" : "0") + "\r\n", new UTF8Encoding(false));
         }
     }
 
@@ -294,6 +298,39 @@ namespace RomajiSlm
         }
     }
 
+    /// 実利用の記録（本人の依頼 2026-10-16）。1 行 1 件の JSON を history.jsonl に追記する。次の改良の材料にする
+    /// （eval の評価セット・本人の実入力）。ime.ini の history=0 で止まる
+    sealed class History
+    {
+        readonly string path;
+        public bool Enabled = true;
+        public History(string path) { this.path = path; }
+
+        static string J(string s)
+        {
+            if (s == null) return "null";
+            var sb = new StringBuilder("\"");
+            foreach (char ch in s)
+            {
+                if (ch == '"' || ch == '\\') sb.Append('\\').Append(ch);
+                else if (ch < 0x20) sb.Append("\\u").Append(((int)ch).ToString("x4"));
+                else sb.Append(ch);
+            }
+            return sb.Append('"').ToString();
+        }
+
+        public void Write(LogEffect e, string app)
+        {
+            if (!Enabled) return;
+            var c = e.Candidates == null ? "null" : "[" + string.Join(",", e.Candidates.Select(J)) + "]";
+            string line = "{\"time\":" + J(DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff")) + ",\"event\":" + J(e.Event) +
+                          ",\"romaji\":" + J(e.Romaji) + ",\"context\":" + J(e.Context) + ",\"text\":" + J(e.Text) +
+                          ",\"candidates\":" + c + ",\"chosen\":" + e.Chosen + ",\"raw\":" + (e.Raw ? "true" : "false") +
+                          ",\"app\":" + J(app) + ",\"note\":" + J(e.Note) + "}\n";
+            try { File.AppendAllText(path, line, new UTF8Encoding(false)); } catch { }
+        }
+    }
+
     /// 未確定の文と候補を出す浮き窓。フォーカスを奪わない（WS_EX_NOACTIVATE）
     sealed class Popup : Form
     {
@@ -417,6 +454,7 @@ namespace RomajiSlm
         readonly Config cfg;
         readonly Server server;
         readonly Usage usage;
+        readonly History history;
         readonly Popup popup;
         readonly NotifyIcon tray;
         readonly ToolStripMenuItem enabledItem, serverItem;
@@ -442,6 +480,7 @@ namespace RomajiSlm
             cfg = new Config(Path.Combine(data, "ime.ini"));
             if (!File.Exists(cfg.Path)) cfg.Save();
             usage = new Usage(Path.Combine(data, "usage.txt"));
+            history = new History(Path.Combine(data, "history.jsonl")) { Enabled = cfg.History };
             popup = new Popup(comp);
             var unused = popup.Handle;   // BeginInvoke の宛先にするため、表示せずにハンドルを作る
 
@@ -582,6 +621,7 @@ namespace RomajiSlm
                     }
                     else if (mode != null) OnMode(mode.Mode);
                     else if (stat != null) usage.Add(stat.Name, stat.Value);
+                    else if (e is LogEffect) history.Write((LogEffect)e, Native.ForegroundExe());
                     else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq, ((CheckFieldEffect)e).DelayMs);
                     else if (e is AltMaskEffect) Native.SendMask();
                     else if (e is RedrawEffect) redraw = true;

@@ -61,6 +61,12 @@ namespace RomajiSlm
     /// 欄の確認。DelayMs だけ待ってから確かめる（欄を移すキーを送った直後は、アプリが移し終えるのを待つ）
     public sealed class CheckFieldEffect : Effect { public int Seq, DelayMs; public CheckFieldEffect(int s, int delay = 0) { Seq = s; DelayMs = delay; } }
     public sealed class StatEffect : Effect { public string Name; public double Value; public StatEffect(string n, double v) { Name = n; Value = v; } }
+    /// 実利用の記録 1 件（本人の依頼 2026-10-16「実利用中の入力と出力をすべて保存」）。Event: commit / cancel / restore。
+    /// パスワード欄の打鍵は確定にならず（そのまま送る）、ここに来ない
+    public sealed class LogEffect : Effect
+    {
+        public string Event, Romaji, Context, Text, Note; public string[] Candidates; public int Chosen; public bool Raw;
+    }
 
     public sealed class Composer
     {
@@ -106,6 +112,7 @@ namespace RomajiSlm
         bool passthrough, deliverPosted, reprocessing;
         // postMove: 欄を移しうるキーの後ろの打鍵を預かっている。awaitingMove: そのキーをまだアプリに送っていない（確認はまだ出さない）
         bool postMove, awaitingMove;
+        long lastMoveAt = long.MinValue / 2, nowKey;   // 欄を移しうるキーが最後にアプリに届いた時刻
         // 今の欄をパスワード欄でないと確かめた。窓・欄が替わる、Tab・Enter・Esc を素通しする、で消える。
         // フォーカスの通知を出さないアプリ（focus が空）では欄の移動が分からないので、未確定の文が終わるたびに消す
         bool verified;
@@ -114,7 +121,8 @@ namespace RomajiSlm
 
         sealed class Item
         {
-            public string Romaji, Text, Focus; public IntPtr Window; public bool Raw; public int CandIndex; public long At;
+            public string Romaji, Text, Focus, Context; public IntPtr Window; public bool Raw; public int CandIndex; public long At;
+            public string[] Cands;   // 記録用: 確定のときに出ていた候補
         }
         sealed class Entry { public Item Commit; public KeyEv Key; public bool Moves; }   // Moves: 欄を移しうるキーの押下
         sealed class HeldKey { public KeyEv Ev; public Mods M; public long At; }
@@ -167,6 +175,7 @@ namespace RomajiSlm
             if (fg != foreground)
                 OnForeground(fg, now);
             var kev = new KeyEv(vk, scan, ext, down);
+            nowKey = now;
             if (FieldPending)
             {
                 // 欄の確認が済むまでは、どの打鍵も解釈せずに預かる（OnFieldChecked で、そのまま送るか処理し直す）
@@ -192,7 +201,9 @@ namespace RomajiSlm
                 postMove = awaitingMove = false;
                 fieldHold.Clear();
                 fieldHold.Add(new HeldKey { Ev = kev, M = m, At = now });
-                effects.Add(new CheckFieldEffect(++fieldSeq));
+                // 欄を移しうるキーが届いてすぐなら、アプリが移し終えるまで待ってから確かめる
+                long since = now - lastMoveAt;
+                effects.Add(new CheckFieldEffect(++fieldSeq, since >= 0 && since < MoveSettleMs ? (int)(MoveSettleMs - since) : 0));
                 return true;
             }
             return Decide(kev, m, now, late);
@@ -259,6 +270,7 @@ namespace RomajiSlm
         void ReachesApp(int vk, Mods m)
         {
             if (!MayMoveFocus(vk, m)) return;
+            if (!Waiting && !reprocessing) lastMoveAt = nowKey;   // いまアプリに届く（積むものは Delivered で記録）
             verified = false;
             passthrough = false;
         }
@@ -359,7 +371,12 @@ namespace RomajiSlm
                     break;
                 case VK_ESCAPE:
                     if (Phase == Phase.Candidates) Phase = Phase.Raw;
-                    else { effects.Add(new StatEffect("cancel", 1)); Clear(); }
+                    else
+                    {
+                        effects.Add(new StatEffect("cancel", 1));
+                        effects.Add(new LogEffect { Event = "cancel", Romaji = buf.ToString(), Context = context, Candidates = Candidates, Chosen = -1 });
+                        Clear();
+                    }
                     break;
                 case VK_BACK:
                     if (Phase == Phase.Candidates) Phase = Phase.Raw;
@@ -404,6 +421,8 @@ namespace RomajiSlm
             it.Window = foreground;
             it.Focus = focus;
             it.At = now;
+            it.Context = context;
+            if (it.Cands == null) it.Cands = Candidates;
             queue.Add(new Entry { Commit = it });
             Clear();
             Flush(now);
@@ -487,11 +506,13 @@ namespace RomajiSlm
             bool moved = false;
             foreach (var e in taken)
             {
-                if (e.Moves) moved = true;
+                if (e.Moves) { moved = true; lastMoveAt = now; }
                 if (e.Commit != null)
                 {
                     var it = e.Commit;
                     effects.Add(new StatEffect(it.Raw ? "commit_raw" : it.CandIndex > 0 ? "commit_other" : "commit_first", 1));
+                    effects.Add(new LogEffect { Event = "commit", Romaji = it.Romaji, Context = it.Context, Text = it.Text,
+                                                Candidates = it.Cands, Chosen = it.Raw ? -1 : it.CandIndex, Raw = it.Raw });
                     AppendContext(it.Text, now);
                 }
                 else if (e.Key.Down)
@@ -526,6 +547,10 @@ namespace RomajiSlm
         /// 待ち行列の確定をすべて打鍵列のまま欄の先頭へ（順を保って）戻す。積んだ打鍵は離鍵だけ送り、押下は捨てる
         void RestoreQueue(string status)
         {
+            foreach (var e in queue)
+                if (e.Commit != null)
+                    effects.Add(new LogEffect { Event = "restore", Romaji = e.Commit.Romaji, Context = e.Commit.Context, Text = e.Commit.Text,
+                                                Candidates = e.Commit.Cands, Chosen = -1, Note = status });
             var romaji = new StringBuilder();
             var ups = new List<KeyEv>();
             foreach (var e in queue)
@@ -579,7 +604,9 @@ namespace RomajiSlm
 
         void Pump(long now)
         {
-            if (inflight != null || !ServerReady || FieldPending || taken.Count > 0) return;
+            // 欄の確認で預かっている間も、それより前に確定した文の変換は進める（止めると、その確定を待つ欄を移すキーと
+            // 互いに待ち合って止まる）。預かった打鍵は浮き窓に入っていないので、止めるのは今の未確定文の先読みだけ
+            if (inflight != null || !ServerReady || taken.Count > 0) return;
             foreach (var e in queue)
             {
                 if (e.Commit == null) continue;
@@ -588,7 +615,7 @@ namespace RomajiSlm
                 Send(e.Commit.Romaji, now);
                 return;
             }
-            if (buf.Length == 0) return;
+            if (buf.Length == 0 || FieldPending) return;
             string k = Key(buf.ToString(), context);
             if (cache.ContainsKey(k) || failed.ContainsKey(k)) return;
             if (Phase == Phase.Candidates || now - lastKeyAt >= DebounceMs)
@@ -625,7 +652,7 @@ namespace RomajiSlm
             foreach (var e in queue) if (e.Commit != null && e.Commit.Text == null) { head = e.Commit; break; }
             if (head != null && Key(head.Romaji, context) == k)
             {
-                if (ok) head.Text = cands[0];
+                if (ok) { head.Text = cands[0]; head.Cands = cands; head.Context = context; }
                 else
                 {
                     failed.Remove(k);   // 欄に戻した文は、もう一度 Enter で再試行できるように

@@ -59,7 +59,8 @@ pwsh -NoProfile -File ime/uninstall.ps1
 ```
 
 - 設定は `%LOCALAPPDATA%\romaji-slm\ime.ini` にある（`device=auto|cuda|cpu`、`port`、前回の on/off）。変えたらトレイの「終了」から起動し直す。
-- ログは `server.log`（打った文字列は残さない）。トレイの「使用状況をコピー」で、確定の回数・別候補を選んだ回数・待ち時間の中央値・アプリ別の回数を、貼れる文にして出す。数だけで、文字列は持たない。
+- **実利用の記録**（本人の依頼）: `%LOCALAPPDATA%\romaji-slm\history.jsonl` に 1 行 1 件の JSON で残す。残すのは、確定（`commit`）・Esc で捨てた文（`cancel`）・変換や送信に失敗して浮き窓に戻した文（`restore`）。項目は `time` `event` `romaji`（打った打鍵列） `context`（左文脈） `candidates`（出ていた候補） `chosen`（選んだ番号。1 位なら 0、打鍵列のままなら -1） `text`（入れた文） `raw` `app`（入力先の exe 名） `note`。パスワード欄の打鍵は変換せずにそのまま送るので残らない。確定した後にアプリの中で直した結果は見えない。止めるには `ime.ini` を `history=0` にする。
+- サーバのログは `server.log`（打った文字列は残さない）。トレイの「使用状況をコピー」で、確定の回数・別候補を選んだ回数・待ち時間の中央値・アプリ別の回数を、貼れる文にして出す。数だけで、文字列は持たない。
 - 初めて起動したときは「使っていない」状態で始まる。Ctrl+Alt+Space で使い始める。
 
 ## 仕組み
@@ -93,6 +94,6 @@ user_style の先頭 30 文、句読点 B・英字打ったまま（既定）。
 
 ### 試験
 
-- `pwsh -NoProfile -File ime/build.ps1 -Test`: Composer の状態機械（合成した打鍵で 44 件）。`tests/test_ime_server.py` もこれを呼ぶ。
+- `pwsh -NoProfile -File ime/build.ps1 -Test`: Composer の状態機械（合成した打鍵で 48 件）。`tests/test_ime_server.py` もこれを呼ぶ。
 - `RomajiSlmIme.exe --selftest <打鍵列> <結果ファイル> [--root <app>]`: フックも送り込みも使わずに、本物のサーバで「打鍵 → Enter → 確定文」を通す。本人のキー入力を奪わずに配線を確かめられる。
 - 実際のアプリでの打鍵（フックと SendInput、MS-IME の開閉）は、本人の操作でしか確かめられない。

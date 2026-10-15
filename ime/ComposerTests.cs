@@ -552,6 +552,67 @@ namespace RomajiSlm
                 Check(!c.OnKey(0x41, false, Mods.None, 5, W1), "its up reaches the app");
             });
 
+            Run("記録: 確定は打鍵列・候補・選んだ番号・確定文を、Esc で捨てた文は打鍵列を残す", () =>
+            {
+                var c = Ready();
+                Type(c, "kami", 0);
+                c.Tick(200);
+                var req = Req(Drain(c, 200));
+                c.OnResult(req.Id, new[] { "紙", "髪" }, null, 250);
+                Press(c, Composer.VK_SPACE, Mods.None, 300);
+                Press(c, Composer.VK_SPACE, Mods.None, 301);
+                Press(c, Composer.VK_RETURN, Mods.None, 302);
+                var log = Last<LogEffect>(Drain(c, 302).Effects);
+                Check(log != null && log.Event == "commit" && log.Romaji == "kami" && log.Text == "髪" && log.Chosen == 1
+                      && log.Candidates.Length == 2 && log.Context == "", "commit logged");
+                Type(c, "ab", 400);
+                Press(c, Composer.VK_ESCAPE, Mods.None, 401);
+                log = Last<LogEffect>(Drain(c, 401).Effects);
+                Check(log != null && log.Event == "cancel" && log.Romaji == "ab" && log.Context == "髪", "cancel logged");
+            });
+
+            Run("記録: パスワード欄で預かってそのまま送った打鍵は残さない", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                Type(c, "pw", 0);
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, true, 1);
+                Press(c, Composer.VK_RETURN, Mods.None, 2);
+                Check(!Drain(c, 2).Effects.OfType<LogEffect>().Any(), "nothing logged");
+            });
+
+            Run("欄の確認で預かっている間も、それより前の確定の変換は要求する（待ち合いで止まらない）", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "a", 0);
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, false, 1);
+                c.Tick(200);
+                var pre = Req(Drain(c, 200));   // a の先読み
+                Type(c, "b", 210);
+                Press(c, Composer.VK_RETURN, Mods.None, 211);   // ab を確定（未変換）
+                Press(c, Composer.VK_TAB, ctrl, 212);           // 確定を待つ Ctrl+Tab。離鍵から預かる
+                Drain(c, 212);
+                c.OnResult(pre.Id, new[] { "あ" }, null, 300);
+                var req = Req(Drain(c, 300));
+                Check(req != null && req.Romaji == "ab", "commit requested while holding: " + (req == null ? "none" : req.Romaji));
+            });
+
+            Run("欄を移しうるキーが届いてすぐの確認は、アプリが移し終えるまで待つ", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "a", 0);
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, false, 1);
+                Press(c, Composer.VK_ESCAPE, Mods.None, 2);
+                Check(!Press(c, Composer.VK_TAB, Mods.None, 100), "tab passes");
+                Type(c, "s", 110);
+                var chk = Last<CheckFieldEffect>(Drain(c, 110).Effects);
+                Check(chk != null && chk.DelayMs == Composer.MoveSettleMs - 10, "delayed: " + (chk == null ? -1 : chk.DelayMs));
+            });
+
             Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
             {
                 var c = Ready();
