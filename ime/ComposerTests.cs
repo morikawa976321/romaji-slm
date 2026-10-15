@@ -397,6 +397,64 @@ namespace RomajiSlm
                 Check(!Type(c, "x", 1001).Any(x => x), "passthrough in the password field");
             });
 
+            Run("未確定を残してパスワード欄へ移り、Space や @ から打ち始めても、確かめてからそのまま送る", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "a", 0);
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, false, 1);
+                Drain(c, 1);
+                c.OnFocus("100:-4:2", 2);
+                Check(Press(c, Composer.VK_SPACE, Mods.None, 3), "space held");
+                var chk = Last<CheckFieldEffect>(Drain(c, 3).Effects);
+                Check(chk != null && c.Phase == Phase.Raw, "checked before interpreting space");
+                Press(c, 0x32, Mods.ShiftOnly, 4);   // @
+                Type(c, "s", 5);
+                c.OnFieldChecked(chk.Seq, true, 6);
+                var o = Drain(c, 6);
+                Check(string.Join(",", o.Sent) == "K:+32,K:-32,K:+50,K:-50,K:+83,K:-83", "raw: " + string.Join(",", o.Sent));
+                Check(c.Buffer == "a" && Req(o) == null, "nothing added or requested");
+            });
+
+            Run("前面の窓が替わったら、前の窓の欄の確認を使い回さない", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "a", 0);
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, false, 1);
+                Press(c, Composer.VK_ESCAPE, Mods.None, 2);
+                Drain(c, 2);
+                c.OnForeground(W2, 3);   // フォーカスの通知を出さない窓
+                Check(Type(c, "s", 4).All(x => x) && Last<CheckFieldEffect>(Drain(c, 4).Effects) != null, "checked again in the new window");
+            });
+
+            Run("フォーカスの通知が無い窓では、文が終わるたびに確かめ直す", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                Type(c, "a", 0);
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, false, 1);
+                Drain(c, 1);
+                Type(c, "b", 2);
+                Check(Last<CheckFieldEffect>(Drain(c, 2).Effects) == null && c.Buffer == "ab", "same sentence: no check");
+                Press(c, Composer.VK_RETURN, Mods.ShiftOnly, 3);
+                Drain(c, 3);
+                Type(c, "c", 4);
+                Check(Last<CheckFieldEffect>(Drain(c, 4).Effects) != null, "next sentence: checked");
+            });
+
+            Run("送った時刻より前に押されていたキー（late）は待ち行列に入り、後のキーや確定と順を保つ", () =>
+            {
+                var c = Ready();
+                Check(c.OnKey(Composer.VK_RETURN, true, Mods.None, 0, W1, 0, false, true), "late enter queued");
+                Check(c.OnKey(Composer.VK_RETURN, false, Mods.None, 1, W1), "its up follows (queue not empty)");
+                Type(c, "b", 2);
+                Press(c, Composer.VK_RETURN, Mods.ShiftOnly, 3);
+                Check(string.Join(",", Drain(c, 4).Sent) == "K:+13,K:-13,T:b", "order");
+            });
+
             Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
             {
                 var c = Ready();

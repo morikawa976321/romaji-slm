@@ -430,7 +430,6 @@ namespace RomajiSlm
         Point anchor;
         readonly bool[] keyDown = new bool[256];
         uint batchTick;   // 最後に SendBatch した時刻（GetTickCount。KBDLLHOOKSTRUCT.time と同じ時計）
-        readonly List<KeyEv> late = new List<KeyEv>();   // 送った分の後ろに送り直す、素通しのキー
         bool wasComposing, caps, posted, caretAnchor;
         long flashUntil, fieldDeadline;
         int fieldSeq;
@@ -501,7 +500,7 @@ namespace RomajiSlm
             ResyncModifiers();
             timer.Tick += (s, e) =>
             {
-                if (!comp.Holding && late.Count == 0) ResyncModifiers();   // 離鍵を取りこぼしても（管理者権限の窓の上で離した等）修飾キーが押されたままにならない
+                if (!comp.Holding) ResyncModifiers();   // 離鍵を取りこぼしても（管理者権限の窓の上で離した等）修飾キーが押されたままにならない
                 if (fieldDeadline != 0 && Now > fieldDeadline) { fieldDeadline = 0; comp.OnFieldChecked(fieldSeq, false, Now); }
                 comp.Tick(Now);
                 Run();
@@ -510,15 +509,6 @@ namespace RomajiSlm
             // UI Automation の初回の呼び出しは初期化で遅く、欄の確認（0.3 秒で打ち切り）に間に合わないことがあるので、起動時に 1 回済ませる
             ThreadPool.QueueUserWorkItem(_ => { bool pw; Point q; Native.FocusedElement(out pw, out q); });
             timer.Start();
-        }
-
-        void FlushLate()
-        {
-            if (late.Count == 0) return;
-            var ds = late.Select(k => new Delivery { IsKey = true, Key = k }).ToList();
-            late.Clear();
-            Native.SendBatch(ds);
-            batchTick = unchecked((uint)Environment.TickCount);
         }
 
         /// 確定待ちでない（修飾キーを積んでいない）間は、OS の状態が本人の押している状態と一致する
@@ -551,19 +541,13 @@ namespace RomajiSlm
                     if (down && k.vkCode == Composer.VK_CAPITAL) caps = !caps;
                     var m = new Mods(keyDown[0xA0] || keyDown[0xA1], keyDown[0xA2] || keyDown[0xA3],
                                      keyDown[0xA4] || keyDown[0xA5], keyDown[0x5B] || keyDown[0x5C], caps);
+                    // こちらがまとめて送った（SendBatch）時刻より前に押されていたキーは、入力の列では送った分より前にいる。
+                    // 素通しにすると確定文を追い越すので、Composer の待ち行列に積ませて後ろに送り直す
+                    bool late = batchTick != 0 && unchecked((int)(k.time - batchTick)) < 0;
                     bool swallow = comp.OnKey((int)k.vkCode, down, m, Now, Native.GetForegroundWindow(),
-                                              (int)k.scanCode, (k.flags & 0x01) != 0);
+                                              (int)k.scanCode, (k.flags & 0x01) != 0, late);
                     if (!posted) { posted = true; popup.BeginInvoke((Action)Run); }
                     if (swallow) return new IntPtr(1);
-                    // こちらがまとめて送った（SendBatch）時刻より前に押されていたキーは、入力の列では送った分より前にいる。
-                    // そのまま渡すと確定文を追い越すので、止めて送った分の後ろに送り直す。送り直しを待つキーがある間は、
-                    // 後から来たキーも同じ列に並べる（先に通すと、押下と離鍵の順が入れ替わる）
-                    if (late.Count > 0 || (batchTick != 0 && unchecked((int)(k.time - batchTick)) < 0))
-                    {
-                        late.Add(new KeyEv((int)k.vkCode, (int)k.scanCode, (k.flags & 0x01) != 0, down));
-                        if (late.Count == 1) popup.BeginInvoke((Action)FlushLate);
-                        return new IntPtr(1);
-                    }
                 }
             }
             catch { }

@@ -103,7 +103,9 @@ namespace RomajiSlm
         long lastKeyAt;
         int nextId = 1, fieldSeq;
         bool passthrough, deliverPosted, reprocessing;
-        string checkedFocus;   // パスワード欄でないと確かめた欄（フォーカスの組）。同じ欄では確かめ直さない
+        // 今の欄をパスワード欄でないと確かめた。窓・欄が替わる、Tab・Enter・Esc を素通しする、で消える。
+        // フォーカスの通知を出さないアプリ（focus が空）では欄の移動が分からないので、未確定の文が終わるたびに消す
+        bool verified;
         readonly List<HeldKey> fieldHold = new List<HeldKey>();   // 欄の確認が済むまで預かった打鍵
         Pending inflight;
 
@@ -157,7 +159,7 @@ namespace RomajiSlm
 
         /// 打鍵 1 つ。true ならアプリに渡さない（握りつぶすか、待ち行列に積んだ）。
         /// m は呼び出し側が自分で追った修飾キーの状態（積んだ修飾キーは OS に届いていないので、OS の状態は使えない）
-        public bool OnKey(int vk, bool down, Mods m, long now, IntPtr fg, int scan = 0, bool ext = false)
+        public bool OnKey(int vk, bool down, Mods m, long now, IntPtr fg, int scan = 0, bool ext = false, bool late = false)
         {
             if (fg != foreground)
                 OnForeground(fg, now);
@@ -176,21 +178,23 @@ namespace RomajiSlm
                 effects.Add(new CheckFieldEffect(++fieldSeq));
                 return true;
             }
-            return Decide(kev, m, now);
+            return Decide(kev, m, now, late);
         }
 
-        /// 未確定の欄に文字を足す打鍵で、今の欄をまだ確かめていなければ、パスワード欄かを先に確かめる。
-        /// 未確定の文を残したまま別の欄に移ったときも確かめる（移った先がパスワード欄なら、足す文字は秘密）。
-        /// フォーカスの通知を出さないアプリ（focus が空）では欄の移動が分からないので、打ち始めのたびに確かめる
+        /// 日本語モードで、今の欄をまだ確かめていなければ、パスワード欄かを先に確かめる（文字に限らず Space・記号・Enter も。
+        /// どのキーもこの欄では解釈し始める前に確かめる）。ショートカット（Ctrl・Alt・Win つき）と修飾キーそのものは対象外
         bool NeedsFieldCheck(int vk, Mods m)
         {
-            if (!RequireFieldCheck || Mode != Mode.Japanese || passthrough) return false;
-            if (m.Ctrl || m.Alt || m.Win || CharFor(vk, m) == '\0') return false;
-            if (Phase == Phase.Candidates) return false;   // 候補の表示中の文字は、まず確定に使われる（確定後の打ち始めで確かめる）
-            return focus.Length == 0 ? !Composing : focus != checkedFocus;
+            if (!RequireFieldCheck || Mode != Mode.Japanese || passthrough || verified) return false;
+            if (m.Ctrl || m.Alt || m.Win || IsModifier(vk)) return false;
+            return true;
         }
 
-        bool Decide(KeyEv kev, Mods m, long now)
+        static bool IsModifier(int vk)
+        {
+            return (vk >= 0x10 && vk <= 0x12) || (vk >= 0xA0 && vk <= 0xA5) || vk == 0x5B || vk == 0x5C || vk == VK_CAPITAL;
+        }
+        bool Decide(KeyEv kev, Mods m, long now, bool late = false)
         {
             int vk = kev.Vk;
             bool down = kev.Down;
@@ -200,7 +204,7 @@ namespace RomajiSlm
             {
                 held.Remove(vk);
                 if (wasHeld && (st == Swallowed || st == Dropped)) return true;
-                return Enqueue(kev);
+                return Enqueue(kev, late);
             }
             if (wasHeld)
             {
@@ -212,20 +216,21 @@ namespace RomajiSlm
                     if (!m.Ctrl && !m.Alt && !m.Win && !(vk == VK_SPACE && m.Shift)) HandleDown(vk, m, now);
                     return true;
                 }
-                if (Enqueue(kev)) { held[vk] = Queued; return true; }
+                if (Enqueue(kev, late)) { held[vk] = Queued; return true; }
                 return false;
             }
             if (HandleDown(vk, m, now)) { held[vk] = Swallowed; return true; }
-            if (Enqueue(kev)) { held[vk] = Queued; return true; }
+            if (Enqueue(kev, late)) { held[vk] = Queued; return true; }
             held[vk] = Passed;
             return false;
         }
 
         /// 確定待ちなら素通しのはずの打鍵を積む（true）。待っていなければ false（そのまま渡す）。
-        /// 預かった打鍵を処理し直している間は、すでにアプリへ渡し損ねているので必ず積む
-        bool Enqueue(KeyEv k)
+        /// 預かった打鍵を処理し直している間と、こちらが最後にまとめて送った時刻より前に押されていたキー（late）は、
+        /// そのまま渡すと入力の列で順が崩れるので必ず積む
+        bool Enqueue(KeyEv k, bool late = false)
         {
-            if (!Waiting && !reprocessing) return false;
+            if (!Waiting && !reprocessing && !late) return false;
             queue.Add(new Entry { Key = k });
             PostDeliver();
             return true;
@@ -269,6 +274,7 @@ namespace RomajiSlm
             }
             if (!Composing)
             {
+                if (vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE) verified = false;   // 欄を離れうる
                 if (c != '\0')
                 {
                     buf.Append(c);
@@ -338,6 +344,7 @@ namespace RomajiSlm
 
         void Clear()
         {
+            if (focus.Length == 0) verified = false;
             buf.Length = 0;
             Phase = Phase.Idle;
             CandIndex = 0;
@@ -598,7 +605,7 @@ namespace RomajiSlm
             else
             {
                 // 普通の欄。預かった打鍵を打たれた順に処理し直す。素通しになる打鍵は、アプリへ渡し損ねているので待ち行列に積む
-                checkedFocus = focus;
+                verified = true;
                 reprocessing = true;
                 try { foreach (var h in hs) Decide(h.Ev, h.M, h.At); }
                 finally { reprocessing = false; }
@@ -653,7 +660,8 @@ namespace RomajiSlm
             if (fg == foreground) return;
             DropFieldHold();
             foreground = fg;
-            checkedFocus = null;
+            focus = "";   // 新しい窓の欄はまだ分からない（前の窓の欄の組を使い回さない）
+            verified = false;
             passthrough = false;
             if (Phase == Phase.Candidates) Phase = Phase.Raw;   // 移った先で文字を打っても、前の欄の候補で確定しない
             ResetContext();
@@ -669,6 +677,7 @@ namespace RomajiSlm
             if (key == focus) return;
             DropFieldHold();
             focus = key;
+            verified = false;
             passthrough = false;
             if (Phase == Phase.Candidates) Phase = Phase.Raw;
             ResetContext();
