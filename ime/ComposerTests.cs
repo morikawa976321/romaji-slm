@@ -508,6 +508,50 @@ namespace RomajiSlm
                 Check(Type(c, "a", 3).All(x => x) && Last<CheckFieldEffect>(Drain(c, 3).Effects) != null, "next field checked, not passed through");
             });
 
+            Run("欄を移すキー（Ctrl+Tab）がまだ送られていない間に打った文字は、送ってから移った先で確かめる", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "a", 0);
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, false, 1);
+                Drain(c, 1);
+                Press(c, Composer.VK_RETURN, Mods.None, 2);
+                var req = Req(Drain(c, 2));
+                Check(Press(c, Composer.VK_TAB, ctrl, 3), "ctrl+tab queued");
+                Check(Type(c, "se", 4).All(x => x) && c.Buffer == "", "held, not composed");
+                Check(Last<CheckFieldEffect>(Drain(c, 4).Effects) == null, "no check before the move is sent");
+                c.OnResult(req.Id, new[] { "あ" }, null, 5);
+                var o = Drain(c, 5);
+                var chk = Last<CheckFieldEffect>(o.Effects);
+                Check(string.Join(",", o.Sent) == "T:あ,K:+9" && chk != null && chk.DelayMs > 0, "sent then delayed check: " + string.Join(",", o.Sent));
+                c.OnFocus("100:-4:2", 6);   // 移った（パスワード欄）
+                chk = Last<CheckFieldEffect>(Drain(c, 6).Effects);
+                Check(chk != null && c.FieldPending, "rechecked on focus, still holding");
+                c.OnFieldChecked(chk.Seq, true, 7);
+                o = Drain(c, 7);
+                Check(string.Join(",", o.Sent) == "K:-9,K:+83,K:-83,K:+69,K:-69", "raw: " + string.Join(",", o.Sent));
+                Check(c.Buffer == "" && Req(o) == null, "secret never composed or requested");
+            });
+
+            Run("文字キーを押したまま欄を移っても、リピートは確かめてから扱う", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Check(c.OnKey(0x41, true, Mods.None, 0, W1), "a down held");
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, false, 1);
+                Drain(c, 1);
+                Check(c.Buffer == "a", "composed");
+                c.OnFocus("100:-4:2", 2);
+                Check(c.OnKey(0x41, true, Mods.None, 3, W1), "repeat held");
+                var chk = Last<CheckFieldEffect>(Drain(c, 3).Effects);
+                Check(chk != null, "checked");
+                c.OnFieldChecked(chk.Seq, true, 4);
+                Check(string.Join(",", Drain(c, 4).Sent) == "K:+65" && c.Buffer == "a", "repeat sent raw, not appended");
+                Check(!c.OnKey(0x41, false, Mods.None, 5, W1), "its up reaches the app");
+            });
+
             Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
             {
                 var c = Ready();

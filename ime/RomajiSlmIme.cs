@@ -582,7 +582,7 @@ namespace RomajiSlm
                     }
                     else if (mode != null) OnMode(mode.Mode);
                     else if (stat != null) usage.Add(stat.Name, stat.Value);
-                    else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq);
+                    else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq, ((CheckFieldEffect)e).DelayMs);
                     else if (e is AltMaskEffect) Native.SendMask();
                     else if (e is RedrawEffect) redraw = true;
                 }
@@ -627,12 +627,13 @@ namespace RomajiSlm
         }
 
         /// フォーカスの欄がパスワード欄かを UI Automation で確かめる（別スレッド。応答しなければ時間切れで「違う」）
-        void CheckField(int seq)
+        void CheckField(int seq, int delayMs)
         {
             fieldSeq = seq;
-            fieldDeadline = Now + FieldCheckMs;
+            fieldDeadline = Now + delayMs + FieldCheckMs;
             ThreadPool.QueueUserWorkItem(_ =>
             {
+                if (delayMs > 0) Thread.Sleep(delayMs);   // 欄を移すキーを送った直後。アプリが移し終えるのを待つ
                 bool password; Point q;
                 bool ok = Native.FocusedElement(out password, out q);
                 popup.BeginInvoke((Action)(() =>

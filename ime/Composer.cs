@@ -58,7 +58,8 @@ namespace RomajiSlm
     public sealed class ModeEffect : Effect { public Mode Mode; public ModeEffect(Mode m) { Mode = m; } }
     public sealed class AltMaskEffect : Effect { }   // Alt を押したまま握りつぶしたキーのあと、Alt の単押し（メニュー起動）を防ぐ
     public sealed class RedrawEffect : Effect { }
-    public sealed class CheckFieldEffect : Effect { public int Seq; public CheckFieldEffect(int s) { Seq = s; } }
+    /// 欄の確認。DelayMs だけ待ってから確かめる（欄を移すキーを送った直後は、アプリが移し終えるのを待つ）
+    public sealed class CheckFieldEffect : Effect { public int Seq, DelayMs; public CheckFieldEffect(int s, int delay = 0) { Seq = s; DelayMs = delay; } }
     public sealed class StatEffect : Effect { public string Name; public double Value; public StatEffect(string n, double v) { Name = n; Value = v; } }
 
     public sealed class Composer
@@ -103,6 +104,8 @@ namespace RomajiSlm
         long lastKeyAt;
         int nextId = 1, fieldSeq;
         bool passthrough, deliverPosted, reprocessing;
+        // postMove: 欄を移しうるキーの後ろの打鍵を預かっている。awaitingMove: そのキーをまだアプリに送っていない（確認はまだ出さない）
+        bool postMove, awaitingMove;
         // 今の欄をパスワード欄でないと確かめた。窓・欄が替わる、Tab・Enter・Esc を素通しする、で消える。
         // フォーカスの通知を出さないアプリ（focus が空）では欄の移動が分からないので、未確定の文が終わるたびに消す
         bool verified;
@@ -113,7 +116,7 @@ namespace RomajiSlm
         {
             public string Romaji, Text, Focus; public IntPtr Window; public bool Raw; public int CandIndex; public long At;
         }
-        sealed class Entry { public Item Commit; public KeyEv Key; }
+        sealed class Entry { public Item Commit; public KeyEv Key; public bool Moves; }   // Moves: 欄を移しうるキーの押下
         sealed class HeldKey { public KeyEv Ev; public Mods M; public long At; }
         sealed class Pending { public int Id; public string Key; public long SentAt; }
 
@@ -170,15 +173,39 @@ namespace RomajiSlm
                 fieldHold.Add(new HeldKey { Ev = kev, M = m, At = now });
                 return true;
             }
-            if (down && !held.ContainsKey(vk) && NeedsFieldCheck(vk, m))
+            if (RequireFieldCheck && Mode == Mode.Japanese && MoveInFlight)
+            {
+                // 欄を移しうるキーがまだ待ち行列にある（アプリに届いていない）。この後の打鍵は移った先の欄のものなので、
+                // そのキーを送ってから移った先を確かめるまで、解釈せずに預かる
+                FieldPending = true;
+                postMove = awaitingMove = true;
+                fieldHold.Clear();
+                fieldHold.Add(new HeldKey { Ev = kev, M = m, At = now });
+                return true;
+            }
+            int st;
+            bool known = held.TryGetValue(vk, out st);
+            // キーリピートでも、握りつぶしているキー（浮き窓に文字を足している）なら確かめる（押したまま欄を移った）
+            if (down && (!known || st == Swallowed) && NeedsFieldCheck(vk, m))
             {
                 FieldPending = true;
+                postMove = awaitingMove = false;
                 fieldHold.Clear();
                 fieldHold.Add(new HeldKey { Ev = kev, M = m, At = now });
                 effects.Add(new CheckFieldEffect(++fieldSeq));
                 return true;
             }
             return Decide(kev, m, now, late);
+        }
+
+        bool MoveInFlight
+        {
+            get
+            {
+                foreach (var e in queue) if (e.Moves) return true;
+                foreach (var e in taken) if (e.Moves) return true;
+                return false;
+            }
         }
 
         /// 日本語モードで、今の欄をまだ確かめていなければ、パスワード欄かを先に確かめる（文字に限らず Space・記号・Enter も。
@@ -217,12 +244,12 @@ namespace RomajiSlm
                     return true;
                 }
                 ReachesApp(vk, m);   // Tab の押しっぱなしなど、リピートでも欄は移る
-                if (Enqueue(kev, late)) { held[vk] = Queued; return true; }
+                if (Enqueue(kev, late, MayMoveFocus(vk, m))) { held[vk] = Queued; return true; }
                 return false;
             }
             if (HandleDown(vk, m, now)) { held[vk] = Swallowed; return true; }
             ReachesApp(vk, m);
-            if (Enqueue(kev, late)) { held[vk] = Queued; return true; }
+            if (Enqueue(kev, late, MayMoveFocus(vk, m))) { held[vk] = Queued; return true; }
             held[vk] = Passed;
             return false;
         }
@@ -248,10 +275,10 @@ namespace RomajiSlm
         /// 確定待ちなら素通しのはずの打鍵を積む（true）。待っていなければ false（そのまま渡す）。
         /// 預かった打鍵を処理し直している間と、こちらが最後にまとめて送った時刻より前に押されていたキー（late）は、
         /// そのまま渡すと入力の列で順が崩れるので必ず積む
-        bool Enqueue(KeyEv k, bool late = false)
+        bool Enqueue(KeyEv k, bool late = false, bool moves = false)
         {
             if (!Waiting && !reprocessing && !late) return false;
-            queue.Add(new Entry { Key = k });
+            queue.Add(new Entry { Key = k, Moves = moves });
             PostDeliver();
             return true;
         }
@@ -457,8 +484,10 @@ namespace RomajiSlm
         /// TakeReady で渡した分を送り終えた
         public void Delivered(long now)
         {
+            bool moved = false;
             foreach (var e in taken)
             {
+                if (e.Moves) moved = true;
                 if (e.Commit != null)
                 {
                     var it = e.Commit;
@@ -472,9 +501,17 @@ namespace RomajiSlm
                 }
             }
             taken.Clear();
+            if (moved && FieldPending && awaitingMove && !MoveInFlight)
+            {
+                // 欄を移すキーが届いた。アプリが移し終えるのを少し待ってから、移った先を確かめる（フォーカスの通知が来ればすぐ確かめ直す）
+                awaitingMove = false;
+                effects.Add(new CheckFieldEffect(++fieldSeq, MoveSettleMs));
+            }
             effects.Add(new RedrawEffect());
             Flush(now);
         }
+
+        public const int MoveSettleMs = 100;
 
         /// TakeReady で渡した分を送れなかった（SendInput の失敗・前面の窓の変化）。渡した分と残りの待ち行列を順に欄へ戻す
         public void DeliveryFailed(string why, long now)
@@ -504,6 +541,12 @@ namespace RomajiSlm
             queue.Clear();
             deliverPosted = false;
             if (ups.Count > 0) effects.Add(new ReplayEffect(ups));
+            if (FieldPending && awaitingMove)
+            {
+                // 欄を移すキーを送らずに捨てたので、欄は移っていない。預かった打鍵は今の欄で確かめる
+                awaitingMove = false;
+                effects.Add(new CheckFieldEffect(++fieldSeq));
+            }
             Restore(romaji.ToString(), status);
         }
 
@@ -603,8 +646,9 @@ namespace RomajiSlm
         /// 欄の確認の結果（呼び出し側が時間切れにしたときは password=false で呼ぶ）
         public void OnFieldChecked(int seq, bool password, long now)
         {
-            if (seq != fieldSeq || !FieldPending) return;
+            if (seq != fieldSeq || !FieldPending || awaitingMove) return;
             FieldPending = false;
+            postMove = false;
             var hs = new List<HeldKey>(fieldHold);
             fieldHold.Clear();
             if (password)
@@ -618,7 +662,8 @@ namespace RomajiSlm
                     var h = hs[i];
                     queue.Add(new Entry { Key = h.Ev });
                     if (!h.Ev.Down) { held.Remove(h.Ev.Vk); continue; }
-                    if (!held.ContainsKey(h.Ev.Vk)) held[h.Ev.Vk] = Queued;
+                    int hst;
+                    if (!held.TryGetValue(h.Ev.Vk, out hst) || hst == Swallowed) held[h.Ev.Vk] = Queued;   // 押下を送るので離鍵も送る
                     if (MayMoveFocus(h.Ev.Vk, h.M)) { passthrough = false; i++; break; }
                 }
                 if (i < hs.Count) DropHeld(hs.GetRange(i, hs.Count - i), "入力欄を離れるキーの後に打った文字は、移った先の欄を確かめられないので捨てました");
@@ -664,7 +709,14 @@ namespace RomajiSlm
         void DropFieldHold()
         {
             if (!FieldPending) return;
+            if (postMove && !awaitingMove)
+            {
+                // 欄を移すキーを送った後の通知。預かった打鍵は移った先のものなので、捨てずに移った先を確かめ直す
+                effects.Add(new CheckFieldEffect(++fieldSeq));
+                return;
+            }
             FieldPending = false;
+            postMove = awaitingMove = false;
             fieldSeq++;   // 遅れて届く確認の結果を無視する
             var hs = new List<HeldKey>(fieldHold);
             fieldHold.Clear();
