@@ -752,6 +752,7 @@ namespace RomajiSlm
             var clock = Stopwatch.StartNew();
             var w = new IntPtr(1);
             string result = null;
+            var selfHistory = new History(outPath + ".history.jsonl");   // 記録の書式も同じクラスで確かめる
             using (var server = new Server(root, data, cfg))
             {
                 var ready = new ManualResetEvent(false);
@@ -777,6 +778,7 @@ namespace RomajiSlm
                         foreach (var e in comp.TakeEffects())
                         {
                             var req = e as RequestEffect;
+                            if (e is LogEffect) selfHistory.Write((LogEffect)e, "selftest");
                             if (e is DeliverEffect)
                             {
                                 var ds = comp.TakeReady(clock.ElapsedMilliseconds);
@@ -795,6 +797,7 @@ namespace RomajiSlm
                         if (result == null) { Thread.Sleep(20); comp.Tick(clock.ElapsedMilliseconds); }
                         if (result == null && !comp.Composing && comp.PendingCommits == 0 && comp.Status != "") result = "FAIL: " + comp.Status;
                     }
+                    foreach (var e in comp.TakeEffects()) if (e is LogEffect) selfHistory.Write((LogEffect)e, "selftest");   // 送った後の記録
                     if (result == null) result = "FAIL: " + (comp.Status ?? "") + " buffer=" + comp.Buffer;
                 }
             }
