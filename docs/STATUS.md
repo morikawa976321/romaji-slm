@@ -1,4 +1,4 @@
-# 現状と再開の手引き（2026-10-15、自律進行セッションの終了時点）
+# 現状と再開の手引き（2026-10-15 夜、本人がデスクトップで体験版を試した後）
 
 2026-10-13 に本人が休止を決め、2026-10-14〜15 に親セッション（Claude）が本人不在で進めた（規則は [parent-session-prompt.md](parent-session-prompt.md)、判断の記録 D1〜D13 と本人待ちのカードは [decisions.md](decisions.md)）。
 要件は [DESIGN.md](DESIGN.md)、方式の決定と経緯は [REDESIGN.md](REDESIGN.md)、全実測は [EVAL.md](EVAL.md)、体験版は [TRIAL.md](TRIAL.md)、llama-server 実行系は [LLAMA_BACKEND.md](LLAMA_BACKEND.md)。
@@ -54,11 +54,13 @@ pwsh -NoProfile -File tools/pack-trial.ps1                                      
 
 ## 2. 次にやること
 
-1. **本人待ち**（decisions.md「本人待ち」）: ThinkPad で zip を動かして結果ブロックを貼ってもらう。回答（句読点 A/B・英字・使用感）と ThinkPad の実測（各文の ms・最大・1 秒超の件数）がそれで届く。本人の言葉は decisions.md に原文で記録し、engine の 01_inbox にも 1 メモ 1 ファイルで書く。
-2. **クラウドの残り**: `tools/tasks/reading-recall.md`（読み段の打鍵ミス再現率 63.5%→80%、辞書に無い英字列の保持。ブランチ `claude/reading-recall*`）が進行中だった。PR が来たら `git merge` → `uv run pytest` → `eval.run` で user_style / gen_test / AJIMEE を回し、`eval/diff.py` で改善・悪化・新たに壊れた件を見てから取り込む。
-3. **ThinkPad の実測で 1 秒を超えたら**: llama-server 版を「精度優先」の実体にする（D13）。そのために llama 版の約 1 ポイント差（自然さの強制生成のトークン分割、取り直し 193 回/14 件）を潰し、Windows 向けの llama-server（CPU 版か Vulkan 版）と GGUF を zip に同梱する形に `trial/engine.py` と `tools/pack-trial.ps1` を広げる。
-4. **精度**: 誤補正（視線計測→自然計測の型）、辞書に無い英字・略語（jr→上野、scc-0210→サッカー0210、cdma→狭）、ローマ字として読める英単語（todo→とど、code→コデ）。目安（user_style 70 / tech 60 / typo 50 / 誤補正 2%）と現在値からの差分で採否。
-5. IME 化は本人が「後で決める」としたままで未着手。
+本人は 2026-10-15 にデスクトップで体験版を試し、句読点 B・英字 打ったまま・「使ってみたい」と答えた（decisions.md「本人の回答」、D14）。コアの既定は punct=insert・en_case=typed にした。読み段の PR #10 は後段の補正つきで取り込んだ（D15）。
+
+1. **ThinkPad での実測はまだ**。速度要件（20〜30 字 1 秒以内）の判定には ThinkPad で体験版を 1 回動かす必要がある（`dist/romaji-slm-trial-*.zip`、手順は decisions.md「本人の身体が要ること」）。
+2. **長い入力の速度**: 本人の自由入力（91 字、2 文）はデスクトップの CPU で small 3.2 秒、xsmall 1.0 秒。時間は文字数にほぼ比例する。句点の位置で区切って変換する、または llama-server 版（約 0.7 倍）に切り替える。
+3. **1 語に打鍵ミスが 3 つ以上**（kangaerareru → kangkaraereu）は読み段が 1 語 1 編集・1 文 2 編集までなので直せない。**別の正しいローマ字になる余計な 1 字**（donnna|i|kairyou → 異界量）も直せない。PR #10 の提案（読みの候補 20〜40 件を辞書の変換コストで 5 件に絞る。机上で再現率 82%）が次の候補。
+4. **句読点 B は文中の句点を入れない**（読点 1 つと文末だけ）。2 文を続けて打つと「…だろうか速度の…」と切れない。
+5. IME 化は本人が「後で決める」としたまま。「使ってみたい」は IME 化の決定ではないので、次の提示でカードにする。
 
 ## 3. 止めた路線（再開時に繰り返さない）
 
