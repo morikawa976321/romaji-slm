@@ -430,6 +430,7 @@ namespace RomajiSlm
         Point anchor;
         readonly bool[] keyDown = new bool[256];
         uint batchTick;   // 最後に SendBatch した時刻（GetTickCount。KBDLLHOOKSTRUCT.time と同じ時計）
+        readonly List<KeyEv> late = new List<KeyEv>();   // 送った分の後ろに送り直す、素通しのキー
         bool wasComposing, caps, posted, caretAnchor;
         long flashUntil, fieldDeadline;
         int fieldSeq;
@@ -500,13 +501,22 @@ namespace RomajiSlm
             ResyncModifiers();
             timer.Tick += (s, e) =>
             {
-                if (!comp.Waiting) ResyncModifiers();   // 離鍵を取りこぼしても（管理者権限の窓の上で離した等）修飾キーが押されたままにならない
+                if (!comp.Holding && late.Count == 0) ResyncModifiers();   // 離鍵を取りこぼしても（管理者権限の窓の上で離した等）修飾キーが押されたままにならない
                 if (fieldDeadline != 0 && Now > fieldDeadline) { fieldDeadline = 0; comp.OnFieldChecked(fieldSeq, false, Now); }
                 comp.Tick(Now);
                 Run();
             };
             comp.RequireFieldCheck = true;
             timer.Start();
+        }
+
+        void FlushLate()
+        {
+            if (late.Count == 0) return;
+            var ds = late.Select(k => new Delivery { IsKey = true, Key = k }).ToList();
+            late.Clear();
+            Native.SendBatch(ds);
+            batchTick = unchecked((uint)Environment.TickCount);
         }
 
         /// 確定待ちでない（修飾キーを積んでいない）間は、OS の状態が本人の押している状態と一致する
@@ -544,11 +554,12 @@ namespace RomajiSlm
                     if (!posted) { posted = true; popup.BeginInvoke((Action)Run); }
                     if (swallow) return new IntPtr(1);
                     // こちらがまとめて送った（SendBatch）時刻より前に押されていたキーは、入力の列では送った分より前にいる。
-                    // そのまま渡すと確定文を追い越すので、止めて送った分の後ろに送り直す
-                    if (batchTick != 0 && unchecked((int)(k.time - batchTick)) < 0)
+                    // そのまま渡すと確定文を追い越すので、止めて送った分の後ろに送り直す。送り直しを待つキーがある間は、
+                    // 後から来たキーも同じ列に並べる（先に通すと、押下と離鍵の順が入れ替わる）
+                    if (late.Count > 0 || (batchTick != 0 && unchecked((int)(k.time - batchTick)) < 0))
                     {
-                        var ev = new KeyEv((int)k.vkCode, (int)k.scanCode, (k.flags & 0x01) != 0, down);
-                        popup.BeginInvoke((Action)(() => Native.SendBatch(new List<Delivery> { new Delivery { IsKey = true, Key = ev } })));
+                        late.Add(new KeyEv((int)k.vkCode, (int)k.scanCode, (k.flags & 0x01) != 0, down));
+                        if (late.Count == 1) popup.BeginInvoke((Action)FlushLate);
                         return new IntPtr(1);
                     }
                 }

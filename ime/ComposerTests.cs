@@ -373,6 +373,30 @@ namespace RomajiSlm
                 Check(Last<CheckFieldEffect>(Drain(c, 400).Effects) == null && c.Buffer == "b", "same field: no check");
             });
 
+            Run("未確定の文を残したままパスワード欄へ移っても、移った先で打つ文字は確かめてから扱う", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "a", 0);
+                var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
+                c.OnFieldChecked(chk.Seq, false, 10);
+                Drain(c, 10);
+                Check(c.Buffer == "a", "composing a");
+                c.OnFocus("100:-4:2", 20);   // パスワード欄へ
+                Check(Type(c, "se", 21).All(x => x), "held");
+                chk = Last<CheckFieldEffect>(Drain(c, 21).Effects);
+                Check(chk != null, "checked although composing");
+                c.OnFieldChecked(chk.Seq, true, 30);
+                var o = Drain(c, 30);
+                Check(string.Join(",", o.Sent) == "K:+83,K:-83,K:+69,K:-69", "raw: " + string.Join(",", o.Sent));
+                Check(c.Buffer == "a", "secret not appended: " + c.Buffer);
+                c.Tick(1000);
+                var reqs = Drain(c, 1000).Effects.OfType<RequestEffect>().Concat(o.Effects.OfType<RequestEffect>());
+                Check(reqs.All(r => !r.Romaji.Contains("s")), "secret never requested");
+                Check(!Type(c, "x", 1001).Any(x => x), "passthrough in the password field");
+            });
+
             Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
             {
                 var c = Ready();

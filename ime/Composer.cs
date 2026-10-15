@@ -120,6 +120,8 @@ namespace RomajiSlm
         public string Context { get { return context; } }
         public int PendingCommits { get { int n = 0; foreach (var e in queue) if (e.Commit != null) n++; return n; } }
         public bool Waiting { get { return queue.Count > 0 || taken.Count > 0; } }
+        /// 打鍵を OS に渡さずに持っている（積んでいる・預かっている）。この間は OS のキー状態が本人の押している状態と違う
+        public bool Holding { get { return Waiting || FieldPending; } }
 
         public List<Effect> TakeEffects()
         {
@@ -177,12 +179,15 @@ namespace RomajiSlm
             return Decide(kev, m, now);
         }
 
-        /// 日本語の打ち始め（この打鍵で未確定の文が始まる）で、まだ確かめていない欄なら、パスワード欄かを先に確かめる
+        /// 未確定の欄に文字を足す打鍵で、今の欄をまだ確かめていなければ、パスワード欄かを先に確かめる。
+        /// 未確定の文を残したまま別の欄に移ったときも確かめる（移った先がパスワード欄なら、足す文字は秘密）。
+        /// フォーカスの通知を出さないアプリ（focus が空）では欄の移動が分からないので、打ち始めのたびに確かめる
         bool NeedsFieldCheck(int vk, Mods m)
         {
-            if (!RequireFieldCheck || Mode != Mode.Japanese || Composing || passthrough) return false;
+            if (!RequireFieldCheck || Mode != Mode.Japanese || passthrough) return false;
             if (m.Ctrl || m.Alt || m.Win || CharFor(vk, m) == '\0') return false;
-            return focus.Length == 0 || focus != checkedFocus;
+            if (Phase == Phase.Candidates) return false;   // 候補の表示中の文字は、まず確定に使われる（確定後の打ち始めで確かめる）
+            return focus.Length == 0 ? !Composing : focus != checkedFocus;
         }
 
         bool Decide(KeyEv kev, Mods m, long now)
@@ -256,13 +261,14 @@ namespace RomajiSlm
             }
 
             char c = CharFor(vk, m);
+            if (passthrough)
+            {
+                // パスワード欄。未確定の文（前の欄から持ち越したもの）が残っていても、この欄の打鍵はそのまま渡す
+                if (vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE) passthrough = false;   // 欄を離れる
+                return false;
+            }
             if (!Composing)
             {
-                if (passthrough)
-                {
-                    if (vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE) passthrough = false;   // 欄を離れる
-                    return false;
-                }
                 if (c != '\0')
                 {
                     buf.Append(c);
@@ -649,6 +655,7 @@ namespace RomajiSlm
             foreground = fg;
             checkedFocus = null;
             passthrough = false;
+            if (Phase == Phase.Candidates) Phase = Phase.Raw;   // 移った先で文字を打っても、前の欄の候補で確定しない
             ResetContext();
             // 未確定の文は残す（クリックで別の欄に移っても失わない）。MS-IME はウィンドウごとに開閉を持つので閉じ直す
             if (Mode != Mode.Disabled) effects.Add(new SetImeEffect(false, fg));
@@ -663,6 +670,7 @@ namespace RomajiSlm
             DropFieldHold();
             focus = key;
             passthrough = false;
+            if (Phase == Phase.Candidates) Phase = Phase.Raw;
             ResetContext();
             LeaveField();
         }
