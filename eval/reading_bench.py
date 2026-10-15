@@ -2,6 +2,7 @@
 
     uv run python -m eval.reading_bench            # AJIMEE（きれい・打鍵ミス入り）、user_style、raw_tokens
     uv run python -m eval.reading_bench --fails 10 # 失敗例も表示
+    uv run python -m eval.reading_bench --preselect  # 上位5件を core.preselect（辞書の変換コスト）で選び直して測る
 
 AJIMEE のローマ字は eval/kana.py で正解のカタカナから作ったもの。打鍵ミス版は data/noise.py で1〜2個入れる
 （seed 固定）。比較は記号と長音を除いたカタカナどうし。
@@ -15,6 +16,7 @@ import statistics
 import time
 from pathlib import Path
 
+import core.reading
 from core.reading import readings
 from data.noise import add_noise
 from eval.datasets import ROOT, Item, load_ajimee
@@ -23,6 +25,7 @@ from eval.kana import kata_to_romaji
 USER_READING_PATH = ROOT / "eval" / "sets" / "user_style_reading.jsonl"
 USER_STYLE_PATH = ROOT / "eval" / "sets" / "user_style.jsonl"
 RAW_TOKENS_PATH = ROOT / "eval" / "sets" / "raw_tokens.jsonl"
+TYPO_HARD_PATH = ROOT / "eval" / "sets" / "typo_hard.jsonl"
 _LEN_BINS = ((0, 20), (20, 40), (40, 60), (60, 10**9))
 _STRIP = re.compile(r"[ー、。，．・「」『』（）()！？!?：:…\[\]/,.\-~〜]")
 
@@ -138,6 +141,32 @@ def run_raw(n: int, fails: int, path: Path = RAW_TOKENS_PATH) -> dict:
     return {"by": by, "fails": failed[:fails]}
 
 
+def run_hard(n: int, fails: int, path: Path = TYPO_HARD_PATH, fn=None) -> dict:
+    """難しい打鍵ミス（1語に2〜3個 multi、余計な1字で別の正しいローマ字 extra_valid）で正解が1位・上位5に入るか。
+    同じ文の打鍵ミスの無い版（meta.clean_romaji）で、1位が正解か・1位が編集を含むか（誤補正）も数える。
+    fn は readings の代わり（同じ引数・戻り値）。"""
+    fn = fn or readings
+    rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    by: dict[str, dict] = {}
+    failed = []
+    for d in rows:
+        ref = norm(d["reading"])
+        rs = fn(d["romaji"], n)
+        k = _rank([norm(r.zenz_input()) for r in rs], ref)
+        cs = fn(d["meta"]["clean_romaji"], n)
+        for key in (d["meta"]["category"], "all"):
+            b = by.setdefault(key, {"n": 0, "top1": 0, "top5": 0, "topn": 0, "clean_top1": 0, "clean_misfix": 0})
+            b["n"] += 1
+            b["top1"] += k == 1
+            b["top5"] += k is not None and k <= 5
+            b["topn"] += k is not None
+            b["clean_top1"] += bool(cs) and norm(cs[0].zenz_input()) == ref
+            b["clean_misfix"] += bool(cs) and bool(cs[0].edits)
+        if k is None or k > 5:
+            failed.append((d["romaji"], d["reading"], rs[0] if rs else None, k))
+    return {"by": by, "fails": failed[:fails]}
+
+
 def _en_segs(reading: str) -> list[str]:
     return re.findall(r"[a-z0-9][a-z0-9.\-]*", reading)
 
@@ -168,6 +197,21 @@ def run_user(n: int, fails: int, path: Path = USER_READING_PATH) -> dict:
     return {"by": by, "fails": failed[:fails]}
 
 
+def with_preselect(pool: int = 30):
+    """readings の代わり: 読み段の候補 pool 件から core.preselect で上位5件を選び、残りをコスト順に続ける。"""
+    from core.kanakanji import Dictionary
+    from core.preselect import preselect
+
+    dic = Dictionary.load()
+
+    def fn(keys: str, n: int = 20, max_edits: int = 2):
+        rs = core.reading.readings(keys, max(n, pool), max_edits)
+        top = preselect(rs, dic, 5)
+        chosen = {r.segs for r in top}
+        return (top + sorted((r for r in rs if r.segs not in chosen), key=lambda r: r.cost))[:n]
+    return fn
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("-n", type=int, default=20)
@@ -175,7 +219,12 @@ def main() -> None:
     ap.add_argument("--fails", type=int, default=0)
     ap.add_argument("--skip-ajimee", action="store_true")
     ap.add_argument("--set", default="ajimee", choices=["ajimee", "wac-test"])
+    ap.add_argument("--skip-hard", action="store_true")
+    ap.add_argument("--preselect", action="store_true", help="上位5件を core.preselect で選び直す（読み段の候補 30 件から）")
     args = ap.parse_args()
+    if args.preselect:
+        global readings
+        readings = with_preselect()
     readings("warmup")
     if not args.skip_ajimee:
         a = run_ajimee(args.n, args.seed, args.fails, load_wac_test() if args.set == "wac-test" else None)
@@ -206,6 +255,14 @@ def main() -> None:
         print(f"  {cat:9s} 1位 {b['top1']}/{b['n']}  上位5 {b['top5']}/{b['n']}{en}  誤補正 {b['misfix']}")
     for romaji, ref, r, k in u["fails"]:
         print(f"  [失敗 順位={k}] {romaji}\n      正解 {ref}\n      1位  {r.zenz_input() if r else None}  {r.breakdown if r else ''}")
+    if not args.skip_hard:
+        h = run_hard(args.n, args.fails)
+        print(f"typo_hard（{h['by']['all']['n']}文）")
+        for cat, b in h["by"].items():
+            print(f"  {cat:11s} 1位 {b['top1']}/{b['n']}  上位5 {b['top5']}/{b['n']}  上位{args.n} {b['topn']}/{b['n']}"
+                  f"  打鍵ミス無し版: 1位 {b['clean_top1']}/{b['n']}  誤補正 {b['clean_misfix']}/{b['n']}")
+        for romaji, ref, r, k in h["fails"]:
+            print(f"  [失敗 順位={k}] {romaji}\n      正解 {ref}\n      1位  {r.zenz_input() if r else None}  {r.breakdown if r else ''}")
 
 
 if __name__ == "__main__":
