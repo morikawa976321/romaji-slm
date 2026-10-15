@@ -49,6 +49,14 @@ namespace RomajiSlm
             if (selftest != null)
                 return SelfTest.Run(root, data, selftest, selfOut);
 
+            // UI スレッドの例外で常駐ごと落とさない（既定はダイアログを出す）。記録して続ける
+            string errLog = Path.Combine(data, "ime-error.log");
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) =>
+            {
+                try { File.AppendAllText(errLog, DateTime.Now.ToString("s") + " " + e.Exception + "\r\n"); } catch { }
+            };
+
             bool created;
             using (var mutex = new Mutex(true, "Local\\romaji-slm-ime", out created))
             {
@@ -430,7 +438,13 @@ namespace RomajiSlm
             menu.Items.Add(enabledItem);
             menu.Items.Add(serverItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("使用状況をコピー", null, (s, e) => { Clipboard.SetText(usage.Text(server.Describe)); tray.ShowBalloonTip(2000, "romaji-slm", "使用状況をコピーしました", ToolTipIcon.None); });
+            menu.Items.Add("使用状況をコピー", null, (s, e) =>
+            {
+                string msg = "使用状況をコピーしました";
+                try { Clipboard.SetText(usage.Text(server.Describe)); }
+                catch (Exception ex) { msg = "コピーできませんでした（" + ex.GetType().Name + "）。usage.txt にもあります"; }
+                tray.ShowBalloonTip(2000, "romaji-slm", msg, ToolTipIcon.None);
+            });
             menu.Items.Add("設定とログのフォルダを開く", null, (s, e) => Process.Start("explorer.exe", "\"" + data + "\""));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("終了", null, (s, e) => ExitThread());
@@ -477,7 +491,8 @@ namespace RomajiSlm
 
         IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0)
+            // フックの中の例外はネイティブの境界を越えてプロセスを落とすので、ここで止めて素通しにする
+            if (nCode >= 0) try
             {
                 var k = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
                 bool injected = (k.flags & 0x10) != 0;
@@ -493,6 +508,7 @@ namespace RomajiSlm
                     if (swallow) return new IntPtr(1);
                 }
             }
+            catch { }
             return Native.CallNextHookEx(hook, nCode, wParam, lParam);
         }
 
