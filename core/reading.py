@@ -1,16 +1,19 @@
 """打鍵列 → 読みの N-best（docs/REDESIGN.md 工程2「読みラティス」。仕組みとコストの根拠は docs/READING.md）。
 
-打鍵列の文字位置を節点とし、次の弧を張って、コストの小さい順に経路を N 本取り出す。
+打鍵列の文字位置を節点とし、次の弧を張って、コストの小さい順に経路を取り出す。
 
 - 正規ローマ字の弧（コスト0）。`nn`+母音を「ン+な行」と読む弧は小さいコスト
 - 打鍵ミスの編集弧（隣接キーへの置換・脱字・余計な1字・隣接2字の入れ替え）。1弧1編集、1文 max_edits まで
-- 英語の弧（wordfreq の上位語＋core/data/tech_words.tsv）、数字の弧、記号の弧
+- 英語の弧（wordfreq の上位語＋core/data/tech_words.tsv）、辞書に無い英字列（略語・型番）の弧、数字の弧、記号の弧
 - かなの区間には文字 4-gram の「読みらしさ」（core/kana_lm.py）を足す
+
+上位5件（後段が比べる数）は、1位をコスト最小にしたうえで、残りを Mozc の語の知識も使って選ぶ（_select）。
 
     uv run python -m core.reading "githubnipushshiteoite"
 """
 
 import argparse
+import gc
 import heapq
 import itertools
 import sys
@@ -18,7 +21,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from .english import FUZZY_MIN_LEN, SHORT_OK, lexicon
-from .kana_lm import BOS, ORDER, load as load_lm
+from .kana_lm import AFTER_EN, AFTER_NUM, BOS, EOS, ORDER, load as load_lm, word_cost
 from .keyboard import NEIGHBORS
 from .romaji_table import MAXLEN, TABLE, VOWELS
 from .types import Edit, Reading, Seg
@@ -41,11 +44,16 @@ COST = {
     "compound": 0.5,  # 英字・数字を . - でつないだ塊の、つなぎ1つあたり
     "raw": 5.0,  # 辞書に無い英字列（区間1つの固定分）
     "raw_char": 1.0,  # 辞書に無い英字列の1字あたり
+    "raw_token": 2.0,  # かなに読めない位置を含む英数字列（区間1つの固定分）
+    "raw_token_brk": 0.15,  # 同じく、かなの弧が1本も出ない英字（jr の j・r）と数字の直前の英字（int8 の int）1字あたり
+    "raw_token_ok": 1.0,  # 同じく、かなに読める英字1字あたり（cdma の m・a。raw_char と同じ）
     "num_in_word": 1.5,  # 英字に挟まれた数字（dai2shou は正しいが、打鍵ミスの o→9 なども同じ形になる）
     "num_cut": 2.5,  # 母音・n 以外の英字の直後の数字（ローマ字の音節が途中で切れている）
     "sym_dash": 1.0,  # `-` を長音でなく記号として読む
+    "sym_dash_vowel": 3.0,  # 母音の直後の `-` を記号として読む
     "lm_weight": 0.3,  # 文字 4-gram の -log P に掛ける重み
     "lm_cap": 9.0,  # 1字の -log P の上限（ュ・シィのような珍しいかな1字で、正しい入力が編集に負けないように）
+    "lm_eos_base": 1.5,  # かなの連続の終わり（EOS）の基準値（WAC の連続の終わりの −log P の平均 1.42）
     "lm_base": 3.5,  # 1字あたりの基準値（これを引いて、英語区間でかなを置き換えても有利不利が出ないようにする）
 }
 
@@ -57,8 +65,12 @@ _CONSONANTS = set("bcdfghjklmpqrstvwxyz")
 _LOAN = {"ti": "ティ", "di": "ディ"}
 # 編集弧の元にする綴り: 音節表＋「ン」（単独の n は次の字が母音・y でないときだけ。使う側で確かめる）
 _EDIT_TABLE = {**TABLE, "n": "ン", "nn": "ン"}
+# 編集で直した先にする綴り。x・l で始まる小書き（la → ァ）と q（qa → クァ）は除く: 打とうとした綴りであることが
+# まれなのに、母音1字の脱字（a → ァ・クァ）などで弧が増える
+_EDIT_TARGETS = {k: v for k, v in _EDIT_TABLE.items() if k[0] not in "xlq"}
 _APPEND = "iun"  # 音節の後ろに脱字として補う字（aiueon と比べて WAC test の上位5 が同じで、弧が減って速い）
 _EN_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789.-")
+RAW_MAX = 10  # かなに読めない位置を含む英数字列の最大長
 _EXT = frozenset({"md", "py", "js", "ts", "rs", "sh", "go", "c", "h"})  # . の後ろに来る短い拡張子
 
 
@@ -90,7 +102,7 @@ def _edit_index() -> dict[str, list[tuple[str, str, int, str, float]]]:
             return
         idx.setdefault(v, []).append((_EDIT_TABLE[key], kind, off, detail, cost, key == "n"))
 
-    for key in _EDIT_TABLE:
+    for key in _EDIT_TARGETS:
         n = len(key)
         for k in range(n):
             for nb in NEIGHBORS.get(key[k], ()):
@@ -166,6 +178,15 @@ def _edit_arcs(s: str, i: int) -> list[Arc]:
             k = TABLE.get(s[i:i + ln])
             if k is not None:
                 out.append(Arc(i, i + ln, "kana", "ッ" + k, parts=(("edit", COST["drop"]),), edit=Edit("drop", i, "+" + c)))
+    # 促音の子音が隣のキーに化けた（tsuku6ta → ツクッタ）・促音の前に余計な1字（iesshin → イッシン）。
+    # 促音は前後の字で決まる弧なので、音節表から作る編集の索引に入っていない
+    d = s[i + 1] if i + 1 < L else ""
+    if d and d in _CONSONANTS and d not in "nxly":
+        if c in NEIGHBORS.get(d, ()):
+            out.append(Arc(i, i + 1, "kana", "ッ", parts=(("edit", COST["sub"]),), edit=Edit("sub", i, f"{c}>{d}")))
+        if i + 2 < L and s[i + 2] == d and (c == d or c in NEIGHBORS.get(d, ())):
+            cost = COST["insert_dup"] if c == d else COST["insert"]
+            out.append(Arc(i, i + 2, "kana", "ッ", parts=(("edit", cost),), edit=Edit("insert", i, "-" + c)))
     # 音節の後ろの母音1字・n を落とした（tasou → タイソウ、akakohan → アカンコハン）
     for ln in range(1, min(MAXLEN, L - i) + 1):
         k = TABLE.get(s[i:i + ln])
@@ -337,17 +358,60 @@ def _num_sym_arcs(s: str, i: int) -> list[Arc]:
     if ch == "'" and i and s[i - 1] == "n":
         return []  # n' の ' はかなの弧が持つ
     if ch == "-":
-        if i and s[i - 1] in VOWELS:
-            return []
-        return [Arc(i, i + 1, "sym", "-", ("-", "－"), (("sym", COST["sym_dash"]),))]
+        # 母音の後の - はふつう長音（かなの弧が持つ）。英字列の後の記号（cve-2024）もありうるので高めに残す
+        cost = COST["sym_dash_vowel"] if i and s[i - 1] in VOWELS else COST["sym_dash"]
+        return [Arc(i, i + 1, "sym", "-", ("-", "－"), (("sym", cost),))]
     return [Arc(i, i + 1, "sym", ch, SYMBOLS.get(ch, (ch,)))]
 
 
+_PARTICLES = frozenset({"to", "no", "ni", "wo", "de", "ga", "ha", "mo", "ya", "ka", "he"})
+
+
+def _raw_arcs(s: str, i: int, brk: list[bool], cheap: list[bool]) -> list[Arc]:
+    """かなに読めない字を含む英数字列（jr、cdma、bf16、rtx5060ti）。辞書に無い略語・型番を英字のまま残す経路。
+    brk は「かなの弧が1本も出ない英字」、cheap は brk か「すぐ後ろに数字が続く英字の連続」（int8 の int）。"""
+    out: list[Arc] = []
+    if not s[i].isalpha():
+        return out
+    L = len(s)
+    cost = COST["raw_token"]
+    has = False
+    stretch = None  # いま続いている、かなに読める英字の連続の始まり
+    for j in range(i + 1, min(L, i + RAW_MAX) + 1):
+        c = s[j - 1]
+        if c.isalpha() and not brk[j - 1]:
+            if stretch is None:
+                stretch = j - 1
+        elif c.isalpha() or c.isdigit():
+            # 読めない字・数字にはさまれた助詞の綴り（sram|to|dram、bf16|to|fp16）は区切りとみて、そこで止める
+            # 区間の頭が助詞の綴りで始まる形（a100|toh100 の toh100）も作らない
+            if stretch is not None and s[stretch:j - 1] in _PARTICLES:
+                break
+            stretch = None
+        else:
+            break
+        if c.isalpha():
+            cost += COST["raw_token_brk"] if cheap[j - 1] else COST["raw_token_ok"]
+            has = has or cheap[j - 1]
+        if not has or j - i < 2 or (c.isdigit() and j < L and s[j].isdigit()):
+            continue
+        out.append(Arc(i, j, "en", s[i:j], (s[i:j],), (("raw", cost),), raw=True))
+    return out
+
+
 def build_arcs(keys: str) -> list[list[Arc]]:
+    """各位置から出る弧。"""
     s = keys.lower()
+    L = len(s)
+    kana = [_kana_arcs(s, i) for i in range(L)]
+    brk = [s[i].isalpha() and not kana[i] for i in range(L)]
+    pre_digit = [False] * (L + 1)  # すぐ後ろに数字が続く英字の連続
+    for i in range(L - 2, -1, -1):
+        pre_digit[i] = s[i].isalpha() and (s[i + 1].isdigit() or pre_digit[i + 1])
+    cheap = [b or d for b, d in zip(brk, pre_digit)]
     arcs = []
-    for i in range(len(s)):
-        a = _kana_arcs(s, i) + _edit_arcs(s, i) + _en_arcs(s, i) + _num_sym_arcs(s, i)
+    for i in range(L):
+        a = kana[i] + _edit_arcs(s, i) + _en_arcs(s, i) + _num_sym_arcs(s, i) + _raw_arcs(s, i, brk, cheap)
         arcs.append(a)
     return arcs
 
@@ -355,6 +419,8 @@ def build_arcs(keys: str) -> list[list[Arc]]:
 # ---- 探索 --------------------------------------------------------------------
 
 _START = BOS * (ORDER - 1)
+# 英字・数字の区間の後のかなは、文頭でなく「英字・数字の語の直後」の文脈で数える（jr|ノ、3.12|ニ）
+_CTX_AFTER = {"en": BOS * (ORDER - 2) + AFTER_EN, "num": BOS * (ORDER - 2) + AFTER_NUM}
 
 
 @lru_cache(maxsize=None)  # 文脈2字×弧のかな（4字以下）なので、実際に現れる組は数十万で頭打ちになる
@@ -368,10 +434,12 @@ def _lm_step(ctx: str, text: str) -> tuple[float, str]:
     return COST["lm_weight"] * total, h
 
 
-def _step(ctx: str, a: Arc) -> tuple[float, str]:
-    if a.kind == "kana":
-        return _lm_step(ctx, a.text)
-    return 0.0, _START
+@lru_cache(maxsize=None)
+def _lm_end(ctx: str) -> float:
+    """かなの連続が英字・数字の区間の前で終わる読みらしさ（オ|cr、ギ|thib のような切れ目は高い）。"""
+    if ctx[-1] in (BOS, AFTER_EN, AFTER_NUM):
+        return 0.0
+    return COST["lm_weight"] * (min(-load_lm().logp(ctx, EOS), COST["lm_cap"]) - COST["lm_eos_base"])
 
 
 def _segs(path: list[Arc]) -> tuple[Seg, ...]:
@@ -392,12 +460,50 @@ def _segs(path: list[Arc]) -> tuple[Seg, ...]:
 
 
 BEAM = 10.0  # 同じ位置で最良からこれ以上悪い状態は捨てる（実際は MAX_STATES のほうが先に効く）
-MIN_PER_EDITS = 3  # 編集数ごとに必ず残す状態の数
-MAX_STATES = 12  # 同じ位置で残す状態の数の上限（WAC test で 16→12 は上位5 が同じ、所要は約3割減）
+POS_PRUNE = 10.0  # 到達先の位置の最良よりこれ以上悪い遷移は記録しない（状態の上限で必ず落ちる）
+MIN_PER_EDITS = 4  # 編集数ごとに必ず残す状態の数
+MAX_STATES = 16  # 同じ位置で残す状態の数の上限（24/6 は AJIMEE 上位5 +1〜2 件で所要が約3割増。docs/READING.md）
+# 探索で数える編集のコスト。COST の値以下にする（返す Reading.cost は COST のまま。_select を参照）。
+# WAC test で調整（打鍵ミスの起こりやすさ data/noise.py に近づけると、入れ替え・押しすぎが安い）
+SEARCH_EDIT = {"sub": 2.0, "drop": 2.0, "insert": 2.0, "insert_dup": 1.5, "swap": 1.5}
+TOP_BLOCK = 5  # 後段が比べる上位の件数（core/pipeline.py の k）
+POOL_EXTRA = 20  # 上位 TOP_BLOCK 件を選ぶために、n 件より余分に取り出す数
+RAW_QUOTA = 2  # 上位 TOP_BLOCK 件のうち、辞書に無い英字列を含む候補の上限
+# 上位 TOP_BLOCK 件の2位以降を選ぶ点数: 探索のコスト + WORD_WEIGHT × 語のコストの差（1位との）
+# + RR_LM × 読みらしさ + RR_EDIT × 編集数。語のコストは Mozc の読みと生起コストで、かなの連続を語に分けた最小
+# （core/kana_lm.py の WordCost。語1つに WORD_CONN を足す）。値は WAC test で調整（docs/READING.md）
+WORD_WEIGHT = 0.0001
+WORD_CONN = 6000.0
+WORD_UNK = 15000.0
+RR_LM = -0.5
+RR_EDIT = -0.5
 
 
 def readings(keys: str, n: int = 20, max_edits: int = 2) -> list[Reading]:
-    """打鍵列 keys の読みの候補を、コストの小さい順に最大 n 個返す（同じ区間列の重複は除く）。"""
+    """打鍵列 keys の読みの候補を最大 n 個返す（同じ区間列の重複は除く）。1位はコスト最小。上位 TOP_BLOCK 件は
+    打鍵ミスの直し方が違う候補を広く拾うように選ぶ（_select）ので、上位 TOP_BLOCK 件とその後ろは、それぞれの中で
+    コストの小さい順。"""
+    # 探索は1回で数十万個のタプル・リストを作り、その間に世代別 GC が何度も走って全部を走査する
+    # （AJIMEE 20〜39字の p95 が GC ありで約280ms、なしで約40ms。クラウドの Xeon で実測）。
+    # 作るものは循環参照を持たず、戻るときに参照カウントで解放されるので、探索の間だけ GC を止める
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        return _readings(keys, n, max_edits)
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def _search_cost(a: Arc) -> float:
+    if a.edit is None:
+        return a.cost
+    e = sum(v for k, v in a.parts if k == "edit")
+    kind = "insert_dup" if a.edit.kind == "insert" and e == COST["insert_dup"] else a.edit.kind
+    return a.cost - e + SEARCH_EDIT[kind]
+
+
+def _readings(keys: str, n: int, max_edits: int) -> list[Reading]:
     L = len(keys)
     if L == 0:
         return [Reading(())]
@@ -409,11 +515,20 @@ def readings(keys: str, n: int = 20, max_edits: int = 2) -> list[Reading]:
             k = (a.end, a.kind, a.text, a.edit is not None, a.raw)
             if k not in best or a.cost < best[k].cost:
                 best[k] = a
-        arcs.append([(a.end, a.cost, a.edit is not None, a.kind == "kana", a) for a in best.values()])
+        # 探索では編集を SEARCH_EDIT のコストで数える（返すコストは元のまま。_select を参照）
+        kana, other = [], []
+        for a in best.values():
+            if a.kind == "kana":
+                kana.append((a.end, _search_cost(a), a.edit is not None, a.text, a))
+            else:
+                other.append((a.end, _search_cost(a), a.edit is not None, _CTX_AFTER.get(a.kind, _START), a.raw, a))
+        arcs.append((kana, other))
     # 前向き: 状態 (位置, 編集数, かなの文脈) ごとの最良コストと、入ってくる遷移を記録する
     g: list[dict] = [dict() for _ in range(L + 1)]
+    pbest = [float("inf")] * (L + 1)  # 位置ごとの最良
     preds: dict[tuple, list] = {}
     g[0][(0, _START)] = 0.0
+    lm_step, lm_end = _lm_step, _lm_end
     for i in range(L):
         here = g[i]
         if not here:
@@ -429,21 +544,47 @@ def readings(keys: str, n: int = 20, max_edits: int = 2) -> list[Reading]:
             for (e, _), gi in here.items():
                 by_e.setdefault(e, []).append(gi)
             keep = {e: sorted(lst)[min(MIN_PER_EDITS, len(lst)) - 1] for e, lst in by_e.items()}
+        kana, other = arcs[i]
         for (e, ctx), gi in here.items():
             if gi > cutoff and gi > keep.get(e, cutoff):
                 continue
             src = (i, e, ctx)
-            for end, cost, is_edit, is_kana, a in arcs[i]:
+            end_lm = None
+            for end, cost, is_edit, text, a in kana:
                 ne = e + is_edit
                 if ne > max_edits:
                     continue
-                if is_kana:
-                    lmc, nctx = _lm_step(ctx, a.text)
-                    c = cost + lmc
-                else:
-                    lmc, nctx, c = 0.0, _START, cost
-                key = (ne, nctx)
+                lmc, nctx = lm_step(ctx, text)
+                c = cost + lmc
                 ng = gi + c
+                # 位置の最良より POS_PRUNE 以上悪い遷移は、状態の上限で必ず落ちるので記録もしない
+                if ng > pbest[end] + POS_PRUNE:
+                    continue
+                if ng < pbest[end]:
+                    pbest[end] = ng
+                key = (ne, nctx)
+                tgt = g[end]
+                old = tgt.get(key)
+                if old is None or ng < old:
+                    tgt[key] = ng
+                preds.setdefault((end, ne, nctx), []).append((src, c, lmc, a))
+            for end, cost, is_edit, nctx, raw, a in other:
+                ne = e + is_edit
+                if ne > max_edits:
+                    continue
+                if raw:  # 辞書に無い英字列の前で終わるかなの連続（オ|cr のような切れ目）の読みらしさ
+                    if end_lm is None:
+                        end_lm = lm_end(ctx)
+                    lmc = end_lm
+                else:
+                    lmc = 0.0
+                c = cost + lmc
+                ng = gi + c
+                if ng > pbest[end] + POS_PRUNE:
+                    continue
+                if ng < pbest[end]:
+                    pbest[end] = ng
+                key = (ne, nctx)
                 tgt = g[end]
                 old = tgt.get(key)
                 if old is None or ng < old:
@@ -451,14 +592,91 @@ def readings(keys: str, n: int = 20, max_edits: int = 2) -> list[Reading]:
                 preds.setdefault((end, ne, nctx), []).append((src, c, lmc, a))
     if not g[L]:
         return []
-    # 後ろ向きに最良優先で経路を取り出す（前向きの最良コストが正確な残りコストになるので、取り出し順はコスト順）
+    return _select(_extract(g, preds, L), n)
+
+
+def _select(paths, n: int) -> list[Reading]:
+    """取り出した候補（探索のコスト順）から n 件を選ぶ。
+
+    1位は元のコスト（Reading.cost）の最小なので、きれいな入力の1位と誤補正は探索で編集を安くしても変わらない。
+    2〜TOP_BLOCK 位は、取り出した n + POOL_EXTRA 件から、語のコストを足した点数（上の WORD_WEIGHT の説明）の順。
+    辞書に無い英字列を含む候補は RAW_QUOTA 件までにする（打鍵ミスでできた子音の並びを英字のまま残す変種が
+    枠を埋めないように）。編集0の候補（「直さない」）と辞書に無い英字列を含む候補（「英字として読む」）が
+    1件も入らなければ、後ろの枠をそれぞれのコスト最小のものに入れ替える。
+    上位 TOP_BLOCK 件とその後ろは、それぞれ元のコスト順に並べる。
+    """
+    got: list[list] = []  # [Reading, 辞書に無い英字列を含むか, 探索のコスト]（同じ区間列は1つ）
+    index: dict[tuple, int] = {}
+    best = float("inf")
+
+    def take(r: Reading, has_raw: bool, f: float, sig: tuple) -> None:
+        k = index.get(sig)
+        if k is None:
+            index[sig] = len(got)
+            got.append([r, has_raw, f])
+        elif r.cost < got[k][0].cost:
+            # 同じ区間列が、編集を使う経路と使わない経路の両方で作れる（ジッケンノケッカ: 脱字 n と nn の揺れ）。
+            # 探索は編集を安く数えるので高い経路が先に出ることがある。返すコストは安いほう
+            got[k][0], got[k][1] = r, has_raw
+
+    pending = None
+    for r, has_raw, f, sig in paths:
+        # 元のコスト >= 探索のコスト（編集を安く数えるだけ）なので、取り出し中の探索のコストが
+        # 元のコストの最小を超えたら、まだ出ていない候補が元のコストで勝つことはない
+        if len(got) >= n + POOL_EXTRA and f >= best:
+            pending = (r, has_raw, f, sig)
+            break
+        take(r, has_raw, f, sig)
+        best = min(best, r.cost)
+    if not got:
+        return []
+    first = min(range(len(got)), key=lambda k: got[k][0].cost)
+    order = sorted(range(len(got)), key=lambda k: got[k][2])
+    wc = word_cost(WORD_CONN, WORD_UNK)
+    if wc is not None:
+        w = [sum(wc(sg.text) for sg in r.segs if sg.kind == "kana") for r, _, _ in got]
+        order.sort(key=lambda k: got[k][2] + WORD_WEIGHT * (w[k] - w[first])
+                   + RR_LM * got[k][0].breakdown.get("lm", 0.0) + RR_EDIT * len(got[k][0].edits))
+    size = min(n, TOP_BLOCK)
+    used = [first]
+    n_raw = int(got[first][1])
+    for k in order:
+        if len(used) >= size:
+            break
+        if k == first or (got[k][1] and n_raw >= RAW_QUOTA):
+            continue
+        n_raw += got[k][1]
+        used.append(k)
+    # 「直さない」と「英字として読む」の仮説を1つずつ残す（後ろの枠から入れ替える）
+    slot = len(used) - 1
+    for want in (lambda k: not got[k][0].edits, lambda k: got[k][1]):
+        if slot < 1 or len(used) < size or any(want(k) for k in used):
+            continue
+        cand = [k for k in range(len(got)) if want(k) and k not in used]
+        if cand:
+            used[slot] = min(cand, key=lambda k: got[k][0].cost)
+            slot -= 1
+    # 選んだ候補のコストが、まだ取り出していない同じ区間列の経路より高くないことを確かめる
+    limit = max(got[k][0].cost for k in used)
+    for r, has_raw, f, sig in itertools.chain([pending] if pending else [], paths):
+        if f >= limit:
+            break
+        if sig in index:
+            take(r, has_raw, f, sig)
+    top = sorted((got[k][0] for k in used), key=lambda r: r.cost)
+    chosen = set(used)
+    rest = sorted((r for k, (r, _, _) in enumerate(got) if k not in chosen), key=lambda r: r.cost)
+    return top + rest[:n - len(top)]
+
+
+def _extract(g: list[dict], preds: dict, L: int):
+    """後ろ向きに最良優先で経路を取り出す（前向きの最良コストが正確な残りコストになるので、取り出し順は探索のコスト順）。
+    (Reading, 辞書に無い英字列を含むか, 探索のコスト, 区間列) を順に返す（同じ区間列が何度も出る）。"""
     tie = itertools.count()
     heap = [(gv, next(tie), 0.0, (L, e, ctx), None) for (e, ctx), gv in g[L].items()]
     heapq.heapify(heap)
-    out: list[Reading] = []
-    seen: set = set()
     pops = 0
-    while heap and len(out) < n and pops < 20000:
+    while heap and pops < 20000:
         f, _, back, state, node = heapq.heappop(heap)
         pops += 1
         if state == (0, 0, _START):
@@ -469,18 +687,15 @@ def readings(keys: str, n: int = 20, max_edits: int = 2) -> list[Reading]:
             arcs_only = [a for a, _ in path]
             segs = _segs(arcs_only)
             sig = tuple((sg.kind, sg.text, sg.end) for sg in segs)
-            if sig in seen:
-                continue
-            seen.add(sig)
+            edits = tuple(a.edit for a in arcs_only if a.edit is not None)
             bd: dict[str, float] = {}
             for a, lmc in path:
                 for k, v in a.parts:
                     bd[k] = bd.get(k, 0.0) + v
-                if a.kind == "kana":
+                if lmc:
                     bd["lm"] = bd.get("lm", 0.0) + lmc
-            bd = {k: round(v, 3) for k, v in bd.items()}
-            edits = tuple(a.edit for a in arcs_only if a.edit is not None)
-            out.append(Reading(segs, edits, round(back, 3), bd))
+            cost = round(sum(bd.values()), 3)
+            yield Reading(segs, edits, cost, {k: round(v, 3) for k, v in bd.items()}), any(a.raw for a in arcs_only), f, sig
             continue
         for src, c, lmc, a in preds.get(state, ()):
             gs = g[src[0]].get(src[1:])
@@ -488,7 +703,6 @@ def readings(keys: str, n: int = 20, max_edits: int = 2) -> list[Reading]:
                 continue
             nb = back + c
             heapq.heappush(heap, (gs + nb, next(tie), nb, src, (a, lmc, node)))
-    return out
 
 
 # ---- CLI ---------------------------------------------------------------------

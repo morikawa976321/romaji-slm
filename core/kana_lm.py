@@ -8,9 +8,12 @@
 
 Mozc の重みは data/fixtures/zenz_like.jsonl の読み 205 文の 1 文字あたり交差エントロピーで、次数は
 WAC test（学習に使っていない）での読みラティスの打鍵ミス復元率で選んだ（docs/READING.md）。
-平滑化は Witten-Bell の補間。
+平滑化は Witten-Bell の補間。英字・数字の語の直後のかなは、文頭とは別の文脈の印（AFTER_EN・AFTER_NUM）で数える。
 
-    uv run python -m core.kana_lm build   # models/reading/kana_lm.pkl を作る（素材が無ければ github から取る）
+WordCost は Mozc の読みと生起コストで、かなの連続を語に分けたときの最小コストを返す（読みラティスが上位5件を
+選ぶときに使う）。
+
+    uv run python -m core.kana_lm build   # models/reading/ の kana_lm.pkl と mozc_readings.marisa を作る（素材が無ければ github から取る）
 """
 
 import math
@@ -29,12 +32,18 @@ MOZC_URL = "https://raw.githubusercontent.com/google/mozc/master/src/data/dictio
 WAC_DIR = ROOT / "models" / "wac"
 WAC_URL = "https://raw.githubusercontent.com/ku-nlp/WikipediaAnnotatedCorpus/main/"
 LM_PATH = ROOT / "models" / "reading" / "kana_lm.pkl"
+WORDS_PATH = ROOT / "models" / "reading" / "mozc_readings.marisa"
 ORDER = 4
 TAU = 1000.0
 MOZC_WEIGHT = 3.0
 _KANA_RUN = re.compile(r"^[ァ-ヴー]+$")
+_LATIN = re.compile(r"^[A-Za-zＡ-Ｚａ-ｚ][A-Za-z0-9Ａ-Ｚａ-ｚ０-９.．\-]*$")
+_DIGITS = re.compile(r"^[0-9０-９][0-9０-９.．,，]*$")
 BOS = "^"
 EOS = "$"
+AFTER_EN = "@"  # 文脈の印: 直前が英字の語（読みラティスの英語区間・辞書に無い英字列の後）
+AFTER_NUM = "#"  # 文脈の印: 直前が数字
+VERSION = 4  # pickle の中身の版（文脈の印 AFTER_EN・AFTER_NUM を足した）。違えば作り直す
 
 
 def to_katakana(s: str) -> str:
@@ -130,6 +139,42 @@ def wac_runs(d: Path = WAC_DIR) -> list[str]:
     return runs
 
 
+def wac_after_runs(d: Path = WAC_DIR) -> list[str]:
+    """英字・数字の語の直後に続くかなの連続を、文脈の印を頭に付けて返す（AFTER_EN+かな、AFTER_NUM+かな）。
+    コーパスに英字の語は少ない（約2800）ので、カタカナ表記の名詞の後も AFTER_EN に数える
+    （英語区間は文中でカタカナ語の名詞と同じように助詞・する が続く）。"""
+    out: list[str] = []
+    for p in sorted(download_wac(d)):
+        sent: list[tuple[str, str, str]] = []
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.startswith(("#", "*", "+")):
+                continue
+            if not line.startswith("EOS"):
+                f = line.split(" ")
+                sent.append((f[0], to_katakana(f[1]), f[3] if len(f) > 3 else ""))
+                continue
+            for k, (sur, r, pos) in enumerate(sent):
+                if _LATIN.match(sur) and not _KANA_RUN.match(r):
+                    mark = AFTER_EN
+                elif _DIGITS.match(sur):
+                    mark = AFTER_NUM
+                elif pos == "名詞" and _KANA_RUN.match(sur):
+                    mark = AFTER_EN
+                else:
+                    continue
+                # 次の英字・数字の語の手前で切る。カタカナ表記の名詞の手前でも切る（英語区間＋助詞＋英語区間
+                # 「sram と dram」を、カタカナ語＋助詞＋カタカナ語で近似する）
+                run = []
+                for sur2, r2, pos2 in sent[k + 1:]:
+                    if not _KANA_RUN.match(r2) or (pos2 == "名詞" and _KANA_RUN.match(sur2)):
+                        break
+                    run.append(r2)
+                if run:
+                    out.append(mark + "".join(run))
+            sent = []
+    return out
+
+
 class KanaLM:
     """Witten-Bell 補間の n-gram。学習時に、現れた n-gram の補間済み log P と、文脈ごとのバックオフ重み
     log(T/(C+T)) を表にしておき、実行時は辞書を引くだけにする（読みラティスは1文で数十万回引く）。"""
@@ -166,10 +211,21 @@ class KanaLM:
         for n in range(1, ORDER + 1):
             for h, total in ctx[n].items():
                 bow[n][h] = math.log(types[n][h] / (total + types[n][h]))
+
+        def lower_lp(n: int, g: str) -> float:
+            # 文脈の印の n-gram は、1つ短い n-gram が数えられていないことがある（印の無い文脈では連続が続く）。
+            # そのときは実行時と同じくバックオフで求める
+            if n == 0:
+                return -math.log(vocab)
+            v = lp[n].get(g)
+            if v is not None:
+                return v
+            return bow[n].get(g[:-1], 0.0) + lower_lp(n - 1, g[1:])
+
         for n in range(1, ORDER + 1):
             for g, k in cnt[n].items():
                 h = g[:-1]
-                lower = math.exp(lp[n - 1][g[1:]]) if n > 1 else 1.0 / vocab
+                lower = math.exp(lower_lp(n - 1, g[1:]))
                 t, total = types[n][h], ctx[n][h]
                 lp[n][g] = math.log((k + t * lower) / (total + t))
         return cls(lp, bow, vocab)
@@ -180,10 +236,15 @@ def train(weighted: dict[str, float]) -> KanaLM:
     ctx = [defaultdict(float) for _ in range(ORDER + 1)]
     seen = [defaultdict(set) for _ in range(ORDER + 1)]
     for r, w in weighted.items():
-        s = BOS * (ORDER - 1) + r + EOS
+        # 文脈の印で始まる連続は、印を履歴に置いて次の字から数える（印そのものは予測しない）。
+        # 同じ文字列は印なしでも数えてあるので、印を含む履歴の n-gram だけ足す（印の無い文脈の確率を変えない）
+        mark = r[0] if r[0] in (AFTER_EN, AFTER_NUM) else ""
+        s = (BOS * (ORDER - 2) if mark else BOS * (ORDER - 1)) + r + EOS
         for i in range(ORDER - 1, len(s)):
             for n in range(1, ORDER + 1):
                 h = s[i - n + 1:i]
+                if mark and mark not in h:
+                    continue
                 cnt[n][h + s[i]] += w
                 ctx[n][h] += w
                 seen[n][h].add(s[i])
@@ -193,12 +254,13 @@ def train(weighted: dict[str, float]) -> KanaLM:
 
 def build(path: Path = LM_PATH) -> KanaLM:
     weighted: Counter = Counter(wac_runs())
+    weighted.update(wac_after_runs())
     for r, c in mozc_readings().items():
         weighted[r] += MOZC_WEIGHT * math.exp(-c / TAU)
     lm = train(weighted)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as f:
-        pickle.dump({"lp": lm.lp, "bow": lm.bow, "unk": lm.unk}, f, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump({"lp": lm.lp, "bow": lm.bow, "unk": lm.unk, "version": VERSION, "order": ORDER}, f, protocol=pickle.HIGHEST_PROTOCOL)
     return lm
 
 
@@ -208,14 +270,75 @@ def load(path: Path = LM_PATH) -> KanaLM:
         return build(path)
     with path.open("rb") as f:
         d = pickle.load(f)
+    if d.get("version") != VERSION or d.get("order", 4) != ORDER:
+        return build(path)
     lm = KanaLM(d["lp"], d["bow"], 1)
     lm.unk = d["unk"]
     return lm
 
 
+class WordCost:
+    """Mozc の読み（カタカナ）→ 最小コストの索引で、かなの連続を語に分けたときの最小コスト（Mozc のコストの単位）。
+    語1つごとに conn（接続コストの代わりの定数）、辞書に無い1字ごとに unk を足す。"""
+
+    def __init__(self, trie, conn: float, unk: float, maxlen: int = 12):
+        self.trie, self.conn, self.unk, self.maxlen = trie, conn, unk, maxlen
+        self._memo: dict[str, float] = {}
+
+    def __call__(self, kana: str) -> float:
+        v = self._memo.get(kana)
+        if v is not None:
+            return v
+        t = self.trie
+        L = len(kana)
+        d = [math.inf] * (L + 1)
+        d[0] = 0.0
+        for i in range(L):
+            di = d[i]
+            if di == math.inf:
+                continue
+            if di + self.unk < d[i + 1]:
+                d[i + 1] = di + self.unk
+            for w in t.prefixes(kana[i:i + self.maxlen]):
+                c = di + t[w][0][0] + self.conn
+                j = i + len(w)
+                if c < d[j]:
+                    d[j] = c
+        if len(self._memo) > 200000:
+            self._memo.clear()
+        self._memo[kana] = d[L]
+        return d[L]
+
+
+def build_words(path: Path = WORDS_PATH) -> None:
+    import marisa_trie
+
+    best = mozc_readings()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    marisa_trie.RecordTrie("<H", ((r, (min(c, 65535),)) for r, c in best.items())).save(str(path))
+
+
+@lru_cache(maxsize=4)
+def word_cost(conn: float, unk: float) -> WordCost | None:
+    """marisa-trie が無いか、索引も Mozc の辞書も手元に無ければ None（呼ぶ側は語のコストを使わずに動く。
+    変換の途中で辞書を取りに行かない）。"""
+    try:
+        import marisa_trie
+    except ImportError:
+        return None
+    if not WORDS_PATH.exists():
+        if not (MOZC_DIR / "dictionary09.txt").exists():
+            return None
+        build_words()
+    t = marisa_trie.RecordTrie("<H")
+    t.load(str(WORDS_PATH))
+    return WordCost(t, conn, unk)
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["build"]:
         build()
-        print(f"書き出し: {LM_PATH}")
+        build_words()
+        print(f"書き出し: {LM_PATH}, {WORDS_PATH}")
     else:
         print(__doc__)
