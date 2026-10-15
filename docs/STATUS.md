@@ -2,11 +2,16 @@
 
 ## 0. いまのゴール（2026-10-16、本人の依頼で autopilot）
 
-本人が「実用可能なレベル」と判断し、このデスクトップで常用できるようにすることを求めた（原文は decisions.md「本人の依頼」）。常駐入力 `ime/` を作って `%LOCALAPPDATA%\romaji-slm\` に入れた（使い方・仕組み・実測は [IME.md](IME.md)、判断は D19〜D21）。残るのは本人が実際のアプリで打って確かめること。本人の使用感（トレイの「使用状況をコピー」と言葉）が返ってきたら、それで D19・D20 の覆る条件を見る。
+本人が「実用可能なレベル」と判断し、このデスクトップで常用できるようにすることを求めた（原文は decisions.md「本人の依頼」）。
 
-- 再開の手順: `pwsh -NoProfile -File ime/install.ps1`（HEAD を入れ直す）。試験は `pwsh -NoProfile -File ime/build.ps1 -Test` と `RomajiSlmIme.exe --selftest <打鍵列> <結果ファイル>`。
-- 本人に残ること: 実際のアプリで打つ（フックと SendInput と MS-IME の開閉は本人の操作でしか確かめられない）。ThinkPad での実測（下の §2 の 1）。
-
+- **できたこと**: 常駐入力 `ime/` を作り、`%LOCALAPPDATA%\romaji-slm\` に入れた。スタートアップに登録し、起動済み（初回は「使っていない」状態）。使い方・仕組み・実測・限界は [IME.md](IME.md)、判断は D19〜D24。
+  - Codex のレビューを 11 回通し、指摘をすべて直した。打ち切りの判断は D23 の末尾。
+  - 途中で本人が追加した依頼で、実利用の記録（`history.jsonl`、D24）を入れた。
+- **本人に残ること**: Ctrl+Alt+Space で使い始め、ふだんのアプリで打つ。フックと SendInput と MS-IME の開閉は、本人の操作でしか確かめられない。使ったらトレイの「使用状況をコピー」を貼ってもらう。ThinkPad での実測（§2 の 1）も残っている。
+- **次の材料**: `history.jsonl` の別候補・取り消し・失敗の行が、誤変換の候補になる。`eval/sets/user_real.jsonl` に足す。
+- **再開の手順**: `pwsh -NoProfile -File ime/install.ps1`（HEAD を入れ直す）。試験は次の 2 つ。
+  - `pwsh -NoProfile -File ime/build.ps1 -Test`
+  - `RomajiSlmIme.exe --selftest <打鍵列> <結果ファイル> [--root <repo>]`
 2026-10-13 に本人が休止を決め、2026-10-14〜15 に親セッション（Claude）が本人不在で進めた（規則は [parent-session-prompt.md](parent-session-prompt.md)、判断の記録 D1〜D13 と本人待ちのカードは [decisions.md](decisions.md)）。
 要件は [DESIGN.md](DESIGN.md)、方式の決定と経緯は [REDESIGN.md](REDESIGN.md)、全実測は [EVAL.md](EVAL.md)、体験版は [TRIAL.md](TRIAL.md)、llama-server 実行系は [LLAMA_BACKEND.md](LLAMA_BACKEND.md)。
 
