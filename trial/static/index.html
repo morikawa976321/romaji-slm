@@ -3,88 +3,123 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>romaji-slm 体験版</title>
+<title>romaji-slm 変換</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="app.css">
+<style>
+  :root { --bg: #fafaf8; --fg: #1d1d1b; --muted: #6b6b66; --line: #d9d8d2; --accent: #2f6fde; --err: #c0392b; --card: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1b1a; --fg: #ecebe6; --muted: #9c9b95; --line: #3a3a37; --accent: #6d9cf0; --err: #e57367; --card: #242422; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, "Yu Gothic UI", "Meiryo", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 18px; margin: 0 0 16px; }
+  h1 small { color: var(--muted); font-weight: normal; font-size: 12px; margin-left: 6px; }
+  .row { display: flex; gap: 8px; }
+  #in { flex: 1; font: 18px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); }
+  #in:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { font: inherit; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { color: var(--muted); font-size: 13px; min-height: 1.6em; margin: 6px 2px 14px; }
+  .status.err { color: var(--err); }
+  label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+  #out { width: 100%; min-height: 180px; font-family: inherit; font-size: 18px; line-height: 1.7; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); resize: vertical; }
+  .tools { display: flex; gap: 8px; align-items: center; margin: 8px 0 20px; flex-wrap: wrap; }
+  .tools .note { color: var(--muted); font-size: 12px; }
+  ol#hist { list-style: none; padding: 0; margin: 0; }
+  ol#hist li { border-top: 1px solid var(--line); padding: 8px 2px; }
+  ol#hist .src { color: var(--muted); font: 12px ui-monospace, Consolas, monospace; word-break: break-all; }
+  ol#hist .ms { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  ol#hist .bad { color: var(--err); }
+</style>
 </head>
 <body>
-<header>
-  <h1>romaji-slm 体験版 <small id="version"></small></h1>
-  <ol id="stepper" class="stepper"></ol>
-</header>
-<div id="banner" class="banner hidden"></div>
-
 <main>
-  <!-- 0 準備 -->
-  <section id="step-0" class="step hidden">
-    <h2>はじめに</h2>
-    <p>ローマ字かな漢字変換を、画面の順にボタンを押して試します。文字を打つ必要はありません。</p>
-    <ol class="plan">
-      <li>句読点: 例文 3 つの変換結果を見比べて、句読点の形を選ぶ</li>
-      <li>英字: 例文 3 つで、英字の大文字・小文字の整え方を選ぶ</li>
-      <li>体感: 選んだ設定で例文を変換してみる（自分の文も試せます）</li>
-      <li>結果: 自動で短い計測をして、結果をコピーする</li>
-    </ol>
-    <p class="note">選んだ内容は押した時点で保存されます。途中でページを閉じても、もう一度開けば続きからです。</p>
-    <p class="status" id="ready-status">準備中（モデルを読み込んでいます）…</p>
-    <div class="row"><button id="start" class="big primary" disabled>はじめる</button></div>
-  </section>
+  <h1>romaji-slm 変換 <small id="ver"></small></h1>
+  <div class="row">
+    <input id="in" autocomplete="off" spellcheck="false" placeholder="ローマ字を打って Enter" autofocus>
+    <button id="go" class="primary">変換</button>
+  </div>
+  <div class="status" id="st">準備中（モデルを読み込んでいます）…</div>
 
-  <!-- 1 句読点 / 2 英字（中身は app.js が組み立てる） -->
-  <section id="step-1" class="step hidden">
-    <h2>1. 句読点</h2>
-    <p class="lead">句読点を打たずに入力した例文です。「この例を変換」を押し、出てきた案のうち良いほうを選んでください。</p>
-    <div id="cmp-punct" class="examples"></div>
-    <div id="q-punct"></div>
-  </section>
+  <label for="out">確定した文（編集できます。末尾が次の変換の左文脈になります）</label>
+  <textarea id="out" spellcheck="false"></textarea>
+  <div class="tools">
+    <button id="copy">コピー</button>
+    <button id="clear">クリア</button>
+    <span class="note" id="ctx"></span>
+  </div>
 
-  <section id="step-2" class="step hidden">
-    <h2>2. 英字の表記</h2>
-    <p class="lead">英字を含む例文です。「この例を変換」を押し、出てきた案のうち良いものを選んでください。</p>
-    <div id="cmp-en_case" class="examples"></div>
-    <div id="q-en_case"></div>
-  </section>
-
-  <!-- 3 体感 -->
-  <section id="step-3" class="step hidden">
-    <h2>3. 体感</h2>
-    <p class="lead" id="feel-combo"></p>
-    <div id="feel-examples" class="examples"></div>
-    <label class="field-label" for="committed">確定欄（変換した結果がここにたまります）</label>
-    <textarea id="committed" rows="3" readonly></textarea>
-    <div id="feel-more" class="hidden">
-      <p class="note">ここから先は任意です。自分の文を試すなら、ローマ字を打って Enter。</p>
-      <div class="row input-row">
-        <input id="own-input" type="text" autocomplete="off" spellcheck="false" placeholder="自分の文を試す（ローマ字で打って Enter）">
-        <button id="own-convert">変換</button>
-      </div>
-      <div class="row">
-        <button id="try-speed">速度優先（xsmall）でも同じ文を試す</button>
-      </div>
-    </div>
-    <p class="status" id="feel-status"></p>
-    <ol id="feel-history" class="history"></ol>
-    <div id="q-use"></div>
-  </section>
-
-  <!-- 4 計測とコピー -->
-  <section id="step-4" class="step hidden">
-    <h2>4. 計測と結果</h2>
-    <p class="lead" id="measure-lead">短い計測をしています。そのままお待ちください（操作は要りません）。</p>
-    <progress id="measure-progress" value="0" max="1"></progress>
-    <p class="status" id="measure-status"></p>
-    <div id="result-box" class="hidden">
-      <div class="row"><button id="copy" class="big primary">結果をコピー</button><span class="status" id="copy-status"></span></div>
-      <p class="note">コピーしたら、そのまま貼って返してください。終わるときは黒いウィンドウを閉じます。</p>
-      <textarea id="summary" rows="20" readonly></textarea>
-    </div>
-  </section>
-
-  <nav class="row nav">
-    <button id="back">← 戻る</button>
-    <button id="next" class="hidden">次へ →</button>
-  </nav>
+  <ol id="hist"></ol>
 </main>
-<script src="app.js"></script>
+<script>
+// 設定は本人の選択（small・句読点を自動で補う・英字は打ったまま。docs/decisions.md「本人の回答」2026-10-15）
+const CONFIG = "small/insert/typed";
+const CTX_CHARS = 60;
+const $ = (id) => document.getElementById(id);
+const inp = $("in"), out = $("out"), st = $("st"), hist = $("hist");
+let busy = false;
+
+function leftContext() { return out.value.slice(-CTX_CHARS); }
+function showCtx() { const c = leftContext(); $("ctx").textContent = c ? `左文脈: …${c.slice(-20)}` : "左文脈: なし"; }
+function status(text, err) { st.textContent = text; st.className = "status" + (err ? " err" : ""); }
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+async function convert() {
+  const text = inp.value.trim();
+  if (!text || busy) return;
+  busy = true; $("go").disabled = true; status("変換中…");
+  try {
+    const r = await post("/api/convert", { text, left_context: leftContext(), config_ids: [CONFIG] });
+    const res = r.results[0];
+    const li = document.createElement("li");
+    if (res.error) {
+      status(`変換できませんでした（入力はそのまま残しています）: ${res.error}`, true);
+      li.innerHTML = `<span class="bad"></span><span class="ms"></span><div class="src"></div>`;
+      li.querySelector(".bad").textContent = "変換できませんでした";
+    } else {
+      out.value += res.text;
+      out.scrollTop = out.scrollHeight;
+      inp.value = "";
+      status(`${Math.round(res.ms)} ms`);
+      li.innerHTML = `<span class="txt"></span><span class="ms"></span><div class="src"></div>`;
+      li.querySelector(".txt").textContent = res.text;
+    }
+    li.querySelector(".ms").textContent = `${Math.round(res.ms)} ms`;
+    li.querySelector(".src").textContent = text;
+    hist.prepend(li);
+  } catch (e) {
+    status(`サーバにつながりません。黒いウィンドウが開いているか確かめてください（${e.message}）`, true);
+  } finally {
+    busy = false; $("go").disabled = false; showCtx(); inp.focus();
+  }
+}
+
+inp.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); convert(); } });
+$("go").addEventListener("click", convert);
+out.addEventListener("input", showCtx);
+$("copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(out.value); status("コピーしました"); }
+  catch { out.select(); document.execCommand("copy"); status("コピーしました"); }
+});
+$("clear").addEventListener("click", () => { out.value = ""; hist.innerHTML = ""; showCtx(); status(""); inp.focus(); });
+
+(async function init() {
+  showCtx();
+  try {
+    const info = await (await fetch("/api/info")).json();
+    $("ver").textContent = info.version || "";
+  } catch { /* 版の表示は無くてよい */ }
+  // 1 回空回しして、最初の変換の待ちを減らす（サーバ側の読み込みが終わるまで待つ）
+  try { await post("/api/convert", { text: "konnichiha", left_context: "", config_ids: [CONFIG] }); status("準備できました。ローマ字を打って Enter で変換します。"); }
+  catch (e) { status(`サーバにつながりません（${e.message}）`, true); }
+})();
+</script>
 </body>
 </html>

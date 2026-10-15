@@ -54,7 +54,7 @@ function Resolve-Real([IO.FileInfo]$f) {
 
 # ページに要るファイル。欠けた zip を作らないよう、無ければ止める
 $required = @('trial/server.py', 'trial/engine.py', 'trial/summary.py', 'trial/machine.py', 'trial/__init__.py',
-              'trial/configs.json', 'trial/examples.json', 'trial/static/index.html', 'trial/static/app.js',
+              'trial/configs.json', 'trial/examples.json', 'trial/static/index.html', 'trial/static/steps.html', 'trial/static/app.js',
               'trial/static/app.css', 'trial/run.cmd', 'trial/run.ps1', 'trial/README-trial.md')
 $missing = @($required | Where-Object { -not (Test-Path $_) })
 if ($missing.Count) { throw "trial/ のファイルが無い: $($missing -join ', ')" }

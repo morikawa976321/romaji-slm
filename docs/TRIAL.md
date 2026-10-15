@@ -19,7 +19,7 @@ V0（3 タブの自由探索）を、D10 の指摘（本人が「何をすれば
 | `trial/machine.py` | 機種情報（Windows はレジストリの CPU 名と `GlobalMemoryStatusEx`） |
 | `trial/configs.json` | モデル・比較の設定・ステップ・質問カードの文言と選択肢 |
 | `trial/examples.json` | 比較・体感・計測の例文（親が実コアで確かめて差し替える） |
-| `trial/static/` | ページ（`index.html`・`app.js`・`app.css`。外部 CDN・Web フォントなし） |
+| `trial/static/` | ページ。`index.html` は入力して変換するだけの画面（設定は本人の選択 small・句読点 B・英字は打ったまま、確定欄の末尾 60 字を左文脈に。2026-10-16 本人の依頼）。`steps.html`・`app.js`・`app.css` は比較と回答を集める一本道の画面（`/steps.html`）。外部 CDN・Web フォントなし |
 | `trial/run.cmd` | ThinkPad で起動する。配布物ではルートに置く。ASCII だけの起動役で、実体は `trial/run.ps1`（cmd.exe は UTF-8 のバッチの日本語を正しく読めないため。2026-10-15 開発機で確認） |
 | `trial/run.ps1` | 起動の手順（uv の導入・`uv sync`・同梱モデルの指定・サーバ起動）。UTF-8 BOM 付き（Windows PowerShell 5.1 向け） |
 | `tools/pack-trial.ps1` | 配布 zip を作る |
