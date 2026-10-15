@@ -428,6 +428,7 @@ namespace RomajiSlm
         readonly Native.WinEventProc fgProc, focusProc;
         IntPtr hook, fgHook, focusHook;
         Point anchor;
+        readonly bool[] keyDown = new bool[256];
         bool wasComposing, caps, posted, caretAnchor;
         long flashUntil, fieldDeadline;
         int fieldSeq;
@@ -495,14 +496,23 @@ namespace RomajiSlm
             UpdateTray();
 
             timer = new System.Windows.Forms.Timer { Interval = 50 };
+            ResyncModifiers();
             timer.Tick += (s, e) =>
             {
+                if (!comp.Waiting) ResyncModifiers();   // 離鍵を取りこぼしても（管理者権限の窓の上で離した等）修飾キーが押されたままにならない
                 if (fieldDeadline != 0 && Now > fieldDeadline) { fieldDeadline = 0; comp.OnFieldChecked(fieldSeq, false, Now); }
                 comp.Tick(Now);
                 Run();
             };
             comp.RequireFieldCheck = true;
             timer.Start();
+        }
+
+        /// 確定待ちでない（修飾キーを積んでいない）間は、OS の状態が本人の押している状態と一致する
+        void ResyncModifiers()
+        {
+            foreach (int vk in new[] { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C })
+                keyDown[vk] = Native.Down(vk);
         }
 
         void Toggle()
@@ -520,11 +530,14 @@ namespace RomajiSlm
                 bool injected = (k.flags & 0x10) != 0;
                 int msg = wParam.ToInt32();
                 bool down = msg == 0x100 || msg == 0x104;
+                // 修飾キーの状態は自分で追う。確定待ちの間は修飾キーも積んで OS に渡さないので、GetAsyncKeyState は使えない。
+                // 他のアプリが送り込んだ修飾キー（貼り付けの Ctrl+V など）も OS の状態を変えるので追う。自分の送り直しは除く
+                if (k.dwExtraInfo != Native.Magic && k.vkCode < 256) keyDown[k.vkCode] = down;
                 if (!injected)
                 {
                     if (down && k.vkCode == Composer.VK_CAPITAL) caps = !caps;
-                    var m = new Mods(Native.Down(0x10), Native.Down(0x11), Native.Down(0x12),
-                                     Native.Down(0x5B) || Native.Down(0x5C), caps);
+                    var m = new Mods(keyDown[0xA0] || keyDown[0xA1], keyDown[0xA2] || keyDown[0xA3],
+                                     keyDown[0xA4] || keyDown[0xA5], keyDown[0x5B] || keyDown[0x5C], caps);
                     bool swallow = comp.OnKey((int)k.vkCode, down, m, Now, Native.GetForegroundWindow(),
                                               (int)k.scanCode, (k.flags & 0x01) != 0);
                     if (!posted) { posted = true; popup.BeginInvoke((Action)Run); }
@@ -540,32 +553,19 @@ namespace RomajiSlm
         {
             posted = false;
             bool redraw = false;
-            for (int round = 0; round < 4; round++)
+            for (int round = 0; round < 8; round++)
             {
                 var effs = comp.TakeEffects();
                 if (effs.Count == 0) break;
-                // 確定文を送れなかったら、同じ回の以降の確定は送らずに打鍵列を戻し、積んだ打鍵は離鍵だけ送る（Composer と同じ規則）
-                List<string> unsent = null;
-                string why = null;
                 foreach (var e in effs)
                 {
-                    var inj = e as InjectEffect;
                     var rep = e as ReplayEffect;
                     var req = e as RequestEffect;
                     var ime = e as SetImeEffect;
                     var mode = e as ModeEffect;
                     var stat = e as StatEffect;
-                    if (inj != null)
-                    {
-                        if (unsent == null && Native.GetForegroundWindow() != inj.Window)
-                            why = "確定の前に窓が替わったので入力していません。Enter で今の窓に入力します";
-                        else if (unsent == null && !Native.SendText(inj.Text))
-                            why = "この窓には入力できませんでした（管理者権限の窓など）。Shift+Enter でも同じです。Esc で捨てます";
-                        else if (unsent == null) { usage.App(Native.ForegroundExe()); continue; }
-                        if (unsent == null) { unsent = new List<string>(); usage.Add("inject_fail", 1); }
-                        unsent.Add(inj.Romaji);
-                    }
-                    else if (rep != null) Native.SendKeys(unsent == null ? rep.Keys : rep.Keys.Where(k => !k.Down).ToList());
+                    if (e is DeliverEffect) Deliver();
+                    else if (rep != null) Native.SendBatch(rep.Keys.Select(k => new Delivery { IsKey = true, Key = k }).ToList());
                     else if (req != null) StartRequest(req);
                     else if (ime != null)
                     {
@@ -575,16 +575,32 @@ namespace RomajiSlm
                         if (imeWnd != IntPtr.Zero) ThreadPool.QueueUserWorkItem(_ => Native.SetImeOpen(imeWnd, open));
                     }
                     else if (mode != null) OnMode(mode.Mode);
-                    else if (stat != null) { if (unsent == null || !stat.Name.StartsWith("commit")) usage.Add(stat.Name, stat.Value); }
+                    else if (stat != null) usage.Add(stat.Name, stat.Value);
                     else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq);
                     else if (e is AltMaskEffect) Native.SendMask();
                     else if (e is RedrawEffect) redraw = true;
                 }
-                if (unsent != null) { comp.OnInjectFailed(unsent, why, Now); redraw = true; }
                 if (effs.Any(x => x is StatEffect)) usage.Save(server.Describe);
             }
             if (flashUntil != 0 && Now > flashUntil) { flashUntil = 0; popup.EndFlash(); redraw = true; }
             if (redraw) Redraw();
+        }
+
+        /// 待ち行列の先頭から送れるものを 1 回の SendInput で送る（間に本人の打鍵が割り込まないように）。
+        /// 送る直前に前面の窓を確かめ、送れなければ Composer が打鍵列を欄へ戻す
+        void Deliver()
+        {
+            var ds = comp.TakeReady(Now);
+            if (ds.Count == 0) return;
+            var fg = Native.GetForegroundWindow();
+            string why = null;
+            if (ds.Any(d => !d.IsKey && d.Window != fg))
+                why = "確定の前に窓が替わったので入力していません。Enter で今の窓に入力します";
+            else if (!Native.SendBatch(ds))
+                why = "この窓には入力できませんでした（管理者権限の窓など）。Esc で捨てます";
+            if (why != null) { comp.DeliveryFailed(why, Now); return; }
+            if (ds.Any(d => !d.IsKey)) usage.App(Native.ForegroundExe());
+            comp.Delivered(Now);
         }
 
         void Redraw()
@@ -713,8 +729,11 @@ namespace RomajiSlm
                         foreach (var e in comp.TakeEffects())
                         {
                             var req = e as RequestEffect;
-                            var inj = e as InjectEffect;
-                            if (inj != null) result = inj.Text;
+                            if (e is DeliverEffect)
+                            {
+                                var ds = comp.TakeReady(clock.ElapsedMilliseconds);
+                                if (ds.Count > 0) { result = string.Concat(ds.Where(d => !d.IsKey).Select(d => d.Text)); comp.Delivered(clock.ElapsedMilliseconds); }
+                            }
                             if (req != null)
                             {
                                 double ms;
@@ -789,7 +808,7 @@ namespace RomajiSlm
         [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
 
         // 自分が送り込んだ打鍵の印（フックは LLKHF_INJECTED で一律に素通しするので、区別は念のため）
-        static readonly IntPtr Magic = new IntPtr(0x52534C4D);
+        public static readonly IntPtr Magic = new IntPtr(0x52534C4D);
 
         public static bool Down(int vk) { return GetAsyncKeyState(vk) < 0; }
 
@@ -800,26 +819,27 @@ namespace RomajiSlm
             return i;
         }
 
-        /// 文字列を 1 回の SendInput で送る（KEYEVENTF_UNICODE。サロゲート対は 2 単位のまま送る）。
-        /// 送った数が足りなければ false（UIPI で拒まれたときも 0 が返る。理由は区別できない）
-        public static bool SendText(string text)
+        /// 確定文と送り直す打鍵を、順を保って 1 回の SendInput で送る。文字は KEYEVENTF_UNICODE（サロゲート対は 2 単位のまま）、
+        /// 打鍵は元の仮想キー・スキャンコード・拡張キーの印のまま。送った数が足りなければ false
+        /// （UIPI で拒まれたときも 0 が返る。理由は区別できない）
+        public static bool SendBatch(List<Delivery> ds)
         {
             var list = new List<INPUT>();
-            foreach (char ch in text)
+            foreach (var d in ds)
             {
-                list.Add(Key(0, ch, 0x0004));
-                list.Add(Key(0, ch, 0x0004 | 0x0002));
+                if (d.IsKey)
+                {
+                    list.Add(Key((ushort)d.Key.Vk, (ushort)d.Key.Scan, (d.Key.Down ? 0u : 0x0002u) | (d.Key.Extended ? 0x0001u : 0u)));
+                    continue;
+                }
+                foreach (char ch in d.Text)
+                {
+                    list.Add(Key(0, ch, 0x0004));
+                    list.Add(Key(0, ch, 0x0004 | 0x0002));
+                }
             }
             if (list.Count == 0) return true;
             return SendInput((uint)list.Count, list.ToArray(), Marshal.SizeOf(typeof(INPUT))) == list.Count;
-        }
-
-        /// 確定待ちの間に積んだ打鍵を、元の仮想キー・スキャンコード・拡張キーの印のまま送り直す
-        public static void SendKeys(List<KeyEv> keys)
-        {
-            if (keys.Count == 0) return;
-            var a = keys.Select(k => Key((ushort)k.Vk, (ushort)k.Scan, (k.Down ? 0u : 0x0002u) | (k.Extended ? 0x0001u : 0u))).ToArray();
-            SendInput((uint)a.Length, a, Marshal.SizeOf(typeof(INPUT)));
         }
 
         /// Alt を押したまま握りつぶしたあと、Alt を離したときにメニューが開かないよう、割り当ての無いキーを 1 回はさむ
