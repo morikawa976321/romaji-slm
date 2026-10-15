@@ -118,7 +118,16 @@ class CorePipeline:
     def candidates(self, romaji: str, left_context: str = "") -> list[dict]:
         """読みの上位 k 件の変換と点数（点数の高い順）。"""
         out = []
-        rs = readings(romaji, n=self.n_read)[: self.k]
+        allr = readings(romaji, n=self.n_read)
+        rs = allr[: self.k]
+        # 読み段は上位 k 件を多様性で選び直して返す（1 位はコスト最小、2〜k 位は選び直し。docs/READING.md）。
+        # 選び直しは英単語として読む候補（code、main をそのまま残す読み）を押し出すことがあり、user_style で
+        # 正常入力が 2 件壊れた。コスト順の上位 k 件も足して比べる（CPU ではバッチが大きくなってもほぼ同じ時間。D3）
+        seen = {r.segs for r in rs}
+        for r in sorted(allr, key=lambda r: r.cost)[: self.k]:
+            if r.segs not in seen:
+                rs.append(r)
+                seen.add(r.segs)
         if rs and all(r.edits for r in rs):
             # 打鍵を直さない読みも必ず比べる。辞書に無い略語・型番（cdma, jr, scc-0210）は、読みの段では
             # 直す経路のほうが安くなりやすい。直すかどうかは zenz の尤度との比較に任せる

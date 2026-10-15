@@ -85,6 +85,10 @@ if (Test-Path $lm) {
 } else {
     Warn "$lm が無い（uv run python -m core.reading で一度動かすと作られる）"
 }
+# 読み段の 2〜5 位の選び直しに使う Mozc の読みの索引（core.kana_lm.WordCost）。無いと語のコストを使わずに動き、精度が落ちる
+$wc = 'models/reading/mozc_readings.marisa'
+if (Test-Path $wc) { Copy-Item $wc (Join-Path $stage $wc) }
+else { Warn "$wc が無い（uv run python -m core.reading で一度動かすと作られる）" }
 
 Write-Host "zenz のキャッシュ: $HfHome"
 foreach ($m in 'models--Miwa-Keita--zenz-v3.1-small', 'models--Miwa-Keita--zenz-v3.1-xsmall') {
