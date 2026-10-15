@@ -507,6 +507,8 @@ namespace RomajiSlm
                 Run();
             };
             comp.RequireFieldCheck = true;
+            // UI Automation の初回の呼び出しは初期化で遅く、欄の確認（0.3 秒で打ち切り）に間に合わないことがあるので、起動時に 1 回済ませる
+            ThreadPool.QueueUserWorkItem(_ => { bool pw; Point q; Native.FocusedElement(out pw, out q); });
             timer.Start();
         }
 
