@@ -190,18 +190,50 @@ class CorePipeline:
             bounds = tuple(sorted({x if x < b else x + 1 for x in bounds} | {b, b + 1}))
         return new_text, bounds
 
+    def _render_best(self, best: dict, romaji: str, left_context: str) -> str:
+        text, bounds = best["text"], best["bounds"]
+        if self.punct == "insert" and not (_TYPED_PUNCT & set(romaji)) and best["score"] != float("-inf"):
+            # 句読点を打った入力には足さない（打った句読点の種類と幅だけ決める = 句読点 A と同じ振る舞い）
+            text, bounds = self.insert_punct(text, bounds, left_context)
+        return render_en_case(text, best["reading_obj"], self.en_case, bounds)
+
     def convert_detailed(self, romaji: str, left_context: str = "") -> Result:
         cands = self.candidates(romaji, left_context)
         if not cands:
             return Result("", prompt=romaji)
         best = cands[0]
-        text, bounds = best["text"], best["bounds"]
-        if self.punct == "insert" and not (_TYPED_PUNCT & set(romaji)) and best["score"] != float("-inf"):
-            # 句読点を打った入力には足さない（打った句読点の種類と幅だけ決める = 句読点 A と同じ振る舞い）
-            text, bounds = self.insert_punct(text, bounds, left_context)
-        text = render_en_case(text, best["reading_obj"], self.en_case, bounds)
+        text = self._render_best(best, romaji, left_context)
         return Result(text, prompt=best["reading"], candidates=tuple(c["text"] for c in cands),
                       edited=bool(best["edits"]))
+
+    def convert_nbest(self, romaji: str, left_context: str = "", n: int = 6) -> list[str]:
+        """常駐の入力（ime/）が次候補に使う、重複のない候補の列。1 位は convert と同じ文。
+
+        2 位以下は句読点を補う採点をし直さず（1 件ごとに 100 ms 以上かかる）、1 位が文末に補った記号だけを同じく付ける。
+        最後に 1 位の読みのひらがなを置く（辞書に無い語を打ったときの逃げ道）。
+        """
+        cands = self.candidates(romaji, left_context)
+        if not cands:
+            return []
+        best = cands[0]
+        first = self._render_best(best, romaji, left_context)
+        end = first[-1] if first and first[-1] in "。？" and not best["text"].endswith(first[-1]) else ""
+        out = [first]
+        for c in cands[1:]:
+            if c["score"] == float("-inf"):
+                continue
+            t = c["text"]
+            if end and t and t[-1] not in _PUNCT:
+                t += end
+            out.append(render_en_case(t, c["reading_obj"], self.en_case, c["bounds"]))
+        reading = "".join(chr(ord(ch) - 0x60) if "ァ" <= ch <= "ヶ" else ch for ch in best["reading"])
+        if end and reading and reading[-1] not in _PUNCT:
+            reading += end
+        out = list(dict.fromkeys(t for t in out if t))
+        if reading in out[1:]:
+            out.remove(reading)
+        out = out[: n - 1]
+        return out + [reading] if reading and reading not in out else out
 
     def convert(self, romaji: str, left_context: str = "") -> str:
         return self.convert_detailed(romaji, left_context).text
