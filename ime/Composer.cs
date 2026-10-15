@@ -1,9 +1,14 @@
 // 常駐入力のキー処理（状態機械）。Windows の API を呼ばない純粋なクラスにして、合成イベントで試験する（ime/ComposerTests.cs）。
 // 呼び出し側（RomajiSlmIme.cs）は OnKey などを呼んだあと Effects を取り出して実行する。
 //
-// 方式（docs/IME.md）: 日本語モードでは打ったローマ字をアプリに渡さず、浮き窓（未確定の欄）にためる。
+// 方式（docs/IME.md、D19）: 日本語モードでは打ったローマ字をアプリに渡さず、浮き窓（未確定の欄）にためる。
 // 確定のときだけ変換結果を 1 回で送り込む。アプリの文字を Backspace で消して置き換える方式は、
-// アプリ側の自動補完などで「覚えた打鍵列 = キャレット直前の文字列」が崩れたとき本人の文章を消すので採らない（D19）。
+// アプリ側の自動補完などで「覚えた打鍵列 = キャレット直前の文字列」が崩れたとき本人の文章を消すので採らない。
+//
+// 確定待ち（変換の応答を待つ間）に打たれた、アプリへ素通しするはずの打鍵（Enter・矢印・英字・修飾キー）は、
+// その場では渡さず待ち行列に積み、確定文を送ったあとに同じ順で送り直す。先に渡すと、改行や送信が確定文より
+// 先に起きる。確定が失敗したら、待ち行列の確定はすべて打鍵列として欄へ戻し、積んだ打鍵は離鍵だけ送る。
+//
 // csc（.NET Framework 4.x、C# 5）でビルドするので、文字列補間・?. ・式形式のメンバは使わない。
 
 using System;
@@ -24,14 +29,28 @@ namespace RomajiSlm
         public static readonly Mods ShiftOnly = new Mods(true, false, false, false, false);
     }
 
+    public struct KeyEv
+    {
+        public int Vk, Scan; public bool Extended, Down;
+        public KeyEv(int vk, int scan, bool ext, bool down) { Vk = vk; Scan = scan; Extended = ext; Down = down; }
+    }
+
     public abstract class Effect { }
-    public sealed class InjectEffect : Effect { public string Text; public InjectEffect(string t) { Text = t; } }
+    /// 確定文を送る。Window は確定したときの前面の窓（送る直前にもう一度確かめる）。失敗したら OnInjectFailed に Romaji を返す
+    public sealed class InjectEffect : Effect
+    {
+        public string Text, Romaji; public IntPtr Window;
+        public InjectEffect(string t, string r, IntPtr w) { Text = t; Romaji = r; Window = w; }
+    }
+    /// 確定待ちの間に積んだ打鍵を、同じ順で送り直す
+    public sealed class ReplayEffect : Effect { public List<KeyEv> Keys; public ReplayEffect(List<KeyEv> k) { Keys = k; } }
     public sealed class RequestEffect : Effect
     {
         public int Id; public string Romaji, Context;
         public RequestEffect(int id, string r, string c) { Id = id; Romaji = r; Context = c; }
     }
-    public sealed class SetImeEffect : Effect { public bool Open; public SetImeEffect(bool o) { Open = o; } }
+    /// MS-IME の開閉。Window は要求したときの前面の窓（遅れて実行しても宛先を変えない）
+    public sealed class SetImeEffect : Effect { public bool Open; public IntPtr Window; public SetImeEffect(bool o, IntPtr w) { Open = o; Window = w; } }
     public sealed class ModeEffect : Effect { public Mode Mode; public ModeEffect(Mode m) { Mode = m; } }
     public sealed class AltMaskEffect : Effect { }   // Alt を押したまま握りつぶしたキーのあと、Alt の単押し（メニュー起動）を防ぐ
     public sealed class RedrawEffect : Effect { }
@@ -54,36 +73,37 @@ namespace RomajiSlm
         public Mode Mode = Mode.Disabled;
         public Phase Phase = Phase.Idle;
         public bool ServerReady;
+        public string Status = "";
+        public int CandIndex;
         // 打ち始めに、フォーカスの欄がパスワード欄かを呼び出し側に確かめさせる（CheckFieldEffect → OnFieldChecked）。
         // 確かめ終わるまで変換を要求せず、浮き窓も出さない。パスワード欄なら打鍵列をそのまま入れて、その欄では素通しにする
         public bool RequireFieldCheck;
         public bool FieldPending { get; private set; }
-        bool passthrough;
-        int fieldSeq;
-        public string Status = "";
-        public int CandIndex;
 
         readonly StringBuilder buf = new StringBuilder();
         readonly List<Effect> effects = new List<Effect>();
         readonly Dictionary<string, string[]> cache = new Dictionary<string, string[]>();
         readonly Queue<string> cacheOrder = new Queue<string>();
         readonly Dictionary<string, string> failed = new Dictionary<string, string>();
-        readonly List<Item> commits = new List<Item>();
-        readonly HashSet<int> swallowedDown = new HashSet<int>();
+        readonly List<Entry> queue = new List<Entry>();   // 確定と、確定待ちの間に積んだ打鍵（送る順）
+        readonly Dictionary<int, bool> held = new Dictionary<int, bool>();   // 押されているキーと、押下のときの判断（握りつぶしたか）
         string context = "";
         long contextAt;
         IntPtr foreground = IntPtr.Zero;
+        string focus = "";
         long lastKeyAt;
-        int nextId = 1;
+        int nextId = 1, fieldSeq;
+        bool passthrough;
         Pending inflight;
 
-        sealed class Item { public string Romaji; public string Text; public IntPtr Window; public bool Raw; public int CandIndex; }
+        sealed class Item { public string Romaji, Text, Focus; public IntPtr Window; public bool Raw; public int CandIndex; }
+        sealed class Entry { public Item Commit; public KeyEv Key; }
         sealed class Pending { public int Id; public string Key; public long SentAt; }
 
         public string Buffer { get { return buf.ToString(); } }
         public bool Composing { get { return buf.Length > 0; } }
         public string Context { get { return context; } }
-        public int PendingCommits { get { return commits.Count; } }
+        public int PendingCommits { get { int n = 0; foreach (var e in queue) if (e.Commit != null) n++; return n; } }
 
         public List<Effect> TakeEffects()
         {
@@ -117,16 +137,37 @@ namespace RomajiSlm
 
         // ---- 打鍵 ----
 
-        /// 打鍵 1 つ。true ならアプリに渡さない（握りつぶす）。押下を握りつぶしたキーは離鍵も握りつぶす。
-        public bool OnKey(int vk, bool down, Mods m, long now, IntPtr fg)
+        /// 打鍵 1 つ。true ならアプリに渡さない（握りつぶす）。
+        /// 押下の判断は離鍵とキーリピートにも引き継ぐ（途中で修飾キーが変わっても、押下と離鍵の対応を崩さない）。
+        public bool OnKey(int vk, bool down, Mods m, long now, IntPtr fg, int scan = 0, bool ext = false)
         {
-            if (!down)
-                return swallowedDown.Remove(vk);
             if (fg != foreground)
                 OnForeground(fg, now);
-            bool s = HandleDown(vk, m, now);
-            if (s) swallowedDown.Add(vk);
-            else swallowedDown.Remove(vk);
+            bool first;
+            bool wasHeld = held.TryGetValue(vk, out first);
+            bool s;
+            if (!down)
+            {
+                held.Remove(vk);
+                s = wasHeld && first;
+            }
+            else if (wasHeld)
+            {
+                // キーリピート。握りつぶしたキーなら同じキーとして扱い直す（文字の連打、Backspace の連続）。
+                // 修飾キーつきと Shift+Space（モードが往復する）は扱わない
+                if (first && !m.Ctrl && !m.Alt && !m.Win && !(vk == VK_SPACE && m.Shift)) HandleDown(vk, m, now);
+                s = first;
+            }
+            else
+            {
+                s = HandleDown(vk, m, now);
+                held[vk] = s;
+            }
+            if (!s && queue.Count > 0)
+            {
+                queue.Add(new Entry { Key = new KeyEv(vk, scan, ext, down) });
+                return true;
+            }
             return s;
         }
 
@@ -143,10 +184,10 @@ namespace RomajiSlm
                 return false;
             if (space && m.Shift && !m.Ctrl && !m.Alt && !m.Win)
             {
-                if (Composing || Phase != Phase.Idle) CommitCurrent(now, false);
+                if (Composing) CommitCurrent(now);
                 Mode = Mode == Mode.Japanese ? Mode.English : Mode.Japanese;
                 passthrough = false;
-                effects.Add(new SetImeEffect(false));
+                effects.Add(new SetImeEffect(false, foreground));
                 effects.Add(new ModeEffect(Mode));
                 effects.Add(new RedrawEffect());
                 return true;
@@ -189,7 +230,7 @@ namespace RomajiSlm
             // 未確定の文があるとき
             if (c != '\0')
             {
-                if (Phase == Phase.Candidates) { CommitSelected(now); }
+                if (Phase == Phase.Candidates) CommitSelected(now);
                 buf.Append(c);
                 Phase = Phase.Raw;
                 lastKeyAt = now;
@@ -209,7 +250,7 @@ namespace RomajiSlm
                     break;
                 case VK_RETURN:
                     if (m.Shift) CommitRaw(now);
-                    else CommitCurrent(now, true);
+                    else CommitCurrent(now);
                     break;
                 case VK_ESCAPE:
                     if (Phase == Phase.Candidates) Phase = Phase.Raw;
@@ -246,18 +287,25 @@ namespace RomajiSlm
             CandIndex = 0;
         }
 
+        bool HasUnresolved
+        {
+            get { foreach (var e in queue) if (e.Commit != null && e.Commit.Text == null) return true; return false; }
+        }
+
+        Item NewItem(string text, int cand, bool raw)
+        {
+            return new Item { Romaji = buf.ToString(), Text = text, Window = foreground, Focus = focus, CandIndex = cand, Raw = raw };
+        }
+
         /// Enter: 候補を出していればその候補、まだなら 1 位を確定する（変換が済んでいなければ届きしだい）
-        void CommitCurrent(long now, bool enter)
+        void CommitCurrent(long now)
         {
             if (buf.Length == 0) { Clear(); return; }
             if (Phase == Phase.Candidates && Candidates != null) { CommitSelected(now); return; }
-            var it = new Item { Romaji = buf.ToString(), Window = foreground };
-            if (commits.Count == 0)
-            {
-                string[] c;
-                if (cache.TryGetValue(Key(it.Romaji, context), out c)) it.Text = c[0];
-            }
-            commits.Add(it);
+            string text = null;
+            string[] c;
+            if (!HasUnresolved && cache.TryGetValue(Key(buf.ToString(), context), out c)) text = c[0];
+            queue.Add(new Entry { Commit = NewItem(text, 0, false) });
             Clear();
             Flush(now);
         }
@@ -265,44 +313,84 @@ namespace RomajiSlm
         void CommitSelected(long now)
         {
             var c = Candidates;
-            if (c == null) { CommitCurrent(now, true); return; }
-            commits.Add(new Item { Romaji = buf.ToString(), Text = c[Math.Min(CandIndex, c.Length - 1)], Window = foreground, CandIndex = CandIndex });
+            if (c == null) { CommitCurrent(now); return; }
+            int i = Math.Min(CandIndex, c.Length - 1);
+            queue.Add(new Entry { Commit = NewItem(c[i], i, false) });
             Clear();
             Flush(now);
         }
 
         void CommitRaw(long now)
         {
-            commits.Add(new Item { Romaji = buf.ToString(), Text = buf.ToString(), Window = foreground, Raw = true });
+            queue.Add(new Entry { Commit = NewItem(buf.ToString(), 0, true) });
             Clear();
             Flush(now);
         }
 
-        /// 先頭から、変換の済んだ確定を順に送り込む。前面のウィンドウが変わっていたら送らずに欄へ戻す
+        /// 先頭から、変換の済んだ確定と積んだ打鍵を順に送る。確定したときと前面の窓・フォーカスの欄が違えば、送らずに欄へ戻す
         void Flush(long now)
         {
-            while (commits.Count > 0 && commits[0].Text != null)
+            List<KeyEv> keys = null;
+            while (queue.Count > 0)
             {
-                var it = commits[0];
-                commits.RemoveAt(0);
-                if (it.Window != foreground)
+                var e = queue[0];
+                if (e.Commit == null)
                 {
-                    Restore(it.Romaji, "確定の前にウィンドウが変わったので入力していません。Enter で今のウィンドウに入力します");
+                    if (keys == null) keys = new List<KeyEv>();
+                    keys.Add(e.Key);
+                    queue.RemoveAt(0);
                     continue;
                 }
-                effects.Add(new InjectEffect(it.Text));
+                var it = e.Commit;
+                if (it.Text == null) break;
+                if (it.Window != foreground || it.Focus != focus)
+                {
+                    if (keys != null) { effects.Add(new ReplayEffect(keys)); keys = null; }
+                    RestoreQueue(MovedStatus);
+                    break;
+                }
+                if (keys != null) { effects.Add(new ReplayEffect(keys)); keys = null; }
+                effects.Add(new InjectEffect(it.Text, it.Romaji, it.Window));
                 effects.Add(new StatEffect(it.Raw ? "commit_raw" : it.CandIndex > 0 ? "commit_other" : "commit_first", 1));
                 AppendContext(it.Text, now);
+                queue.RemoveAt(0);
             }
+            if (keys != null) effects.Add(new ReplayEffect(keys));
             Pump(now);
+        }
+
+        /// 待ち行列の確定をすべて打鍵列のまま欄の先頭へ（順を保って）戻す。積んだ打鍵は離鍵だけ送る（押下は捨てる。
+        /// 確定文の無いまま Enter などが届かないように）
+        void RestoreQueue(string status)
+        {
+            var romaji = new StringBuilder();
+            var ups = new List<KeyEv>();
+            foreach (var e in queue)
+            {
+                if (e.Commit != null) romaji.Append(e.Commit.Romaji);
+                else if (!e.Key.Down) ups.Add(e.Key);
+            }
+            queue.Clear();
+            if (ups.Count > 0) effects.Add(new ReplayEffect(ups));
+            Restore(romaji.ToString(), status);
         }
 
         void Restore(string romaji, string status)
         {
+            if (romaji.Length == 0) return;
             buf.Insert(0, romaji);
             Phase = Phase.Raw;
+            CandIndex = 0;
+            lastKeyAt = 0;
             Status = status;
             effects.Add(new RedrawEffect());
+        }
+
+        /// 呼び出し側が確定文を送れなかった（SendInput の失敗・前面の窓の変化）。打鍵列を順に欄の先頭へ戻す
+        public void OnInjectFailed(List<string> romajis, string why, long now)
+        {
+            ResetContext();
+            Restore(string.Concat(romajis), why);
         }
 
         // ---- 変換の要求と応答 ----
@@ -315,26 +403,13 @@ namespace RomajiSlm
             Pump(now);
         }
 
-        /// 欄の確認の結果（呼び出し側が時間切れにしたときは password=false で呼ぶ）
-        public void OnFieldChecked(int seq, bool password, long now)
-        {
-            if (seq != fieldSeq || !FieldPending) return;
-            FieldPending = false;
-            if (password)
-            {
-                if (Composing) CommitRaw(now);
-                passthrough = true;
-            }
-            effects.Add(new RedrawEffect());
-            Pump(now);
-        }
-
         void Pump(long now)
         {
             if (inflight != null || !ServerReady || FieldPending) return;
-            if (commits.Count > 0 && commits[0].Text == null)
+            foreach (var e in queue)
             {
-                Send(commits[0].Romaji, now);
+                if (e.Commit == null || e.Commit.Text != null) continue;
+                Send(e.Commit.Romaji, now);   // 先頭の未解決の確定（文脈はそれより前の確定を送った後のもの）
                 return;
             }
             if (buf.Length == 0) return;
@@ -357,7 +432,8 @@ namespace RomajiSlm
             if (inflight == null || inflight.Id != id) return;
             string k = inflight.Key;
             inflight = null;
-            if (cands != null && cands.Length > 0)
+            bool ok = cands != null && cands.Length > 0;
+            if (ok)
             {
                 cache[k] = cands;
                 cacheOrder.Enqueue(k);
@@ -369,15 +445,15 @@ namespace RomajiSlm
                 failed[k] = error ?? "候補なし";
                 effects.Add(new StatEffect("fail", 1));
             }
-            if (commits.Count > 0 && commits[0].Text == null && Key(commits[0].Romaji, context) == k)
+            Item head = null;
+            foreach (var e in queue) if (e.Commit != null && e.Commit.Text == null) { head = e.Commit; break; }
+            if (head != null && Key(head.Romaji, context) == k)
             {
-                var it = commits[0];
-                if (cands != null && cands.Length > 0) it.Text = cands[0];
+                if (ok) head.Text = cands[0];
                 else
                 {
-                    commits.RemoveAt(0);
                     failed.Remove(k);   // 欄に戻した文は、もう一度 Enter で再試行できるように
-                    Restore(it.Romaji, "変換できませんでした（" + (error ?? "") + "）。Shift+Enter で打鍵列のまま入力します");
+                    RestoreQueue("変換できませんでした（" + (error ?? "") + "）。Shift+Enter で打鍵列のまま入力します");
                 }
             }
             effects.Add(new RedrawEffect());
@@ -391,23 +467,38 @@ namespace RomajiSlm
             Pump(now);
         }
 
+        /// 欄の確認の結果（呼び出し側が時間切れにしたときは password=false で呼ぶ）
+        public void OnFieldChecked(int seq, bool password, long now)
+        {
+            if (seq != fieldSeq || !FieldPending) return;
+            FieldPending = false;
+            if (password)
+            {
+                if (Composing) CommitRaw(now);
+                passthrough = true;
+            }
+            effects.Add(new RedrawEffect());
+            Pump(now);
+        }
+
         // ---- 状態 ----
 
         public void SetEnabled(bool on, long now)
         {
             if (!on)
             {
-                if (Composing) CommitCurrent(now, false);
+                if (Composing) CommitCurrent(now);
                 bool wasJapanese = Mode == Mode.Japanese;
                 Mode = Mode.Disabled;
                 // 「日本語入力中」はそのまま、変換の担い手だけ MS-IME に戻す
-                if (wasJapanese) effects.Add(new SetImeEffect(true));
+                if (wasJapanese) effects.Add(new SetImeEffect(true, foreground));
             }
             else
             {
                 Mode = Mode.Japanese;
-                effects.Add(new SetImeEffect(false));
+                effects.Add(new SetImeEffect(false, foreground));
             }
+            passthrough = false;
             effects.Add(new ModeEffect(Mode));
             effects.Add(new RedrawEffect());
         }
@@ -419,8 +510,27 @@ namespace RomajiSlm
             passthrough = false;
             ResetContext();
             // 未確定の文は残す（クリックで別の欄に移っても失わない）。MS-IME はウィンドウごとに開閉を持つので閉じ直す
-            if (Mode != Mode.Disabled) effects.Add(new SetImeEffect(false));
+            if (Mode != Mode.Disabled) effects.Add(new SetImeEffect(false, fg));
             effects.Add(new RedrawEffect());
+            LeaveField();
+        }
+
+        const string MovedStatus = "確定の前に入力欄が変わったので入力していません。Enter で今の欄に入力します";
+
+        /// 確定待ちのまま窓や欄が替わったら、応答を待たずに打鍵列を欄へ戻す
+        void LeaveField()
+        {
+            if (PendingCommits > 0) RestoreQueue(MovedStatus);
+        }
+
+        /// フォーカスの欄が替わった（呼び出し側が EVENT_OBJECT_FOCUS の窓・オブジェクト・子の組を文字列にして渡す）
+        public void OnFocus(string key, long now)
+        {
+            if (key == focus) return;
+            focus = key;
+            passthrough = false;
+            ResetContext();
+            LeaveField();
         }
 
         void ResetContext() { context = ""; }

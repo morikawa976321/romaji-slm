@@ -3,7 +3,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -26,7 +26,7 @@ def test_format_response_one_candidate_per_line():
 def serve(convert):
     ready = threading.Event()
     ready.set()
-    srv = HTTPServer(("127.0.0.1", 0), make_handler(convert, ready))
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(convert, ready))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, f"http://127.0.0.1:{srv.server_address[1]}"
 
@@ -60,6 +60,17 @@ def test_server_round_trip_and_errors():
         with urllib.request.urlopen(url + "/health", timeout=5) as r:
             assert r.read().decode().startswith("ok ")
     finally:
+        srv.shutdown()
+
+
+def test_idle_connection_does_not_block_other_requests():
+    import socket
+    srv, url = serve(lambda r, c: [r])
+    idle = socket.create_connection(srv.server_address)   # 何も送らずに保持する
+    try:
+        assert post(url + "/convert", b"ame\n").split("\n")[1] == "ame"
+    finally:
+        idle.close()
         srv.shutdown()
 
 

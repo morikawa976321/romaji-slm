@@ -15,7 +15,7 @@ import os
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 DEFAULT_PORT = 8767  # 体験版（trial/server.py）は 8765、その MockEngine 版（.claude/launch.json）は 8766
@@ -49,6 +49,8 @@ def make_handler(convert, ready: threading.Event):
     lock = threading.Lock()  # torch のモデルを複数の要求で同時に動かさない
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = 10  # 要求を送らずに保持された接続で、他の要求と生存確認を止めない（接続ごとのスレッド＋読み取りの時間切れ）
+
         def log_message(self, fmt, *args):  # 既定は要求行（パス）を stderr に出すだけだが、念のため何も出さない
             pass
 
@@ -103,7 +105,7 @@ def main(argv=None):
         return holder["p"].convert_nbest(romaji, ctx)
 
     # 先に待ち受けを開く。トレイアプリは /health が返るまで「準備中」と表示する
-    srv = HTTPServer(("127.0.0.1", args.port), make_handler(convert, ready))
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(convert, ready))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     from core.pipeline import CorePipeline  # 既定は本人の選択（句読点 B・英字は打ったまま。docs/decisions.md D14）

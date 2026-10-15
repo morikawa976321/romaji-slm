@@ -291,6 +291,117 @@ namespace RomajiSlm
                 Check(Last<RequestEffect>(c.TakeEffects()) != null, "normal field converts");
             });
 
+            Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
+            {
+                var c = Ready();
+                Type(c, "ame", 0);
+                Press(c, Composer.VK_RETURN, Mods.None, 1);
+                var req = Last<RequestEffect>(c.TakeEffects());
+                Check(Press(c, Composer.VK_RETURN, Mods.None, 2), "second enter held back");
+                c.OnResult(req.Id, new[] { "雨" }, null, 300);
+                var e = c.TakeEffects();
+                int iInj = e.FindIndex(x => x is InjectEffect), iRep = e.FindIndex(x => x is ReplayEffect);
+                Check(iInj >= 0 && iRep > iInj, "inject before replay");
+                var keys = ((ReplayEffect)e[iRep]).Keys;
+                Check(keys.Count == 2 && keys[0].Vk == Composer.VK_RETURN && keys[0].Down && !keys[1].Down, "enter down/up replayed");
+            });
+
+            Run("確定待ちの間に英字へ切り替えて打った文字も、確定文のあと", () =>
+            {
+                var c = Ready();
+                Type(c, "ame", 0);
+                Press(c, Composer.VK_RETURN, Mods.None, 1);
+                var req = Last<RequestEffect>(c.TakeEffects());
+                Press(c, Composer.VK_SPACE, Mods.ShiftOnly, 2);
+                Check(c.Mode == Mode.English, "english");
+                Check(Type(c, "b", 3).All(x => x), "held back");
+                c.OnResult(req.Id, new[] { "雨" }, null, 300);
+                var e = c.TakeEffects();
+                Check(e.FindIndex(x => x is InjectEffect) < e.FindIndex(x => x is ReplayEffect), "order");
+                Check(Last<ReplayEffect>(e).Keys[0].Vk == 0x42, "b replayed");
+            });
+
+            Run("確定の失敗: 待ち行列の確定を順に欄へ戻し、積んだ打鍵は離鍵だけ送る", () =>
+            {
+                var c = Ready();
+                Type(c, "a", 0);
+                Press(c, Composer.VK_RETURN, Mods.None, 1);
+                var req = Last<RequestEffect>(c.TakeEffects());
+                Type(c, "b", 2);
+                Press(c, Composer.VK_RETURN, Mods.None, 3);
+                Press(c, Composer.VK_RETURN, Mods.None, 4);   // 積まれる
+                c.OnResult(req.Id, null, "500", 50);
+                var e = c.TakeEffects();
+                Check(Injected(e) == "", "nothing injected");
+                Check(c.Buffer == "ab", "restored in order: " + c.Buffer);
+                var rep = Last<ReplayEffect>(e);
+                Check(rep != null && rep.Keys.All(k => !k.Down), "only key-ups replayed");
+                Check(c.PendingCommits == 0, "queue cleared");
+            });
+
+            Run("確定待ちのまま窓が替わったら、応答を待たずに順に戻す", () =>
+            {
+                var c = Ready();
+                Type(c, "a", 0);
+                Press(c, Composer.VK_RETURN, Mods.None, 1);
+                Type(c, "b", 2);
+                Press(c, Composer.VK_RETURN, Mods.None, 3);
+                c.OnForeground(W2, 4);
+                Check(c.Buffer == "ab" && c.PendingCommits == 0, "restored ab: " + c.Buffer);
+            });
+
+            Run("確定待ちのままフォーカスの欄が替わったら戻す。同じ欄の重ねての通知では戻さない", () =>
+            {
+                var c = Ready();
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "a", 0);
+                Press(c, Composer.VK_RETURN, Mods.None, 1);
+                c.OnFocus("100:-4:1", 2);
+                Check(c.PendingCommits == 1, "same focus keeps");
+                c.OnFocus("100:-4:2", 3);
+                Check(c.Buffer == "a" && c.PendingCommits == 0, "other field restores");
+            });
+
+            Run("キーリピート: 押下の判断を離鍵まで引き継ぐ", () =>
+            {
+                var c = Ready();
+                var ctrl = new Mods(false, true, false, false, false);
+                Check(!c.OnKey(0x41, true, ctrl, 0, W1), "ctrl+a passes");
+                Check(!c.OnKey(0x41, true, Mods.None, 1, W1), "repeat after ctrl released still passes");
+                Check(!c.OnKey(0x41, false, Mods.None, 2, W1), "up passes");
+                Check(!c.Composing, "nothing composed");
+                Check(c.OnKey(0x42, true, Mods.None, 3, W1), "b swallowed");
+                Check(c.OnKey(0x42, true, ctrl, 4, W1), "repeat with ctrl still swallowed");
+                Check(c.OnKey(0x42, true, Mods.None, 5, W1), "plain repeat swallowed");
+                Check(c.Buffer == "bb", "plain repeat appends, ctrl repeat does not: " + c.Buffer);
+                Check(c.OnKey(0x42, false, Mods.None, 6, W1), "up swallowed");
+            });
+
+            Run("Shift+Space を押しっぱなしにしてもモードは 1 回だけ替わる", () =>
+            {
+                var c = Ready();
+                c.OnKey(Composer.VK_SPACE, true, Mods.ShiftOnly, 0, W1);
+                c.OnKey(Composer.VK_SPACE, true, Mods.ShiftOnly, 1, W1);
+                c.OnKey(Composer.VK_SPACE, true, Mods.ShiftOnly, 2, W1);
+                Check(c.OnKey(Composer.VK_SPACE, false, Mods.ShiftOnly, 3, W1), "up swallowed");
+                Check(c.Mode == Mode.English, "toggled once");
+            });
+
+            Run("送れなかった確定は欄に戻る", () =>
+            {
+                var c = Ready();
+                c.OnInjectFailed(new List<string> { "a", "b" }, "送れませんでした", 0);
+                Check(c.Buffer == "ab" && c.Status == "送れませんでした", "restored");
+            });
+
+            Run("MS-IME の開閉は要求したときの窓に向ける", () =>
+            {
+                var c = Ready();
+                Press(c, Composer.VK_SPACE, new Mods(false, true, true, false, false), 0);
+                var ime = Last<SetImeEffect>(c.TakeEffects());
+                Check(ime != null && ime.Open && ime.Window == W1, "target W1");
+            });
+
             Console.WriteLine(failures == 0 ? "all passed" : failures + " failure(s)");
             return failures == 0 ? 0 : 1;
         }

@@ -108,6 +108,7 @@ namespace RomajiSlm
         Process proc;
         IntPtr job;
         volatile bool disposed;
+        readonly object gate = new object();
         public event Action<bool, string> StateChanged;   // (ready, 説明)
         public string Describe = "起動中";
 
@@ -148,8 +149,18 @@ namespace RomajiSlm
             {
                 WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
             };
-            proc = Process.Start(psi);
-            if (job != IntPtr.Zero) Native.AssignProcessToJobObject(job, proc.Handle);
+            // 終了処理（Dispose）と競合しないよう、起動とジョブへの割り当てを 1 つの錠の中で行う。
+            // 終了後に起動してしまった・ジョブに入れられなかったプロセスはその場で止める（孤児にしない）
+            lock (gate)
+            {
+                if (disposed) return;
+                proc = Process.Start(psi);
+                if (job == IntPtr.Zero || !Native.AssignProcessToJobObject(job, proc.Handle))
+                {
+                    try { proc.Kill(); } catch { }
+                    throw new InvalidOperationException("変換サーバをジョブに入れられなかった");
+                }
+            }
         }
 
         void Watch()
@@ -229,9 +240,13 @@ namespace RomajiSlm
 
         public void Dispose()
         {
-            disposed = true;
-            try { if (proc != null && !proc.HasExited) proc.Kill(); } catch { }
-            if (job != IntPtr.Zero) { Native.CloseHandle(job); job = IntPtr.Zero; }
+            lock (gate)
+            {
+                disposed = true;
+                // ジョブを閉じると、uv の起動役（pythonw）とその子の本体の両方が終わる（KILL_ON_JOB_CLOSE）
+                if (job != IntPtr.Zero) { Native.CloseHandle(job); job = IntPtr.Zero; }
+                try { if (proc != null && !proc.HasExited) proc.Kill(); } catch { }
+            }
         }
     }
 
@@ -410,8 +425,8 @@ namespace RomajiSlm
         readonly Dictionary<int, long> sentAt = new Dictionary<int, long>();
         readonly Icon iconJa, iconEn, iconOff;
         readonly Native.HookProc hookProc;
-        readonly Native.WinEventProc fgProc;
-        IntPtr hook, fgHook;
+        readonly Native.WinEventProc fgProc, focusProc;
+        IntPtr hook, fgHook, focusHook;
         Point anchor;
         bool wasComposing, caps, posted, caretAnchor;
         long flashUntil, fieldDeadline;
@@ -466,6 +481,13 @@ namespace RomajiSlm
             hook = Native.SetWindowsHookEx(13, hookProc, Native.GetModuleHandle(null), 0);   // WH_KEYBOARD_LL
             fgProc = (h, ev, hwnd, idObj, idChild, thread, time) => { comp.OnForeground(hwnd, Now); Run(); };
             fgHook = Native.SetWinEventHook(3, 3, IntPtr.Zero, fgProc, 0, 0, 0);   // EVENT_SYSTEM_FOREGROUND, OUTOFCONTEXT
+            // 同じ窓の中で別の欄に移ったことを知る（確定待ちの文を、移った先へ送らないため）。自分のプロセスの通知は除く
+            focusProc = (h, ev, hwnd, idObj, idChild, thread, time) =>
+            {
+                comp.OnFocus(hwnd.ToInt64() + ":" + idObj + ":" + idChild, Now);
+                Run();
+            };
+            focusHook = Native.SetWinEventHook(0x8005, 0x8005, IntPtr.Zero, focusProc, 0, 0, 0x0002);   // EVENT_OBJECT_FOCUS, SKIPOWNPROCESS
             comp.OnForeground(Native.GetForegroundWindow(), Now);
 
             if (cfg.Enabled) comp.SetEnabled(true, Now);
@@ -503,7 +525,8 @@ namespace RomajiSlm
                     if (down && k.vkCode == Composer.VK_CAPITAL) caps = !caps;
                     var m = new Mods(Native.Down(0x10), Native.Down(0x11), Native.Down(0x12),
                                      Native.Down(0x5B) || Native.Down(0x5C), caps);
-                    bool swallow = comp.OnKey((int)k.vkCode, down, m, Now, Native.GetForegroundWindow());
+                    bool swallow = comp.OnKey((int)k.vkCode, down, m, Now, Native.GetForegroundWindow(),
+                                              (int)k.scanCode, (k.flags & 0x01) != 0);
                     if (!posted) { posted = true; popup.BeginInvoke((Action)Run); }
                     if (swallow) return new IntPtr(1);
                 }
@@ -517,25 +540,48 @@ namespace RomajiSlm
         {
             posted = false;
             bool redraw = false;
-            foreach (var e in comp.TakeEffects())
+            for (int round = 0; round < 4; round++)
             {
-                var inj = e as InjectEffect;
-                var req = e as RequestEffect;
-                var ime = e as SetImeEffect;
-                var mode = e as ModeEffect;
-                var stat = e as StatEffect;
-                if (inj != null)
+                var effs = comp.TakeEffects();
+                if (effs.Count == 0) break;
+                // 確定文を送れなかったら、同じ回の以降の確定は送らずに打鍵列を戻し、積んだ打鍵は離鍵だけ送る（Composer と同じ規則）
+                List<string> unsent = null;
+                string why = null;
+                foreach (var e in effs)
                 {
-                    Native.SendText(inj.Text);
-                    usage.App(Native.ForegroundExe());
+                    var inj = e as InjectEffect;
+                    var rep = e as ReplayEffect;
+                    var req = e as RequestEffect;
+                    var ime = e as SetImeEffect;
+                    var mode = e as ModeEffect;
+                    var stat = e as StatEffect;
+                    if (inj != null)
+                    {
+                        if (unsent == null && Native.GetForegroundWindow() != inj.Window)
+                            why = "確定の前に窓が替わったので入力していません。Enter で今の窓に入力します";
+                        else if (unsent == null && !Native.SendText(inj.Text))
+                            why = "この窓には入力できませんでした（管理者権限の窓など）。Shift+Enter でも同じです。Esc で捨てます";
+                        else if (unsent == null) { usage.App(Native.ForegroundExe()); continue; }
+                        if (unsent == null) { unsent = new List<string>(); usage.Add("inject_fail", 1); }
+                        unsent.Add(inj.Romaji);
+                    }
+                    else if (rep != null) Native.SendKeys(unsent == null ? rep.Keys : rep.Keys.Where(k => !k.Down).ToList());
+                    else if (req != null) StartRequest(req);
+                    else if (ime != null)
+                    {
+                        // 宛先はいま決める（遅れて開閉すると、その間に替わった別の窓に効く）。既定の IME 窓はスレッドごと
+                        IntPtr imeWnd = Native.ImmGetDefaultIMEWnd(ime.Window);
+                        bool open = ime.Open;
+                        if (imeWnd != IntPtr.Zero) ThreadPool.QueueUserWorkItem(_ => Native.SetImeOpen(imeWnd, open));
+                    }
+                    else if (mode != null) OnMode(mode.Mode);
+                    else if (stat != null) { if (unsent == null || !stat.Name.StartsWith("commit")) usage.Add(stat.Name, stat.Value); }
+                    else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq);
+                    else if (e is AltMaskEffect) Native.SendMask();
+                    else if (e is RedrawEffect) redraw = true;
                 }
-                else if (req != null) StartRequest(req);
-                else if (ime != null) { bool open = ime.Open; ThreadPool.QueueUserWorkItem(_ => Native.SetImeOpen(open)); }
-                else if (mode != null) OnMode(mode.Mode);
-                else if (stat != null) { usage.Add(stat.Name, stat.Value); usage.Save(server.Describe); }
-                else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq);
-                else if (e is AltMaskEffect) Native.SendMask();
-                else if (e is RedrawEffect) redraw = true;
+                if (unsent != null) { comp.OnInjectFailed(unsent, why, Now); redraw = true; }
+                if (effs.Any(x => x is StatEffect)) usage.Save(server.Describe);
             }
             if (flashUntil != 0 && Now > flashUntil) { flashUntil = 0; popup.EndFlash(); redraw = true; }
             if (redraw) Redraw();
@@ -623,6 +669,7 @@ namespace RomajiSlm
         {
             if (hook != IntPtr.Zero) Native.UnhookWindowsHookEx(hook);
             if (fgHook != IntPtr.Zero) Native.UnhookWinEvent(fgHook);
+            if (focusHook != IntPtr.Zero) Native.UnhookWinEvent(focusHook);
             timer.Stop();
             tray.Visible = false;
             usage.Save(server.Describe);
@@ -733,7 +780,7 @@ namespace RomajiSlm
         [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
         [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
-        [DllImport("imm32.dll")] static extern IntPtr ImmGetDefaultIMEWnd(IntPtr hwnd);
+        [DllImport("imm32.dll")] public static extern IntPtr ImmGetDefaultIMEWnd(IntPtr hwnd);
         [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
         [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr h);
         [DllImport("kernel32.dll")] static extern IntPtr CreateJobObject(IntPtr attr, string name);
@@ -753,8 +800,9 @@ namespace RomajiSlm
             return i;
         }
 
-        /// 文字列を 1 回の SendInput で送る（KEYEVENTF_UNICODE。サロゲート対は 2 単位のまま送る）
-        public static void SendText(string text)
+        /// 文字列を 1 回の SendInput で送る（KEYEVENTF_UNICODE。サロゲート対は 2 単位のまま送る）。
+        /// 送った数が足りなければ false（UIPI で拒まれたときも 0 が返る。理由は区別できない）
+        public static bool SendText(string text)
         {
             var list = new List<INPUT>();
             foreach (char ch in text)
@@ -762,7 +810,16 @@ namespace RomajiSlm
                 list.Add(Key(0, ch, 0x0004));
                 list.Add(Key(0, ch, 0x0004 | 0x0002));
             }
-            if (list.Count > 0) SendInput((uint)list.Count, list.ToArray(), Marshal.SizeOf(typeof(INPUT)));
+            if (list.Count == 0) return true;
+            return SendInput((uint)list.Count, list.ToArray(), Marshal.SizeOf(typeof(INPUT))) == list.Count;
+        }
+
+        /// 確定待ちの間に積んだ打鍵を、元の仮想キー・スキャンコード・拡張キーの印のまま送り直す
+        public static void SendKeys(List<KeyEv> keys)
+        {
+            if (keys.Count == 0) return;
+            var a = keys.Select(k => Key((ushort)k.Vk, (ushort)k.Scan, (k.Down ? 0u : 0x0002u) | (k.Extended ? 0x0001u : 0u))).ToArray();
+            SendInput((uint)a.Length, a, Marshal.SizeOf(typeof(INPUT)));
         }
 
         /// Alt を押したまま握りつぶしたあと、Alt を離したときにメニューが開かないよう、割り当ての無いキーを 1 回はさむ
@@ -772,23 +829,11 @@ namespace RomajiSlm
             SendInput(2, a, Marshal.SizeOf(typeof(INPUT)));
         }
 
-        static IntPtr FocusWindow()
+        /// MS-IME を開閉する（既定の IME 窓へ WM_IME_CONTROL / IMC_SETOPENSTATUS）。応答しないアプリでは 300 ms であきらめる
+        public static void SetImeOpen(IntPtr imeWnd, bool open)
         {
-            var fg = GetForegroundWindow();
-            uint pid;
-            var gi = new GUITHREADINFO { cbSize = Marshal.SizeOf(typeof(GUITHREADINFO)) };
-            if (GetGUIThreadInfo(GetWindowThreadProcessId(fg, out pid), ref gi) && gi.hwndFocus != IntPtr.Zero) return gi.hwndFocus;
-            return fg;
-        }
-
-        /// 前面ウィンドウの MS-IME を開閉する（WM_IME_CONTROL / IMC_SETOPENSTATUS）。応答しないアプリでは 300 ms であきらめる
-        public static void SetImeOpen(bool open)
-        {
-            Thread.Sleep(60);   // 前面の切り替え直後はフォーカスの欄がまだ決まっていないことがある
-            var ime = ImmGetDefaultIMEWnd(FocusWindow());
-            if (ime == IntPtr.Zero) return;
             IntPtr r;
-            SendMessageTimeout(ime, 0x0283, new IntPtr(0x0006), new IntPtr(open ? 1 : 0), 0x0002, 300, out r);
+            SendMessageTimeout(imeWnd, 0x0283, new IntPtr(0x0006), new IntPtr(open ? 1 : 0), 0x0002, 300, out r);
         }
 
         public static string ForegroundExe()
