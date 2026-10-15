@@ -66,6 +66,7 @@ namespace RomajiSlm
     public sealed class LogEffect : Effect
     {
         public string Event, Romaji, Context, Text, Note; public string[] Candidates; public int Chosen; public bool Raw;
+        public IntPtr Window;   // 打った窓（記録の app はこの窓のアプリ。書く時点の前面ではない）
     }
 
     public sealed class Composer
@@ -374,7 +375,7 @@ namespace RomajiSlm
                     else
                     {
                         effects.Add(new StatEffect("cancel", 1));
-                        effects.Add(new LogEffect { Event = "cancel", Romaji = buf.ToString(), Context = context, Candidates = Candidates, Chosen = -1 });
+                        effects.Add(new LogEffect { Event = "cancel", Romaji = buf.ToString(), Context = context, Candidates = Candidates, Chosen = -1, Window = foreground });
                         Clear();
                     }
                     break;
@@ -512,7 +513,7 @@ namespace RomajiSlm
                     var it = e.Commit;
                     effects.Add(new StatEffect(it.Raw ? "commit_raw" : it.CandIndex > 0 ? "commit_other" : "commit_first", 1));
                     effects.Add(new LogEffect { Event = "commit", Romaji = it.Romaji, Context = it.Context, Text = it.Text,
-                                                Candidates = it.Cands, Chosen = it.Raw ? -1 : it.CandIndex, Raw = it.Raw });
+                                                Candidates = it.Cands, Chosen = it.Raw ? -1 : it.CandIndex, Raw = it.Raw, Window = it.Window });
                     AppendContext(it.Text, now);
                 }
                 else if (e.Key.Down)
@@ -550,7 +551,7 @@ namespace RomajiSlm
             foreach (var e in queue)
                 if (e.Commit != null)
                     effects.Add(new LogEffect { Event = "restore", Romaji = e.Commit.Romaji, Context = e.Commit.Context, Text = e.Commit.Text,
-                                                Candidates = e.Commit.Cands, Chosen = -1, Note = status });
+                                                Candidates = e.Commit.Cands, Chosen = -1, Note = status, Window = e.Commit.Window });
             var romaji = new StringBuilder();
             var ups = new List<KeyEv>();
             foreach (var e in queue)
@@ -687,7 +688,7 @@ namespace RomajiSlm
                 for (; i < hs.Count; i++)
                 {
                     var h = hs[i];
-                    queue.Add(new Entry { Key = h.Ev });
+                    queue.Add(new Entry { Key = h.Ev, Moves = h.Ev.Down && MayMoveFocus(h.Ev.Vk, h.M) });   // 送った時刻を Delivered で覚える
                     if (!h.Ev.Down) { held.Remove(h.Ev.Vk); continue; }
                     int hst;
                     if (!held.TryGetValue(h.Ev.Vk, out hst) || hst == Swallowed) held[h.Ev.Vk] = Queued;   // 押下を送るので離鍵も送る

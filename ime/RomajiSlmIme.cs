@@ -621,7 +621,7 @@ namespace RomajiSlm
                     }
                     else if (mode != null) OnMode(mode.Mode);
                     else if (stat != null) usage.Add(stat.Name, stat.Value);
-                    else if (e is LogEffect) history.Write((LogEffect)e, Native.ForegroundExe());
+                    else if (e is LogEffect) history.Write((LogEffect)e, Native.ExeOf(((LogEffect)e).Window));
                     else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq, ((CheckFieldEffect)e).DelayMs);
                     else if (e is AltMaskEffect) Native.SendMask();
                     else if (e is RedrawEffect) redraw = true;
@@ -907,12 +907,14 @@ namespace RomajiSlm
             SendMessageTimeout(imeWnd, 0x0283, new IntPtr(0x0006), new IntPtr(open ? 1 : 0), 0x0002, 300, out r);
         }
 
-        public static string ForegroundExe()
+        public static string ForegroundExe() { return ExeOf(GetForegroundWindow()); }
+
+        public static string ExeOf(IntPtr hwnd)
         {
             try
             {
                 uint pid;
-                GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+                GetWindowThreadProcessId(hwnd, out pid);
                 using (var p = Process.GetProcessById((int)pid)) return p.ProcessName;
             }
             catch { return "?"; }
