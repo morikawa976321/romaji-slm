@@ -305,3 +305,19 @@ PR #10 は読み段の上位 5 件を多様性で選び直す（1 位はコス�
 - 残る悪化は typo の 1 件（`konobranchwomainnimergwshite.` → 「毎に」）。辞書に無い英字列が残るようになった（jr→「jrの駅」、cdma→「cdmaの規格」）。
 
 本人の実入力（`eval/sets/user_real.jsonl`。正解は AI が意図を読んで付けた）は、取り込み後も当たらない。`kanariyoitoomowarerugahokanidonnnaikairyoutennngakangkaraereudaroukasokudonokousokukadarouka` → 「かなり良いと思われるが、他にどんな異界量点が看護からエレウだろうか速度の高速化だろうか。」。原因は 1 語に 3 つ以上の打鍵ミス（kangaerareru → kangkaraereu）と、別の正しいローマ字になる余計な 1 字（donnna|i|kairyou）。
+
+### 難しい打鍵ミス（PR #11）と候補の絞り込み（preselect）の取り込み（2026-10-16）
+
+PR #11 は読み段に「辞書の頻出語の綴りに 1〜2 編集で一致する弧」を足し、`core/preselect.py`（読みの候補 30 件を辞書の変換コストで並べ直して上位 5 件を選ぶ）を加えた。読み段だけの実測（クラウドの Xeon）は docs/READING.md「難しい打鍵ミス」。後段込み（k=5, w=4, f=1、RTX 5060 Ti で精度、Core Ultra 5 245KF の CPU で時間）。差分は D15 の版（取り込み前）からの `eval/diff.py`:
+
+| 版 | user_style | typo | 正常入力で新たに壊れた（user_style / AJIMEE / gen_test） | gen_test（clean の誤補正、英語保持） | AJIMEE | CPU 中央値（user_style） |
+|---|---|---|---|---|---|---|
+| 取り込み前（D15） | 83.6% | 72.7% | — | 34.7%（6.6%、63.4%） | 84.5% | 410 ms |
+| PR #11 の読み段だけ | 83.6% | 72.7% | 0 / 0 / 0 | 34.7%（7.1%、60.6%） | 84.5% | — |
+| PR #11 ＋ preselect | 86.3% | 90.9% | 0 / 0 / 0 | 34.7%（7.5%、60.6%） | 84.5% | — |
+| **＋ 2 編集の弧に追加コスト 1.0（採用）** | **86.3%** | **90.9%** | 0 / 0 / 0 | 34.7%（7.1%、**63.4%**） | 84.5% | 507 ms |
+
+- 追加コスト 0 では、辞書に無い略語「jfn系」が 2 編集の弧で「関係」に直された（gen_test の clean）。1.0〜3.0 のどれでも jfn は守られ、他の数値は同じだったので最小の 1.0 にした。
+- 残る副作用は gen_test の 1 件で、取り込み前から誤っていた文（エンニオ・モリコーネ）が別の誤り（先にオモリコーネ）になったもの（preselect が `+s` の編集の読みを選んだ）。誤補正率の 6.6% → 7.1% はこの 1 件。
+- gen_test の noisy で 1 件改善・1 件悪化（その後本能寺の変 → 本王子の変）。user_style の typo で 2 件改善（main→毎、です→フェス が直った）。
+- 本人の実入力（`eval/sets/user_real.jsonl` の 1 文目）は当たらないまま。1 語に 3 つ以上の打鍵ミス（kangkaraereu）は読み段の候補に入らない（PR #11 の未解決の論点 1）。
