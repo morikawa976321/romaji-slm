@@ -216,13 +216,33 @@ namespace RomajiSlm
                     if (!m.Ctrl && !m.Alt && !m.Win && !(vk == VK_SPACE && m.Shift)) HandleDown(vk, m, now);
                     return true;
                 }
+                ReachesApp(vk, m);   // Tab の押しっぱなしなど、リピートでも欄は移る
                 if (Enqueue(kev, late)) { held[vk] = Queued; return true; }
                 return false;
             }
             if (HandleDown(vk, m, now)) { held[vk] = Swallowed; return true; }
+            ReachesApp(vk, m);
             if (Enqueue(kev, late)) { held[vk] = Queued; return true; }
             held[vk] = Passed;
             return false;
+        }
+
+        /// アプリに届く押下（素通し・積んで後で送る）が欄を移しうるなら、「確かめた」印とパスワード欄の素通しをやめる
+        /// （次の打鍵で確かめ直す）
+        void ReachesApp(int vk, Mods m)
+        {
+            if (!MayMoveFocus(vk, m)) return;
+            verified = false;
+            passthrough = false;
+        }
+
+        /// 欄を移しうるキー: Tab・Enter・Esc・F キー・アプリケーションキーと、Ctrl・Alt・Win つきのショートカットすべて
+        /// （Ctrl+Tab、Alt+D、Ctrl+L …）。文字・Space・Backspace・Delete・矢印・Home/End は欄の中の操作とみなす
+        static bool MayMoveFocus(int vk, Mods m)
+        {
+            if (IsModifier(vk)) return false;
+            if (m.Ctrl || m.Alt || m.Win) return true;
+            return vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE || (vk >= 0x70 && vk <= 0x87) || vk == 0x5D;
         }
 
         /// 確定待ちなら素通しのはずの打鍵を積む（true）。待っていなければ false（そのまま渡す）。
@@ -239,10 +259,6 @@ namespace RomajiSlm
         bool HandleDown(int vk, Mods m, long now)
         {
             bool space = vk == VK_SPACE;
-            // 欄を離れうるキーは、モードに関係なく「確かめた」印を消す（英字モードで Tab を押して移った先でも確かめ直す）。
-            // 未確定の文があるときの Tab・Enter・Esc は浮き窓の中の操作で、欄は離れない
-            if ((vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE) && !(Mode == Mode.Japanese && Composing && !passthrough))
-                verified = false;
             if (space && m.Ctrl && m.Alt && !m.Shift && !m.Win)
             {
                 SetEnabled(Mode == Mode.Disabled, now);
@@ -272,11 +288,7 @@ namespace RomajiSlm
 
             char c = CharFor(vk, m);
             if (passthrough)
-            {
-                // パスワード欄。未確定の文（前の欄から持ち越したもの）が残っていても、この欄の打鍵はそのまま渡す
-                if (vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE) passthrough = false;   // 欄を離れる
-                return false;
-            }
+                return false;   // パスワード欄。未確定の文（前の欄から持ち越したもの）が残っていても、この欄の打鍵はそのまま渡す（抜けるのは Decide）
             if (!Composing)
             {
                 if (c != '\0')
@@ -598,13 +610,18 @@ namespace RomajiSlm
             if (password)
             {
                 // 預かった打鍵を、解釈せずそのままの順で送る。この欄の間は素通し
+                // 途中に欄を離れうるキー（Tab など）があれば、それまでを送り、その後ろは移った先が分からないので捨てる
                 passthrough = true;
-                foreach (var h in hs)
+                int i = 0;
+                for (; i < hs.Count; i++)
                 {
+                    var h = hs[i];
                     queue.Add(new Entry { Key = h.Ev });
-                    if (h.Ev.Down) { if (!held.ContainsKey(h.Ev.Vk)) held[h.Ev.Vk] = Queued; }
-                    else held.Remove(h.Ev.Vk);
+                    if (!h.Ev.Down) { held.Remove(h.Ev.Vk); continue; }
+                    if (!held.ContainsKey(h.Ev.Vk)) held[h.Ev.Vk] = Queued;
+                    if (MayMoveFocus(h.Ev.Vk, h.M)) { passthrough = false; i++; break; }
                 }
+                if (i < hs.Count) DropHeld(hs.GetRange(i, hs.Count - i), "入力欄を離れるキーの後に打った文字は、移った先の欄を確かめられないので捨てました");
             }
             else
             {
