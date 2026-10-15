@@ -4,6 +4,7 @@
 
 - 正規ローマ字の弧（コスト0）。`nn`+母音を「ン+な行」と読む弧は小さいコスト
 - 打鍵ミスの編集弧（隣接キーへの置換・脱字・余計な1字・隣接2字の入れ替え）。1弧1編集、1文 max_edits まで
+- 辞書の語（Mozc の頻出語）の綴りに編集1〜2つで一致する区間の弧（1つの音節に打鍵ミスが2つある語を拾う）
 - 英語の弧（wordfreq の上位語＋core/data/tech_words.tsv）、辞書に無い英字列（略語・型番）の弧、数字の弧、記号の弧
 - かなの区間には文字 4-gram の「読みらしさ」（core/kana_lm.py）を足す
 
@@ -84,10 +85,16 @@ class Arc:
     parts: tuple[tuple[str, float], ...] = ()  # コストの内訳
     edit: Edit | None = None
     raw: bool = False  # 辞書に無い英字列（隣の raw と出力で1区間にまとめる）
+    edit2: Edit | None = None  # 2つ目の編集（辞書の語に2編集で一致する弧だけ。_dict_arcs）
+    word: bool = False  # 辞書の語に編集で一致する弧（_dict_arcs）
 
     @property
     def cost(self) -> float:
         return sum(v for _, v in self.parts)
+
+    @property
+    def n_edits(self) -> int:
+        return (self.edit is not None) + (self.edit2 is not None)
 
 
 # ---- かなの弧 ----------------------------------------------------------------
@@ -213,6 +220,254 @@ def _edit_arcs(s: str, i: int) -> list[Arc]:
             if k2 is not None:
                 out.append(Arc(i, j + 2 + m, "kana", k1 + k2, parts=(("edit", COST["swap"]),),
                                edit=Edit("swap", j, f"{a}{b}>{b}{a}")))
+    return out
+
+
+# ---- 辞書の語に編集で一致するかなの弧 --------------------------------------------
+# 音節の編集弧は1弧1編集なので、1つの音節に打鍵ミスが2つある語（kaggnaekata → カンガエカタ）に届かない。
+# Mozc の頻出語の綴りに編集1〜2つで一致する区間を、語のかな1本の弧にする（編集2つは読み切れない区間のまわりだけ）
+
+DICT_MIN_KANA = 4  # 語のかなの字数の下限
+DICT_MAX_COST = 4000  # Mozc の生起コストの上限（約1.5万語）
+DICT_PREFIX = 7  # 索引に入れる綴りの先頭の字数（SymSpell の prefix length）
+DICT_REACH = 12  # 読み切れない区間の何字手前から、編集2つの語の弧を始めてよいか
+# 返すコストに足す。0 だと AJIMEE のきれいな入力の1位が1件、編集2つの語に変わった
+DICT_PENALTY = 2.0
+# 探索のコスト（SEARCH_EDIT の和）に足す。0 だと AJIMEE の打鍵ミス上位5が1件、新しい候補に押し出された
+DICT_SEARCH = 1.0
+_HEPBURN = {"シ": "shi", "チ": "chi", "ツ": "tsu", "フ": "fu", "ジ": "ji", "シャ": "sha", "シュ": "shu", "ショ": "sho",
+            "チャ": "cha", "チュ": "chu", "チョ": "cho", "ジャ": "ja", "ジュ": "ju", "ジョ": "jo"}
+
+
+@lru_cache(maxsize=1)
+def _spell_table() -> dict[str, str]:
+    """かな → 本人がふつう打つ綴り（ヘボン式。それ以外は x・l で始まらない最短の綴り）。"""
+    def rank(key: str) -> tuple:
+        # x・l・q で始まる小書きの綴りと、c で始まる綴り（ca・cu・co）は後
+        return key[0] in "xlq", key[0] == "c", len(key), key
+
+    best: dict[str, str] = {}
+    for key, kana in TABLE.items():
+        if kana not in best or rank(key) < rank(best[kana]):
+            best[kana] = key
+    best.update(_HEPBURN)
+    return best
+
+
+def _spell(kana: str) -> str | None:
+    tab = _spell_table()
+    sy: list[str] = []
+    i = 0
+    while i < len(kana):
+        for ln in (2, 1):
+            t = tab.get(kana[i:i + ln]) if kana[i:i + ln] not in ("ッ", "ン", "ー") else kana[i]
+            if t is not None and (ln == 1 or kana[i:i + 2] in tab):
+                sy.append(t)
+                i += ln
+                break
+        else:
+            return None
+    out = []
+    for j, t in enumerate(sy):
+        nxt = sy[j + 1] if j + 1 < len(sy) else ""
+        if t == "ッ":
+            if not nxt or nxt[0] in "aiueon":
+                return None
+            out.append(nxt[0])
+        elif t == "ン":
+            out.append("nn" if nxt and nxt[0] in "aiueoyn" else "n")
+        elif t == "ー":
+            out.append("-")
+        else:
+            out.append(t)
+    return "".join(out)
+
+
+def _deletes(w: str, d: int) -> set[str]:
+    out = {w}
+    frontier = {w}
+    for _ in range(d):
+        frontier = {x[:k] + x[k + 1:] for x in frontier for k in range(len(x))}
+        out |= frontier
+    return out
+
+
+@lru_cache(maxsize=1)
+def _dict_index() -> tuple[dict[str, list[int]], dict[str, list[int]], list[tuple[str, str]]]:
+    """(綴りの先頭 DICT_PREFIX 字から1字までを消した文字列 → 語の番号, 同じく2字まで, [(綴り, かな)])。
+    対称削除（SymSpell）で、打鍵列の先頭が語の綴りの先頭に編集1つ・2つ以内で一致する候補を引く。
+    索引は models/reading/mozc_readings.marisa から作る（無ければ空。語の弧を張らずに動く）。"""
+    from .kana_lm import WORDS_PATH
+
+    try:
+        import marisa_trie
+    except ImportError:
+        return {}, {}, []
+    if not WORDS_PATH.exists():
+        return {}, {}, []
+    t = marisa_trie.RecordTrie("<H")
+    t.load(str(WORDS_PATH))
+    words: list[tuple[str, str]] = []
+    idx1: dict[str, list[int]] = {}
+    idx2: dict[str, list[int]] = {}
+    seen = set()
+    for kana, (c,) in t.items():
+        if c >= DICT_MAX_COST or len(kana) < DICT_MIN_KANA or kana in seen:
+            continue
+        seen.add(kana)
+        sp = _spell(kana)
+        if sp is None:
+            continue
+        k = len(words)
+        words.append((sp, kana))
+        for x in _deletes(sp[:DICT_PREFIX], 2):
+            idx2.setdefault(x, []).append(k)
+        for x in _deletes(sp[:DICT_PREFIX], 1):
+            idx1.setdefault(x, []).append(k)
+    return idx1, idx2, words
+
+
+def _band(w: str, t: str, dmax: int) -> list[int]:
+    """語の綴り w と、打鍵列 t の先頭 c 字との編集距離（入れ替えを1つに数える）を c ごとに返す（dmax を超えたら dmax+1）。"""
+    m, n = len(w), len(t)
+    big = dmax + 1
+    prev2 = None
+    prev = [c if c <= dmax else big for c in range(n + 1)]
+    for r in range(1, m + 1):
+        cur = [big] * (n + 1)
+        if r <= dmax:
+            cur[0] = r
+        wr = w[r - 1]
+        lo, hi = max(1, r - dmax), min(n, r + dmax)
+        best = cur[0]
+        for c in range(lo, hi + 1):
+            tc = t[c - 1]
+            v = prev[c - 1] + (wr != tc)
+            if prev[c] + 1 < v:
+                v = prev[c] + 1
+            if cur[c - 1] + 1 < v:
+                v = cur[c - 1] + 1
+            if prev2 is not None and c > 1 and wr == t[c - 2] and w[r - 2] == tc and wr != tc and prev2[c - 2] + 1 < v:
+                v = prev2[c - 2] + 1
+            cur[c] = v if v < big else big
+            if v < best:
+                best = v
+        if best > dmax:
+            return [big] * (n + 1)
+        prev2, prev = prev, cur
+    return prev
+
+
+def _align(t: str, w: str) -> list[tuple[str, int, str]]:
+    """打った t を語の綴り w に直す編集の列 [(種類, t 上の位置, detail)]（入れ替えを1つに数える最短のもの）。"""
+    n, m = len(t), len(w)
+    d = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        d[i][0] = i
+    for j in range(m + 1):
+        d[0][j] = j
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            v = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (t[i - 1] != w[j - 1]))
+            if i > 1 and j > 1 and t[i - 1] == w[j - 2] and t[i - 2] == w[j - 1] and t[i - 1] != t[i - 2]:
+                v = min(v, d[i - 2][j - 2] + 1)
+            d[i][j] = v
+    ops: list[tuple[str, int, str]] = []
+    i, j = n, m
+    while i or j:
+        if i and j and t[i - 1] == w[j - 1] and d[i][j] == d[i - 1][j - 1]:
+            i, j = i - 1, j - 1
+        elif i and j and d[i][j] == d[i - 1][j - 1] + 1:
+            ops.append(("sub", i - 1, f"{t[i - 1]}>{w[j - 1]}"))
+            i, j = i - 1, j - 1
+        elif i > 1 and j > 1 and t[i - 1] == w[j - 2] and t[i - 2] == w[j - 1] and d[i][j] == d[i - 2][j - 2] + 1:
+            ops.append(("swap", i - 2, f"{t[i - 2:i]}>{w[j - 2:j]}"))
+            i, j = i - 2, j - 2
+        elif i and d[i][j] == d[i - 1][j] + 1:
+            ops.append(("insert", i - 1, "-" + t[i - 1]))
+            i -= 1
+        else:
+            ops.append(("drop", i, "+" + w[j - 1]))
+            j -= 1
+    return ops[::-1]
+
+
+def _dict_zone(s: str, kana: list[list[Arc]]) -> list[int]:
+    """各位置から始める語の弧の編集の上限（0: 張らない、1、2）。
+
+    英字の連続（と - '）ごとに、正規ローマ字の弧だけで頭から読める位置と、末尾まで読める位置を求める。
+    そのどちらかの位置（音節の切れ目）からは編集1つの語の弧を始める。読み切れない連続では、頭から読める最も遠い
+    位置 F と末尾まで読める最も手前の位置 B について [min(F, B) - DICT_REACH, max(F, B)] から編集2つの語の弧を
+    始める。編集2つを全部の位置に張ると AJIMEE 20〜39字の所要が約2倍になる（候補の照合が1位置あたり約50語）。"""
+    L = len(s)
+    lim = [0] * L
+    a = 0
+    while a < L:
+        if not (s[a].isalpha() or s[a] in "-'"):
+            a += 1
+            continue
+        b = a
+        while b < L and (s[b].isalpha() or s[b] in "-'"):
+            b += 1
+        fwd = [False] * (b + 1)
+        fwd[a] = True
+        for i in range(a, b):
+            if fwd[i]:
+                for arc in kana[i]:
+                    if arc.end <= b:
+                        fwd[arc.end] = True
+        bwd = [False] * (b + 1)
+        bwd[b] = True
+        for i in range(b - 1, a - 1, -1):
+            bwd[i] = any(arc.end <= b and bwd[arc.end] for arc in kana[i])
+        for i in range(a, b):
+            if fwd[i] or bwd[i]:
+                lim[i] = 1
+        if not fwd[b]:
+            f = max(i for i in range(a, b + 1) if fwd[i])
+            g = min(i for i in range(a, b + 1) if bwd[i])
+            for i in range(max(a, min(f, g) - DICT_REACH), min(b, max(f, g) + 1)):
+                lim[i] = 2
+        a = b
+    return lim
+
+
+def _dict_arcs(s: str, i: int, dmax: int) -> list[Arc]:
+    """i から始まる区間が、辞書の語（かな DICT_MIN_KANA 字以上の頻出語）の綴りに 1〜dmax 個の編集で一致する弧。
+    語ごとに、編集の数が最小になる区間の終わりだけを使う。"""
+    idx1, idx2, words = _dict_index()
+    idx = idx2 if dmax == 2 else idx1
+    if not idx or not s[i].isalpha():
+        return []
+    L = len(s)
+    end = i
+    while end < L and s[end].isalpha():
+        end += 1
+    keys: set[str] = set()
+    for m in range(3, min(end - i, DICT_PREFIX + dmax) + 1):
+        keys |= _deletes(s[i:i + m], dmax)
+    cand: set[int] = set()
+    for x in keys:
+        got = idx.get(x)
+        if got:
+            cand.update(got)
+    out: list[Arc] = []
+    for k in cand:
+        sp, kana = words[k]
+        t = s[i:min(end, i + len(sp) + dmax)]
+        dist = _band(sp, t, dmax)
+        best = min(dist)
+        if not 1 <= best <= dmax:
+            continue
+        for c, v in enumerate(dist):
+            if v != best:
+                continue
+            ops = _align(t[:c], sp)
+            es = [Edit(kind, i + off, detail) for kind, off, detail in ops]
+            dup = [kd == "insert" and (t[o - 1:o] == dt[1:] or t[o + 1:o + 2] == dt[1:]) for kd, o, dt in ops]
+            cost = sum(COST["insert_dup"] if dp else COST[e.kind] for e, dp in zip(es, dup)) + DICT_PENALTY
+            out.append(Arc(i, i + c, "kana", kana, parts=(("edit", cost),), edit=es[0],
+                           edit2=es[1] if len(es) > 1 else None, word=True))
     return out
 
 
@@ -409,9 +664,12 @@ def build_arcs(keys: str) -> list[list[Arc]]:
     for i in range(L - 2, -1, -1):
         pre_digit[i] = s[i].isalpha() and (s[i + 1].isdigit() or pre_digit[i + 1])
     cheap = [b or d for b, d in zip(brk, pre_digit)]
+    zone = _dict_zone(s, kana)
     arcs = []
     for i in range(L):
         a = kana[i] + _edit_arcs(s, i) + _en_arcs(s, i) + _num_sym_arcs(s, i) + _raw_arcs(s, i, brk, cheap)
+        if zone[i]:
+            a += _dict_arcs(s, i, zone[i])
         arcs.append(a)
     return arcs
 
@@ -499,6 +757,8 @@ def _search_cost(a: Arc) -> float:
     if a.edit is None:
         return a.cost
     e = sum(v for k, v in a.parts if k == "edit")
+    if a.word:
+        return a.cost - e + sum(SEARCH_EDIT[x.kind] for x in (a.edit, a.edit2) if x is not None) + DICT_SEARCH
     kind = "insert_dup" if a.edit.kind == "insert" and e == COST["insert_dup"] else a.edit.kind
     return a.cost - e + SEARCH_EDIT[kind]
 
@@ -512,16 +772,16 @@ def _readings(keys: str, n: int, max_edits: int) -> list[Reading]:
         # 終点・種類・文字列・編集の有無が同じ弧は、探索では安いほうだけ使う
         best: dict[tuple, Arc] = {}
         for a in lst:
-            k = (a.end, a.kind, a.text, a.edit is not None, a.raw)
+            k = (a.end, a.kind, a.text, a.n_edits, a.raw)
             if k not in best or a.cost < best[k].cost:
                 best[k] = a
         # 探索では編集を SEARCH_EDIT のコストで数える（返すコストは元のまま。_select を参照）
         kana, other = [], []
         for a in best.values():
             if a.kind == "kana":
-                kana.append((a.end, _search_cost(a), a.edit is not None, a.text, a))
+                kana.append((a.end, _search_cost(a), a.n_edits, a.text, a))
             else:
-                other.append((a.end, _search_cost(a), a.edit is not None, _CTX_AFTER.get(a.kind, _START), a.raw, a))
+                other.append((a.end, _search_cost(a), a.n_edits, _CTX_AFTER.get(a.kind, _START), a.raw, a))
         arcs.append((kana, other))
     # 前向き: 状態 (位置, 編集数, かなの文脈) ごとの最良コストと、入ってくる遷移を記録する
     g: list[dict] = [dict() for _ in range(L + 1)]
@@ -687,7 +947,7 @@ def _extract(g: list[dict], preds: dict, L: int):
             arcs_only = [a for a, _ in path]
             segs = _segs(arcs_only)
             sig = tuple((sg.kind, sg.text, sg.end) for sg in segs)
-            edits = tuple(a.edit for a in arcs_only if a.edit is not None)
+            edits = tuple(e for a in arcs_only for e in (a.edit, a.edit2) if e is not None)
             bd: dict[str, float] = {}
             for a, lmc in path:
                 for k, v in a.parts:

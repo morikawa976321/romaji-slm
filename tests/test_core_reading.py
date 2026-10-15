@@ -222,3 +222,41 @@ def test_kana_lm_is_normalized():
         # 語彙外の1字分（1/V の重み）だけ 1 に届かない
         assert 0.85 < total <= 1.0 + 1e-9
     assert lm.logp("アイ", "ウ") > lm.logp("アイ", "エ") > lm.logp("アイ", "オ")
+
+
+def test_spell_matches_typed_romaji():
+    from core.reading import _spell
+
+    assert _spell("ヒッコシ") == "hikkoshi"
+    assert _spell("ジドウテスト") == "jidoutesuto"
+    assert _spell("センシュウ") == "senshuu"
+    assert _spell("カンイ") == "kanni"  # ン の後に母音が続くと nn
+    assert _spell("ワカリヤスク") == "wakariyasuku"
+
+
+def test_align_counts_swap_as_one():
+    from core.reading import _align, _band
+
+    assert _align("kangkae", "kangae") == [("insert", 4, "-k")]
+    assert _align("mzizen", "kaizen") == [("sub", 0, "m>k"), ("sub", 1, "z>a")]
+    assert _align("hcuu", "chuu") == [("swap", 0, "hc>ch")]
+    # 語の綴りと、打鍵列の先頭 c 字との距離（2 を超えたら 3）
+    assert _band("kaizen", "mzizengen", 2)[6] == 2
+
+
+def test_two_typos_in_one_syllable_via_dictionary_word(monkeypatch):
+    import core.reading as R
+
+    # kangae の n と g の入れ替え＋g の重ね打ち（1つの音節に2つ。音節の編集弧は1弧1編集なので、辞書の語の弧が要る）
+    keys, want = "kaggnaekatahatadashiitoomou.", "カンガエカタハタダシイトオモウ。"
+    hit = [r for r in top(keys)[:5] if r.zenz_input() == want]
+    assert hit and len(hit[0].edits) == 2
+    assert all(len(r.edits) <= 1 for r in top(keys, 20, max_edits=1))  # 1文の上限は2編集の弧にも掛かる
+    monkeypatch.setattr(R, "_dict_arcs", lambda s, i, d: [])
+    assert want not in inputs(top(keys)[:5])
+
+
+def test_dictionary_word_arcs_do_not_change_clean_first():
+    for keys in ("kyouhaiitenkidesune", "kaizentenwokajougakidedashite.", "yomikominijikangakakaru."):
+        r = top(keys, 5)[0]
+        assert r.edits == ()
