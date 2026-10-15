@@ -102,14 +102,17 @@ namespace RomajiSlm
         string focus = "";
         long lastKeyAt;
         int nextId = 1, fieldSeq;
-        bool passthrough, deliverPosted;
+        bool passthrough, deliverPosted, reprocessing;
+        string checkedFocus;   // パスワード欄でないと確かめた欄（フォーカスの組）。同じ欄では確かめ直さない
+        readonly List<HeldKey> fieldHold = new List<HeldKey>();   // 欄の確認が済むまで預かった打鍵
         Pending inflight;
 
         sealed class Item
         {
-            public string Romaji, Text, Focus; public IntPtr Window; public bool Raw, Secret; public int CandIndex, FieldSeq; public long At;
+            public string Romaji, Text, Focus; public IntPtr Window; public bool Raw; public int CandIndex; public long At;
         }
         sealed class Entry { public Item Commit; public KeyEv Key; }
+        sealed class HeldKey { public KeyEv Ev; public Mods M; public long At; }
         sealed class Pending { public int Id; public string Key; public long SentAt; }
 
         public string Buffer { get { return buf.ToString(); } }
@@ -156,9 +159,38 @@ namespace RomajiSlm
         {
             if (fg != foreground)
                 OnForeground(fg, now);
+            var kev = new KeyEv(vk, scan, ext, down);
+            if (FieldPending)
+            {
+                // 欄の確認が済むまでは、どの打鍵も解釈せずに預かる（OnFieldChecked で、そのまま送るか処理し直す）
+                fieldHold.Add(new HeldKey { Ev = kev, M = m, At = now });
+                return true;
+            }
+            if (down && !held.ContainsKey(vk) && NeedsFieldCheck(vk, m))
+            {
+                FieldPending = true;
+                fieldHold.Clear();
+                fieldHold.Add(new HeldKey { Ev = kev, M = m, At = now });
+                effects.Add(new CheckFieldEffect(++fieldSeq));
+                return true;
+            }
+            return Decide(kev, m, now);
+        }
+
+        /// 日本語の打ち始め（この打鍵で未確定の文が始まる）で、まだ確かめていない欄なら、パスワード欄かを先に確かめる
+        bool NeedsFieldCheck(int vk, Mods m)
+        {
+            if (!RequireFieldCheck || Mode != Mode.Japanese || Composing || passthrough) return false;
+            if (m.Ctrl || m.Alt || m.Win || CharFor(vk, m) == '\0') return false;
+            return focus.Length == 0 || focus != checkedFocus;
+        }
+
+        bool Decide(KeyEv kev, Mods m, long now)
+        {
+            int vk = kev.Vk;
+            bool down = kev.Down;
             int st;
             bool wasHeld = held.TryGetValue(vk, out st);
-            var kev = new KeyEv(vk, scan, ext, down);
             if (!down)
             {
                 held.Remove(vk);
@@ -184,10 +216,11 @@ namespace RomajiSlm
             return false;
         }
 
-        /// 確定待ちなら素通しのはずの打鍵を積む（true）。待っていなければ false（そのまま渡す）
+        /// 確定待ちなら素通しのはずの打鍵を積む（true）。待っていなければ false（そのまま渡す）。
+        /// 預かった打鍵を処理し直している間は、すでにアプリへ渡し損ねているので必ず積む
         bool Enqueue(KeyEv k)
         {
-            if (!Waiting) return false;
+            if (!Waiting && !reprocessing) return false;
             queue.Add(new Entry { Key = k });
             PostDeliver();
             return true;
@@ -236,12 +269,6 @@ namespace RomajiSlm
                     Phase = Phase.Raw;
                     lastKeyAt = now;
                     Status = "";
-                    // 確認中に次の文を打ち始めたときは、同じ確認の結果を待つ（番号を替えると、先に確定した分が結果から漏れる）
-                    if (RequireFieldCheck && !FieldPending)
-                    {
-                        FieldPending = true;
-                        effects.Add(new CheckFieldEffect(++fieldSeq));
-                    }
                     effects.Add(new RedrawEffect());
                     return true;
                 }
@@ -321,7 +348,6 @@ namespace RomajiSlm
             it.Window = foreground;
             it.Focus = focus;
             it.At = now;
-            it.FieldSeq = FieldPending ? fieldSeq : 0;   // 欄の確認が済んでいない確定（パスワード欄と分かったら打鍵列のままにする）
             queue.Add(new Entry { Commit = it });
             Clear();
             Flush(now);
@@ -408,7 +434,7 @@ namespace RomajiSlm
                 {
                     var it = e.Commit;
                     effects.Add(new StatEffect(it.Raw ? "commit_raw" : it.CandIndex > 0 ? "commit_other" : "commit_first", 1));
-                    if (!it.Secret) AppendContext(it.Text, now);
+                    AppendContext(it.Text, now);
                 }
                 else if (e.Key.Down)
                 {
@@ -431,20 +457,14 @@ namespace RomajiSlm
             RestoreQueue(why);
         }
 
-        /// 待ち行列の確定をすべて打鍵列のまま欄の先頭へ（順を保って）戻す。積んだ打鍵は離鍵だけ送り、押下は捨てる。
-        /// パスワード欄の確定は戻さずに捨てる（浮き窓に平文で出さない）
+        /// 待ち行列の確定をすべて打鍵列のまま欄の先頭へ（順を保って）戻す。積んだ打鍵は離鍵だけ送り、押下は捨てる
         void RestoreQueue(string status)
         {
             var romaji = new StringBuilder();
             var ups = new List<KeyEv>();
-            bool secret = false;
             foreach (var e in queue)
             {
-                if (e.Commit != null)
-                {
-                    if (e.Commit.Secret) secret = true;
-                    else romaji.Append(e.Commit.Romaji);
-                }
+                if (e.Commit != null) romaji.Append(e.Commit.Romaji);
                 else if (!e.Key.Down) ups.Add(e.Key);
                 else
                 {
@@ -455,7 +475,6 @@ namespace RomajiSlm
             queue.Clear();
             deliverPosted = false;
             if (ups.Count > 0) effects.Add(new ReplayEffect(ups));
-            if (secret) status = "パスワード欄に入力できなかったので、打った文字は捨てました";
             Restore(romaji.ToString(), status);
         }
 
@@ -557,16 +576,48 @@ namespace RomajiSlm
         {
             if (seq != fieldSeq || !FieldPending) return;
             FieldPending = false;
+            var hs = new List<HeldKey>(fieldHold);
+            fieldHold.Clear();
             if (password)
             {
-                // 確認の前に Enter で確定した分も、変換せず打鍵列のまま送る
-                foreach (var e in queue)
-                    if (e.Commit != null && e.Commit.FieldSeq == seq) { e.Commit.Text = e.Commit.Romaji; e.Commit.Raw = e.Commit.Secret = true; }
-                if (Composing) Add(new Item { Text = buf.ToString(), Raw = true, Secret = true }, now);
+                // 預かった打鍵を、解釈せずそのままの順で送る。この欄の間は素通し
                 passthrough = true;
+                foreach (var h in hs)
+                {
+                    queue.Add(new Entry { Key = h.Ev });
+                    if (h.Ev.Down) { if (!held.ContainsKey(h.Ev.Vk)) held[h.Ev.Vk] = Queued; }
+                    else held.Remove(h.Ev.Vk);
+                }
+            }
+            else
+            {
+                // 普通の欄。預かった打鍵を打たれた順に処理し直す。素通しになる打鍵は、アプリへ渡し損ねているので待ち行列に積む
+                checkedFocus = focus;
+                reprocessing = true;
+                try { foreach (var h in hs) Decide(h.Ev, h.M, h.At); }
+                finally { reprocessing = false; }
             }
             effects.Add(new RedrawEffect());
             Flush(now);
+        }
+
+        /// 欄の確認の途中で窓や欄が替わった。預かった打鍵はどちらの欄のものとも言えないので捨てる（パスワードかもしれない）。
+        /// 離鍵だけ送ってアプリのキー状態を揃える
+        void DropFieldHold()
+        {
+            if (!FieldPending) return;
+            FieldPending = false;
+            fieldSeq++;   // 遅れて届く確認の結果を無視する
+            var ups = new List<KeyEv>();
+            foreach (var h in fieldHold)
+            {
+                if (h.Ev.Down) held[h.Ev.Vk] = Dropped;
+                else { ups.Add(h.Ev); held.Remove(h.Ev.Vk); }
+            }
+            fieldHold.Clear();
+            if (ups.Count > 0) effects.Add(new ReplayEffect(ups));
+            Status = "入力欄が変わったので、欄を確かめ終わる前に打った文字は捨てました";
+            effects.Add(new RedrawEffect());
         }
 
         // ---- 状態 ----
@@ -594,7 +645,9 @@ namespace RomajiSlm
         public void OnForeground(IntPtr fg, long now)
         {
             if (fg == foreground) return;
+            DropFieldHold();
             foreground = fg;
+            checkedFocus = null;
             passthrough = false;
             ResetContext();
             // 未確定の文は残す（クリックで別の欄に移っても失わない）。MS-IME はウィンドウごとに開閉を持つので閉じ直す
@@ -607,6 +660,7 @@ namespace RomajiSlm
         public void OnFocus(string key, long now)
         {
             if (key == focus) return;
+            DropFieldHold();
             focus = key;
             passthrough = false;
             ResetContext();

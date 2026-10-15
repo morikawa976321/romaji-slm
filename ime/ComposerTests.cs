@@ -304,38 +304,73 @@ namespace RomajiSlm
                 Check(c.Buffer == "a", "not added");
             });
 
-            Run("パスワード欄: 確かめ終わるまで要求も表示もせず、パスワード欄なら打鍵列のまま入れて以後は素通し", () =>
+            Run("パスワード欄: 確かめ終わるまで打鍵を預かり、パスワード欄ならそのままの順で送って以後は素通し", () =>
             {
                 var c = Ready();
                 c.RequireFieldCheck = true;
-                Type(c, "pa", 0);
+                Check(Type(c, "pa", 0).All(x => x), "held");
                 var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
-                Check(chk != null && c.FieldPending, "check requested");
+                Check(chk != null && c.FieldPending && c.Buffer == "", "check requested, nothing composed");
                 c.Tick(500);
                 Check(Req(Drain(c, 500)) == null, "no request while checking");
                 c.OnFieldChecked(chk.Seq, true, 510);
-                Check(Texts(Drain(c, 510)) == "pa", "raw sent");
+                Check(string.Join(",", Drain(c, 510).Sent) == "K:+80,K:-80,K:+65,K:-65", "raw keys in order");
                 Check(!Type(c, "ss", 520).Any(x => x), "passthrough afterwards");
                 Press(c, Composer.VK_TAB, Mods.None, 530);
                 Check(Type(c, "a", 540).All(x => x), "tab leaves the field");
                 chk = Last<CheckFieldEffect>(Drain(c, 540).Effects);
                 c.OnFieldChecked(chk.Seq, false, 550);
+                Check(c.Buffer == "a", "normal field: reprocessed into composition");
                 c.Tick(800);
                 Check(Req(Drain(c, 800)) != null, "normal field converts");
             });
 
-            Run("パスワード欄: 確認の前に Enter しても変換せず、失敗しても浮き窓に戻さない", () =>
+            Run("パスワード欄: 確認の前に Enter しても次の文を打ち始めても、記号も含めて全部そのまま送る", () =>
             {
                 var c = Ready();
                 c.RequireFieldCheck = true;
-                Type(c, "secret", 0);
+                Type(c, "se", 0);
                 var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
-                Press(c, Composer.VK_RETURN, Mods.None, 10);
-                Check(Req(Drain(c, 10)) == null, "no request before check");
+                Press(c, 0x32, Mods.ShiftOnly, 1);   // @
+                Press(c, Composer.VK_RETURN, Mods.None, 2);
+                Type(c, "x", 3);
+                Check(Last<CheckFieldEffect>(Drain(c, 3).Effects) == null, "no second check while pending");
                 c.OnFieldChecked(chk.Seq, true, 20);
-                var o = Drain(c, 20, fail: true);
-                Check(Req(o) == null, "never requested");
-                Check(c.Buffer == "" && c.Status.Contains("パスワード"), "not restored as plain text: " + c.Buffer);
+                var o = Drain(c, 20);
+                Check(Req(o) == null && Texts(o) == "", "never converted");
+                Check(string.Join(",", o.Sent) == "K:+83,K:-83,K:+69,K:-69,K:+50,K:-50,K:+13,K:-13,K:+88,K:-88", "all keys raw: " + string.Join(",", o.Sent));
+                Check(c.Buffer == "" && !c.Waiting, "nothing left");
+            });
+
+            Run("欄の確認中に欄が替わったら、預かった打鍵は捨てて遅れた結果も無視する", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                Type(c, "se", 0);
+                var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
+                c.OnFocus("200:-4:1", 5);
+                Check(!c.FieldPending && c.Buffer == "" && c.Status.Contains("捨て"), "dropped");
+                c.OnFieldChecked(chk.Seq, true, 10);
+                var o = Drain(c, 10);
+                Check(o.Sent.All(s => s.StartsWith("R:-")) && Texts(o) == "", "late result ignored: " + string.Join(",", o.Sent));
+                Check(Type(c, "a", 20).All(x => x) && Last<CheckFieldEffect>(Drain(c, 20).Effects) != null, "new field is checked again");
+            });
+
+            Run("普通の欄なら、預かった Enter も含めて処理し直す。確かめた欄では次から待たない", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "ame", 0);
+                var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
+                Press(c, Composer.VK_RETURN, Mods.None, 1);
+                c.OnFieldChecked(chk.Seq, false, 30);
+                var req = Req(Drain(c, 30));
+                Check(req != null && req.Romaji == "ame" && c.PendingCommits == 1, "held enter commits after reprocessing");
+                c.OnResult(req.Id, new[] { "雨" }, null, 300);
+                Check(Texts(Drain(c, 300)) == "雨", "sent");
+                Type(c, "b", 400);
+                Check(Last<CheckFieldEffect>(Drain(c, 400).Effects) == null && c.Buffer == "b", "same field: no check");
             });
 
             Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
@@ -493,21 +528,6 @@ namespace RomajiSlm
                 c.OnResult(req.Id, new[] { "あ" }, null, 3);
                 Check(string.Join(",", Drain(c, 3).Sent) == "T:あ,K:+39", "down replayed");
                 Check(!c.OnKey(Composer.VK_RIGHT, false, Mods.None, 4, W1), "up passes");
-            });
-
-            Run("パスワード欄: 確認の途中で次の文を打ち始めても、先に確定した分は同じ確認の結果に従う", () =>
-            {
-                var c = Ready();
-                c.RequireFieldCheck = true;
-                Type(c, "secret", 0);
-                var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
-                Press(c, Composer.VK_RETURN, Mods.None, 10);
-                Type(c, "x", 11);
-                Check(Last<CheckFieldEffect>(Drain(c, 11).Effects) == null, "no second check while pending");
-                c.OnFieldChecked(chk.Seq, true, 20);
-                var o = Drain(c, 20, fail: true);
-                Check(Req(o) == null, "never requested");
-                Check(c.Buffer == "" && c.Status.Contains("パスワード"), "nothing restored as plain text: " + c.Buffer);
             });
 
             Run("捨てた Enter を押し続けても、リピートで確定し直さない", () =>

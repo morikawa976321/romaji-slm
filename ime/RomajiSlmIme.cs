@@ -429,6 +429,7 @@ namespace RomajiSlm
         IntPtr hook, fgHook, focusHook;
         Point anchor;
         readonly bool[] keyDown = new bool[256];
+        uint batchTick;   // 最後に SendBatch した時刻（GetTickCount。KBDLLHOOKSTRUCT.time と同じ時計）
         bool wasComposing, caps, posted, caretAnchor;
         long flashUntil, fieldDeadline;
         int fieldSeq;
@@ -542,6 +543,14 @@ namespace RomajiSlm
                                               (int)k.scanCode, (k.flags & 0x01) != 0);
                     if (!posted) { posted = true; popup.BeginInvoke((Action)Run); }
                     if (swallow) return new IntPtr(1);
+                    // こちらがまとめて送った（SendBatch）時刻より前に押されていたキーは、入力の列では送った分より前にいる。
+                    // そのまま渡すと確定文を追い越すので、止めて送った分の後ろに送り直す
+                    if (batchTick != 0 && unchecked((int)(k.time - batchTick)) < 0)
+                    {
+                        var ev = new KeyEv((int)k.vkCode, (int)k.scanCode, (k.flags & 0x01) != 0, down);
+                        popup.BeginInvoke((Action)(() => Native.SendBatch(new List<Delivery> { new Delivery { IsKey = true, Key = ev } })));
+                        return new IntPtr(1);
+                    }
                 }
             }
             catch { }
@@ -598,6 +607,7 @@ namespace RomajiSlm
                 why = "確定の前に窓が替わったので入力していません。Enter で今の窓に入力します";
             else if (!Native.SendBatch(ds))
                 why = "この窓には入力できませんでした（管理者権限の窓など）。Esc で捨てます";
+            batchTick = unchecked((uint)Environment.TickCount);
             if (why != null) { comp.DeliveryFailed(why, Now); return; }
             if (ds.Any(d => !d.IsKey)) usage.App(Native.ForegroundExe());
             comp.Delivered(Now);
