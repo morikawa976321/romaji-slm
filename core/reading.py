@@ -233,6 +233,7 @@ DICT_PREFIX = 7  # 索引に入れる綴りの先頭の字数（SymSpell の pre
 DICT_REACH = 12  # 読み切れない区間の何字手前から、編集2つの語の弧を始めてよいか
 # 返すコストに足す。0 だと AJIMEE のきれいな入力の1位が1件、編集2つの語に変わった
 DICT_PENALTY = 2.0
+DICT_PENALTY2 = 1.0  # 2 編集で一致する弧だけに足す分（辞書に無い略語 jfn を「関係」に直す副作用を抑える。docs/decisions.md D18）
 # 探索のコスト（SEARCH_EDIT の和）に足す。0 だと AJIMEE の打鍵ミス上位5が1件、新しい候補に押し出された
 DICT_SEARCH = 1.0
 _HEPBURN = {"シ": "shi", "チ": "chi", "ツ": "tsu", "フ": "fu", "ジ": "ji", "シャ": "sha", "シュ": "shu", "ショ": "sho",
@@ -466,6 +467,8 @@ def _dict_arcs(s: str, i: int, dmax: int) -> list[Arc]:
             es = [Edit(kind, i + off, detail) for kind, off, detail in ops]
             dup = [kd == "insert" and (t[o - 1:o] == dt[1:] or t[o + 1:o + 2] == dt[1:]) for kd, o, dt in ops]
             cost = sum(COST["insert_dup"] if dp else COST[e.kind] for e, dp in zip(es, dup)) + DICT_PENALTY
+            if len(es) > 1:
+                cost += DICT_PENALTY2
             out.append(Arc(i, i + c, "kana", kana, parts=(("edit", cost),), edit=es[0],
                            edit2=es[1] if len(es) > 1 else None, word=True))
     return out

@@ -90,7 +90,8 @@ class CorePipeline:
     def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu", k: int = 5,
                  n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None,
                  batched: bool = True, punct: str = "insert", en_case: str = "typed",
-                 tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None):
+                 tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None,
+                 preselect: bool = True, n_pre: int = 30):
         """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
         punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
         既定の punct="insert"・en_case="typed" は本人の選択（docs/decisions.md「本人の回答」2026-10-15）。
@@ -109,6 +110,8 @@ class CorePipeline:
         self.batched = batched  # k 件の制約付き生成を1バッチで回す（False は1件ずつ。速度の比較用）
         self.punct, self.en_case = punct, en_case
         self.tau_comma, self.tau_end, self.tau_q = tau_comma, tau_end, tau_q
+        # preselect: 読み段の候補 n_pre 件を辞書の変換コストで並べ直して上位 k 件を選ぶ（core.preselect、PR #11）
+        self.preselect, self.n_pre = preselect, n_pre
         self.name = name or f"core(k={k},w_read={w_read})"
         if backend is not None:
             self.n_params = backend.n_params
@@ -118,8 +121,13 @@ class CorePipeline:
     def candidates(self, romaji: str, left_context: str = "") -> list[dict]:
         """読みの上位 k 件の変換と点数（点数の高い順）。"""
         out = []
-        allr = readings(romaji, n=self.n_read)
-        rs = allr[: self.k]
+        if self.preselect:
+            from .preselect import preselect as _preselect
+            allr = readings(romaji, n=self.n_pre)
+            rs = _preselect(allr, self.dic, self.k)
+        else:
+            allr = readings(romaji, n=self.n_read)
+            rs = allr[: self.k]
         # 読み段は上位 k 件を多様性で選び直して返す（1 位はコスト最小、2〜k 位は選び直し。docs/READING.md）。
         # 選び直しは英単語として読む候補（code、main をそのまま残す読み）を押し出すことがあり、user_style で
         # 正常入力が 2 件壊れた。コスト順の上位 k 件も足して比べる（CPU ではバッチが大きくなってもほぼ同じ時間。D3）
