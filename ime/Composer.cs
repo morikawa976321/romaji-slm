@@ -239,6 +239,10 @@ namespace RomajiSlm
         bool HandleDown(int vk, Mods m, long now)
         {
             bool space = vk == VK_SPACE;
+            // 欄を離れうるキーは、モードに関係なく「確かめた」印を消す（英字モードで Tab を押して移った先でも確かめ直す）。
+            // 未確定の文があるときの Tab・Enter・Esc は浮き窓の中の操作で、欄は離れない
+            if ((vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE) && !(Mode == Mode.Japanese && Composing && !passthrough))
+                verified = false;
             if (space && m.Ctrl && m.Alt && !m.Shift && !m.Win)
             {
                 SetEnabled(Mode == Mode.Disabled, now);
@@ -252,6 +256,7 @@ namespace RomajiSlm
                 if (Composing) CommitCurrent(now);
                 Mode = Mode == Mode.Japanese ? Mode.English : Mode.Japanese;
                 passthrough = false;
+                verified = false;   // 英字の間に欄を移っても分かるとは限らないので、日本語に戻ったら確かめ直す
                 effects.Add(new SetImeEffect(false, foreground));
                 effects.Add(new ModeEffect(Mode));
                 effects.Add(new RedrawEffect());
@@ -274,7 +279,6 @@ namespace RomajiSlm
             }
             if (!Composing)
             {
-                if (vk == VK_TAB || vk == VK_RETURN || vk == VK_ESCAPE) verified = false;   // 欄を離れうる
                 if (c != '\0')
                 {
                     buf.Append(c);
@@ -605,13 +609,37 @@ namespace RomajiSlm
             else
             {
                 // 普通の欄。預かった打鍵を打たれた順に処理し直す。素通しになる打鍵は、アプリへ渡し損ねているので待ち行列に積む
+                // 途中で欄を離れうるキー（Tab など）が来て印が消えたら、その後ろに預かった打鍵は移った先の欄のものかもしれない。
+                // 移った先を確かめる手段が無い（確認が移動より先に走りうる）ので、漏らさないよう捨てる
                 verified = true;
                 reprocessing = true;
-                try { foreach (var h in hs) Decide(h.Ev, h.M, h.At); }
+                try
+                {
+                    int i = 0;
+                    for (; i < hs.Count && verified; i++) Decide(hs[i].Ev, hs[i].M, hs[i].At);
+                    if (i < hs.Count) DropHeld(hs.GetRange(i, hs.Count - i), "入力欄を離れるキーの後に打った文字は、移った先の欄を確かめられないので捨てました");
+                }
                 finally { reprocessing = false; }
             }
             effects.Add(new RedrawEffect());
             Flush(now);
+        }
+
+        /// 預かった打鍵を捨てる。新しく押されたキーは Dropped（リピートも離鍵も渡さない）。すでにアプリへ押下が届いている
+        /// （届く予定の）キーのリピートは捨てるだけで、その離鍵は送る（待ち行列の後ろに）
+        void DropHeld(List<HeldKey> hs, string status)
+        {
+            foreach (var h in hs)
+            {
+                int st;
+                bool known = held.TryGetValue(h.Ev.Vk, out st);
+                if (h.Ev.Down) { if (!known) held[h.Ev.Vk] = Dropped; }
+                else if (known && st == Dropped) held.Remove(h.Ev.Vk);
+                else { held.Remove(h.Ev.Vk); queue.Add(new Entry { Key = h.Ev }); }
+            }
+            Status = status;
+            effects.Add(new RedrawEffect());
+            PostDeliver();
         }
 
         /// 欄の確認の途中で窓や欄が替わった。預かった打鍵はどちらの欄のものとも言えないので捨てる（パスワードかもしれない）。
@@ -621,16 +649,9 @@ namespace RomajiSlm
             if (!FieldPending) return;
             FieldPending = false;
             fieldSeq++;   // 遅れて届く確認の結果を無視する
-            var ups = new List<KeyEv>();
-            foreach (var h in fieldHold)
-            {
-                if (h.Ev.Down) held[h.Ev.Vk] = Dropped;
-                else { ups.Add(h.Ev); held.Remove(h.Ev.Vk); }
-            }
+            var hs = new List<HeldKey>(fieldHold);
             fieldHold.Clear();
-            if (ups.Count > 0) effects.Add(new ReplayEffect(ups));
-            Status = "入力欄が変わったので、欄を確かめ終わる前に打った文字は捨てました";
-            effects.Add(new RedrawEffect());
+            DropHeld(hs, "入力欄が変わったので、欄を確かめ終わる前に打った文字は捨てました");
         }
 
         // ---- 状態 ----
@@ -651,6 +672,7 @@ namespace RomajiSlm
                 effects.Add(new SetImeEffect(false, foreground));
             }
             passthrough = false;
+            verified = false;
             effects.Add(new ModeEffect(Mode));
             effects.Add(new RedrawEffect());
         }

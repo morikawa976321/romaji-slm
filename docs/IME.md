@@ -93,6 +93,6 @@ user_style の先頭 30 文、句読点 B・英字打ったまま（既定）。
 
 ### 試験
 
-- `pwsh -NoProfile -File ime/build.ps1 -Test`: Composer の状態機械（合成した打鍵で 38 件）。`tests/test_ime_server.py` もこれを呼ぶ。
+- `pwsh -NoProfile -File ime/build.ps1 -Test`: Composer の状態機械（合成した打鍵で 40 件）。`tests/test_ime_server.py` もこれを呼ぶ。
 - `RomajiSlmIme.exe --selftest <打鍵列> <結果ファイル> [--root <app>]`: フックも送り込みも使わずに、本物のサーバで「打鍵 → Enter → 確定文」を通す。本人のキー入力を奪わずに配線を確かめられる。
 - 実際のアプリでの打鍵（フックと SendInput、MS-IME の開閉）は、本人の操作でしか確かめられない。

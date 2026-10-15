@@ -352,7 +352,7 @@ namespace RomajiSlm
                 Check(!c.FieldPending && c.Buffer == "" && c.Status.Contains("捨て"), "dropped");
                 c.OnFieldChecked(chk.Seq, true, 10);
                 var o = Drain(c, 10);
-                Check(o.Sent.All(s => s.StartsWith("R:-")) && Texts(o) == "", "late result ignored: " + string.Join(",", o.Sent));
+                Check(o.Sent.All(s => s.Contains(":-")) && Texts(o) == "", "late result ignored: " + string.Join(",", o.Sent));
                 Check(Type(c, "a", 20).All(x => x) && Last<CheckFieldEffect>(Drain(c, 20).Effects) != null, "new field is checked again");
             });
 
@@ -453,6 +453,35 @@ namespace RomajiSlm
                 Type(c, "b", 2);
                 Press(c, Composer.VK_RETURN, Mods.ShiftOnly, 3);
                 Check(string.Join(",", Drain(c, 4).Sent) == "K:+13,K:-13,T:b", "order");
+            });
+
+            Run("確認待ちに預かった Tab の後ろの打鍵は、移った先の欄のものかもしれないので捨てる", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Check(Press(c, Composer.VK_TAB, Mods.None, 1), "tab held");
+                var chk = Last<CheckFieldEffect>(Drain(c, 1).Effects);
+                Type(c, "se", 2);
+                c.OnFieldChecked(chk.Seq, false, 3);
+                var o = Drain(c, 3);
+                Check(string.Join(",", o.Sent) == "K:+9,K:-9", "only tab delivered: " + string.Join(",", o.Sent));
+                Check(c.Buffer == "" && Req(o) == null && c.Status.Contains("捨て"), "secret dropped");
+            });
+
+            Run("英字モードで Tab を押して日本語に戻ったら、確かめ直す", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Type(c, "a", 0);
+                c.OnFieldChecked(Last<CheckFieldEffect>(Drain(c, 0).Effects).Seq, false, 1);
+                Press(c, Composer.VK_ESCAPE, Mods.None, 2);
+                Press(c, Composer.VK_SPACE, Mods.ShiftOnly, 3);
+                Check(c.Mode == Mode.English && !Press(c, Composer.VK_TAB, Mods.None, 4), "english tab passes");
+                Press(c, Composer.VK_SPACE, Mods.ShiftOnly, 5);
+                Drain(c, 5);
+                Check(Type(c, "s", 6).All(x => x) && Last<CheckFieldEffect>(Drain(c, 6).Effects) != null, "checked again");
             });
 
             Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
