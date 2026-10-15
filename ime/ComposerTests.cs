@@ -495,6 +495,36 @@ namespace RomajiSlm
                 Check(!c.OnKey(Composer.VK_RIGHT, false, Mods.None, 4, W1), "up passes");
             });
 
+            Run("パスワード欄: 確認の途中で次の文を打ち始めても、先に確定した分は同じ確認の結果に従う", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                Type(c, "secret", 0);
+                var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
+                Press(c, Composer.VK_RETURN, Mods.None, 10);
+                Type(c, "x", 11);
+                Check(Last<CheckFieldEffect>(Drain(c, 11).Effects) == null, "no second check while pending");
+                c.OnFieldChecked(chk.Seq, true, 20);
+                var o = Drain(c, 20, fail: true);
+                Check(Req(o) == null, "never requested");
+                Check(c.Buffer == "" && c.Status.Contains("パスワード"), "nothing restored as plain text: " + c.Buffer);
+            });
+
+            Run("捨てた Enter を押し続けても、リピートで確定し直さない", () =>
+            {
+                var c = Ready();
+                Type(c, "a", 0);
+                Press(c, Composer.VK_RETURN, Mods.None, 1);
+                var req = Req(Drain(c, 1));
+                c.OnKey(Composer.VK_RETURN, true, Mods.None, 2, W1);   // 積まれる
+                c.OnForeground(W2, 3);                                 // 戻す: a は欄へ、Enter の押下は捨てる
+                Drain(c, 3);
+                Check(c.OnKey(Composer.VK_RETURN, true, Mods.None, 4, W2), "repeat swallowed");
+                Check(c.Buffer == "a" && !c.Waiting, "repeat did not re-commit");
+                c.OnResult(req.Id, new[] { "あ" }, null, 5);
+                Check(Texts(Drain(c, 5)) == "", "nothing sent to W2");
+            });
+
             Run("Shift+Space を押しっぱなしにしてもモードは 1 回だけ替わる", () =>
             {
                 var c = Ready();

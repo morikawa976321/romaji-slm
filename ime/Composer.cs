@@ -94,7 +94,8 @@ namespace RomajiSlm
         readonly List<Entry> taken = new List<Entry>();   // TakeReady で渡し、結果を待っている分
         // 押されているキーと、押下をどう扱ったか。離鍵とキーリピートはこれに従う（途中で修飾キーが変わっても対応を崩さない）
         readonly Dictionary<int, int> held = new Dictionary<int, int>();
-        const int Passed = 0, Swallowed = 1, Queued = 2;
+        // Dropped: 積んだ押下を捨てた（待ち行列を欄へ戻した）。リピートも離鍵も渡さず、キー処理もし直さない
+        const int Passed = 0, Swallowed = 1, Queued = 2, Dropped = 3;
         string context = "";
         long contextAt;
         IntPtr foreground = IntPtr.Zero;
@@ -161,13 +162,14 @@ namespace RomajiSlm
             if (!down)
             {
                 held.Remove(vk);
-                if (wasHeld && st == Swallowed) return true;
+                if (wasHeld && (st == Swallowed || st == Dropped)) return true;
                 return Enqueue(kev);
             }
             if (wasHeld)
             {
                 // キーリピート。握りつぶしたキーなら同じキーとして扱い直す（文字の連打、Backspace の連続）。
                 // 修飾キーつきと Shift+Space（モードが往復する）は扱わない
+                if (st == Dropped) return true;
                 if (st == Swallowed)
                 {
                     if (!m.Ctrl && !m.Alt && !m.Win && !(vk == VK_SPACE && m.Shift)) HandleDown(vk, m, now);
@@ -234,7 +236,8 @@ namespace RomajiSlm
                     Phase = Phase.Raw;
                     lastKeyAt = now;
                     Status = "";
-                    if (RequireFieldCheck)
+                    // 確認中に次の文を打ち始めたときは、同じ確認の結果を待つ（番号を替えると、先に確定した分が結果から漏れる）
+                    if (RequireFieldCheck && !FieldPending)
                     {
                         FieldPending = true;
                         effects.Add(new CheckFieldEffect(++fieldSeq));
@@ -446,7 +449,7 @@ namespace RomajiSlm
                 else
                 {
                     int st;
-                    if (held.TryGetValue(e.Key.Vk, out st) && st == Queued) held[e.Key.Vk] = Swallowed;   // 押下を捨てたので、離鍵も渡さない
+                    if (held.TryGetValue(e.Key.Vk, out st) && st == Queued) held[e.Key.Vk] = Dropped;   // 押下を捨てたので、離鍵も渡さない
                 }
             }
             queue.Clear();
