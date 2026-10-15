@@ -65,7 +65,7 @@ pwsh -NoProfile -File ime/uninstall.ps1
 
 ```
 キー ─ 低レベルキーボードフック（ime/RomajiSlmIme.cs）─ Composer（ime/Composer.cs、状態機械）
-                                                         │ 変換の要求（HTTP、127.0.0.1:8766）
+                                                         │ 変換の要求（HTTP、127.0.0.1:8767）
                                                          ▼
                                                ime/server.py（CorePipeline.convert_nbest、GPU があれば GPU）
 確定 ─ SendInput(KEYEVENTF_UNICODE) で 1 回で送る

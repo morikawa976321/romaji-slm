@@ -1,4 +1,11 @@
-# 現状と再開の手引き（2026-10-16、本人の方針に沿って打鍵ミスの改良を取り込んだ後）
+# 現状と再開の手引き（2026-10-16、このデスクトップに常駐入力を入れた後）
+
+## 0. いまのゴール（2026-10-16、本人の依頼で autopilot）
+
+本人が「実用可能なレベル」と判断し、このデスクトップで常用できるようにすることを求めた（原文は decisions.md「本人の依頼」）。常駐入力 `ime/` を作って `%LOCALAPPDATA%\romaji-slm\` に入れた（使い方・仕組み・実測は [IME.md](IME.md)、判断は D19〜D21）。残るのは本人が実際のアプリで打って確かめること。本人の使用感（トレイの「使用状況をコピー」と言葉）が返ってきたら、それで D19・D20 の覆る条件を見る。
+
+- 再開の手順: `pwsh -NoProfile -File ime/install.ps1`（HEAD を入れ直す）。試験は `pwsh -NoProfile -File ime/build.ps1 -Test` と `RomajiSlmIme.exe --selftest <打鍵列> <結果ファイル>`。
+- 本人に残ること: 実際のアプリで打つ（フックと SendInput と MS-IME の開閉は本人の操作でしか確かめられない）。ThinkPad での実測（下の §2 の 1）。
 
 2026-10-13 に本人が休止を決め、2026-10-14〜15 に親セッション（Claude）が本人不在で進めた（規則は [parent-session-prompt.md](parent-session-prompt.md)、判断の記録 D1〜D13 と本人待ちのカードは [decisions.md](decisions.md)）。
 要件は [DESIGN.md](DESIGN.md)、方式の決定と経緯は [REDESIGN.md](REDESIGN.md)、全実測は [EVAL.md](EVAL.md)、体験版は [TRIAL.md](TRIAL.md)、llama-server 実行系は [LLAMA_BACKEND.md](LLAMA_BACKEND.md)。
@@ -60,7 +67,7 @@ pwsh -NoProfile -File tools/pack-trial.ps1                                      
 2. **1 語に打鍵ミスが 3 つ以上**（本人の実入力 kangkaraereu）は読み段の候補に入らないまま（PR #11 の未解決の論点 1）。`max_edits=3` や 3 編集の語の弧は副作用が大きかった（docs/READING.md）。本人の方針（副作用が出るなら慎重に）に従い、入れていない。
 3. **速度**: 出力を変えない高速化は効かなかった（D17）。llama-server 版は正常入力を 6 件壊すので切り替えない。ThinkPad で 1 秒を超えたら、llama 版の振る舞いを torch 版に揃える作業から始める。
 4. 文中の句点（2 文の間）は本人の方針で着手しない（1 文ずつ変換する）。
-5. IME 化は本人が「後で決める」としたまま。
+5. IME 化は 2026-10-16 の本人の依頼で常駐入力として着手した（§0）。
 6. `uv run pytest` が 1 回だけ 1 件落ち、続く 3 回は全件通った（2026-10-16）。どのテストかは特定していない。
 
 ## 3. 止めた路線（再開時に繰り返さない）

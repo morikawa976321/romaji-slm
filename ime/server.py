@@ -1,6 +1,6 @@
 """常駐の変換サーバ（docs/IME.md）。トレイアプリ ime/RomajiSlmIme.cs が 127.0.0.1 で呼ぶ。
 
-    uv run python -m ime.server [--port 8766] [--device auto|cuda|cpu]
+    uv run python -m ime.server [--port 8767] [--device auto|cuda|cpu]
 
 POST /convert  本文（UTF-8）: 1 行目 = 打鍵列、2 行目以降 = 左文脈
                応答（UTF-8）: 1 行目 = 変換にかかった ms、2 行目以降 = 候補（1 位が既定の変換）
@@ -18,7 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-DEFAULT_PORT = 8766  # 体験版（trial/server.py）は 8765
+DEFAULT_PORT = 8767  # 体験版（trial/server.py）は 8765、その MockEngine 版（.claude/launch.json）は 8766
 ROOT = Path(__file__).resolve().parent.parent
 
 

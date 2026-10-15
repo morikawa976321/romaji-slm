@@ -64,7 +64,7 @@ namespace RomajiSlm
         public readonly string Path;
         public bool Enabled;
         public string Device = "auto";
-        public int Port = 8766;
+        public int Port = 8767;
 
         public Config(string path)
         {
