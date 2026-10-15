@@ -114,3 +114,26 @@
 
 - ThinkPad で体験版を 1 回動かす。初回は uv と torch（約 250 MB）の取得で数分かかる。黒いウィンドウに「Windows によって PC が保護されました」と出たら「詳細情報」→「実行」。
 - 結果ブロックには機種・初回起動時間・常駐時の各文の所要 ms が入るので、数値の転記は要らない。ThinkPad での速度要件（20〜30 字 1 秒以内）の判定はこの値で行う。
+
+## 本人の回答（2026-10-15 22:28、デスクトップで体験版 90b5564 を試した結果ブロック）
+
+本人が次のメッセージに貼った結果ブロックから、回答と自由入力の行を原文で写す（全文は会話にある）:
+
+> 機種: Intel(R) Core(TM) Ultra 5 245KF / 14 / 31.7GB / Windows 11 (10.0.26300) / Python 3.14.4 / torch 2.14.1+cpu / エンジン core
+> 初回起動: serve 5.8s / ready 33.4s
+> 【回答】句読点: B
+> 【回答】英字: 打ったまま
+> 【回答】使用感: 使ってみたい
+> 体感した設定: small + punct=insert + en_case=typed（xsmall も試した: はい）
+> 計測: small + punct=insert + en_case=typed 6文: 各 552, 442, 625, 444, 577, 496 ms, 最大 625ms, 1秒超 0件 ／ small vs xsmall 3文: small 319, 493, 392 ms / xsmall 124, 196, 161 ms
+> 5. [small + punct=insert + en_case=typed] "kanariyoitoomowarerugahokanidonnnaikairyoutennngakangkaraereudaroukasokudonokousokukadarouka" → かなり良いと思われるが、他にどんな異界量点がkangからエレウダロウか速度の高速化だろうか。 3196ms 文脈=60字（自分の文）
+> 6. [xsmall + punct=insert + en_case=typed] "kanariyoitoomowarerugahokanidonnnaikairyoutennngakangkaraereudaroukasokudonokousokukadarouka" → かなり良いと思われるが、他にどんな位階料点がkangからエレウダロウカ速度の高速化だろうか。 984ms 文脈=60字（速度優先で同じ文）
+
+- 比較の 6 例はすべて「どちらも問題ない」「どれも問題ない」だった。そのうえでカードでは句読点 B・英字 打ったまま・使ってみたい を選んだ。
+- 試したのはデスクトップ（Core Ultra 5 245KF）で、**ThinkPad の実測ではない**。ThinkPad での速度要件の判定は未了のまま。
+- 自由入力の 5 番は「他にどんな改良点が考えられるだろうか。速度の高速化だろうか」という問いとして読める（AI の読み）。
+
+### D14. 本人の選択をコアの既定にする（2026-10-15、AIの判断）
+
+- 決めたこと: `CorePipeline` の既定を `punct="insert"`（句読点 B）、`en_case="typed"`（打ったまま）にする。評価の変換器 `--converter core` の既定は過去の表と比べられるよう `p=auto` のまま残す（AJIMEE は句読点の無い断片が多く、insert を既定にすると過去の数値と比べられない）。
+- 本人の回答「使ってみたい」は IME 化の決定ではない（IME 化は本人が「後で決める」とした）。IME 化をするかは次の提示でカードにする。
