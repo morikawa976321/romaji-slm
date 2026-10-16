@@ -495,7 +495,9 @@ namespace RomajiSlm
         // フックの見張り: Raw Input にはキーが届いているのにフックが呼ばれていなければ、Windows がフックを外した
         // （LowLevelHooksTimeout を超えたとき黙って外す）とみなして付け直す
         long lastHookAt, lastRawAt, lastReinstallAt = -100000, lastStateAt;
-        int hookEvents, reinstalls;
+        int hookEvents, reinstalls, physicalDowns, injectedDowns, hookErrors;
+        string lastInjected = "";
+        int keyLogLeft = 30;
         readonly DebugLog dbg;
         readonly string statePath;
         const int FieldCheckMs = 300;   // UI Automation が応答しないアプリでは、この時間でパスワード欄ではないとみなす
@@ -613,7 +615,9 @@ namespace RomajiSlm
                     "\r\ncomposing=" + comp.Composing + "\r\nfield_pending=" + comp.FieldPending + "\r\npassthrough=" + comp.Passthrough +
                     "\r\nverified=" + comp.Verified + "\r\nwaiting=" + comp.Waiting + "\r\nserver_ready=" + comp.ServerReady +
                     "\r\nhook=" + hook + "\r\nhook_events=" + hookEvents + "\r\nhook_ago_ms=" + (Now - lastHookAt) +
-                    "\r\nraw_ago_ms=" + (Now - lastRawAt) + "\r\nreinstalls=" + reinstalls + "\r\nforeground=" + Native.ForegroundExe() +
+                    "\r\nraw_ago_ms=" + (Now - lastRawAt) + "\r\nreinstalls=" + reinstalls +
+                    "\r\nphysical_downs=" + physicalDowns + "\r\ninjected_downs=" + injectedDowns + "\r\nlast_injected=" + lastInjected +
+                    "\r\nhook_errors=" + hookErrors + "\r\nforeground=" + Native.ForegroundExe() +
                     "\r\nstatus=" + comp.Status + "\r\n", new UTF8Encoding(false));
             }
             catch { }
@@ -646,6 +650,15 @@ namespace RomajiSlm
                 bool injected = (k.flags & 0x10) != 0;
                 int msg = wParam.ToInt32();
                 bool down = msg == 0x100 || msg == 0x104;
+                if (down)
+                {
+                    if (!injected) physicalDowns++;
+                    else if (k.dwExtraInfo != Native.Magic)
+                    {
+                        injectedDowns++;
+                        lastInjected = "vk=0x" + k.vkCode.ToString("X2") + " flags=0x" + k.flags.ToString("X") + " extra=0x" + k.dwExtraInfo.ToInt64().ToString("X");
+                    }
+                }
                 // 修飾キーの状態は自分で追う。確定待ちの間は修飾キーも積んで OS に渡さないので、GetAsyncKeyState は使えない。
                 // 他のアプリが送り込んだ修飾キー（貼り付けの Ctrl+V など）も OS の状態を変えるので追う。自分の送り直しは除く
                 if (k.dwExtraInfo != Native.Magic && k.vkCode < 256) keyDown[k.vkCode] = down;
@@ -660,10 +673,22 @@ namespace RomajiSlm
                     bool swallow = comp.OnKey((int)k.vkCode, down, m, Now, Native.GetForegroundWindow(),
                                               (int)k.scanCode, (k.flags & 0x01) != 0, late);
                     if (!posted) { posted = true; popup.BeginInvoke((Action)Run); }
+                    if (down && keyLogLeft > 0)
+                    {
+                        // 起動直後の 30 打鍵だけ、判断を診断の記録に残す（仮想キーと判断だけ。1 回限り）
+                        keyLogLeft--;
+                        string line = "key vk=0x" + k.vkCode.ToString("X2") + " flags=0x" + k.flags.ToString("X") + " swallow=" + swallow +
+                                      " mode=" + comp.Mode + " pending=" + comp.FieldPending + " shift=" + m.Shift + " ctrl=" + m.Ctrl +
+                                      " alt=" + m.Alt + " win=" + m.Win;
+                        popup.BeginInvoke((Action)(() => dbg.Write(line)));
+                    }
                     if (swallow) return new IntPtr(1);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (hookErrors++ < 5) popup.BeginInvoke((Action)(() => dbg.Write("hook exception: " + ex)));
+            }
             return Native.CallNextHookEx(hook, nCode, wParam, lParam);
         }
 
