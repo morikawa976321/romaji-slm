@@ -594,7 +594,7 @@ namespace RomajiSlm
             };
             comp.RequireFieldCheck = true;
             // UI Automation の初回の呼び出しは初期化で遅く、欄の確認（0.3 秒で打ち切り）に間に合わないことがあるので、起動時に 1 回済ませる
-            ThreadPool.QueueUserWorkItem(_ => { bool pw; Point q; Native.FocusedElement(out pw, out q); });
+            ThreadPool.QueueUserWorkItem(_ => { bool pw, ed; Point q; string kd; Native.FocusedElement(out pw, out q, out ed, out kd); });
             timer.Start();
         }
 
@@ -822,18 +822,18 @@ namespace RomajiSlm
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 if (delayMs > 0) Thread.Sleep(delayMs);   // 欄を移すキーを送った直後。アプリが移し終えるのを待つ
-                bool password; Point q;
+                bool password, editable; Point q; string kind;
                 var sw = Stopwatch.StartNew();
-                bool ok = Native.FocusedElement(out password, out q);
+                bool ok = Native.FocusedElement(out password, out q, out editable, out kind);
                 long took = sw.ElapsedMilliseconds;
                 popup.BeginInvoke((Action)(() =>
                 {
-                    dbg.Write("field check seq=" + seq + " ok=" + ok + " password=" + password + " ms=" + took +
+                    dbg.Write("field check seq=" + seq + " ok=" + ok + " password=" + password + " editable=" + editable + " (" + kind + ") ms=" + took +
                               (seq != fieldSeq || fieldDeadline == 0 ? " (late, ignored)" : "") + " fg=" + Native.ForegroundExe());
                     if (seq != fieldSeq || fieldDeadline == 0) return;
                     fieldDeadline = 0;
                     if (ok && !caretAnchor && q != Point.Empty) anchor = q;
-                    comp.OnFieldChecked(seq, ok && password, Now);
+                    comp.OnFieldChecked(seq, ok && password, Now, !ok || editable);
                     Run();
                 }));
             });
@@ -1108,9 +1108,14 @@ namespace RomajiSlm
         }
 
         /// フォーカスの要素がパスワード欄か、と浮き窓を置く位置（要素の左下）。取れなければ false
-        public static bool FocusedElement(out bool password, out Point below)
+        /// editable: 文字を打つ欄か（本人の報告 2026-10-16: 入力欄でないところで打鍵を取ると、YouTube の k・f などが効かない）。
+        /// 入力欄とみなすのは、Win32 のキャレットがある・種類が Edit・値が書き換えられる・文書で TextPattern があり読み取り専用でない、のどれか。
+        /// Web ページそのもの（Document で値は読み取り専用）、動画のプレーヤー、一覧などは入力欄でない。分からなければ入力欄とみなす
+        public static bool FocusedElement(out bool password, out Point below, out bool editable, out string kind)
         {
             password = false;
+            editable = true;
+            kind = "";
             below = Point.Empty;
             try
             {
@@ -1118,12 +1123,35 @@ namespace RomajiSlm
                 if (el == null) return false;
                 var cur = el.Current;
                 password = cur.IsPassword;
+                var ct = cur.ControlType;
+                bool hasValue = (bool)el.GetCurrentPropertyValue(System.Windows.Automation.AutomationElement.IsValuePatternAvailableProperty);
+                bool hasText = (bool)el.GetCurrentPropertyValue(System.Windows.Automation.AutomationElement.IsTextPatternAvailableProperty);
+                bool readOnly = false;
+                if (hasValue)
+                {
+                    object vp;
+                    if (el.TryGetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern, out vp))
+                        readOnly = ((System.Windows.Automation.ValuePattern)vp).Current.IsReadOnly;
+                }
+                bool caret = HasWin32Caret();
+                editable = caret || ct == System.Windows.Automation.ControlType.Edit || (hasValue && !readOnly)
+                           || (ct == System.Windows.Automation.ControlType.Document && hasText && !(hasValue && readOnly));
+                kind = (ct == null ? "?" : ct.ProgrammaticName.Replace("ControlType.", "")) + " value=" + hasValue + " ro=" + readOnly +
+                       " text=" + hasText + " caret=" + caret + " fw=" + cur.FrameworkId;
                 var r = cur.BoundingRectangle;
                 if (!r.IsEmpty && r.Width > 0 && !double.IsInfinity(r.Left))
                     below = new Point((int)r.Left, (int)r.Bottom + 6);
                 return true;
             }
             catch { return false; }
+        }
+
+        static bool HasWin32Caret()
+        {
+            uint pid;
+            var gi = new GUITHREADINFO { cbSize = Marshal.SizeOf(typeof(GUITHREADINFO)) };
+            if (!GetGUIThreadInfo(GetWindowThreadProcessId(GetForegroundWindow(), out pid), ref gi)) return false;
+            return gi.hwndCaret != IntPtr.Zero;
         }
 
         public static Point WindowFallback()

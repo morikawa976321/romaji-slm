@@ -674,8 +674,11 @@ namespace RomajiSlm
         }
 
         /// 欄の確認の結果（呼び出し側が時間切れにしたときは password=false で呼ぶ）
-        public void OnFieldChecked(int seq, bool password, long now)
+        /// editable=false（入力欄でない: Web ページそのもの・動画のプレーヤー・一覧など）も、パスワード欄と同じく打鍵をそのまま送り、
+        /// 欄を移すまで素通しにする（YouTube の k・f などのショートカットを取らない。本人の報告 2026-10-16）
+        public void OnFieldChecked(int seq, bool password, long now, bool editable = true)
         {
+            if (!editable) password = true;
             if (seq != fieldSeq || !FieldPending || awaitingMove) return;
             FieldPending = false;
             postMove = false;

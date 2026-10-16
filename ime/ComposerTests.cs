@@ -618,6 +618,21 @@ namespace RomajiSlm
                 Check(chk != null && chk.DelayMs == Composer.MoveSettleMs - 10, "delayed: " + (chk == null ? -1 : chk.DelayMs));
             });
 
+            Run("入力欄でない（動画のプレーヤーなど）なら、打鍵をそのまま送って素通し（YouTube の k・f・Space）", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("300:-4:1", 0);
+                Check(Press(c, 0x4B, Mods.None, 0), "k held for the check");
+                var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
+                c.OnFieldChecked(chk.Seq, false, 1, false);
+                Check(string.Join(",", Drain(c, 1).Sent) == "K:+75,K:-75", "k sent as is");
+                Check(!Press(c, 0x46, Mods.None, 2) && !Press(c, Composer.VK_SPACE, Mods.None, 3), "f and space pass");
+                Check(c.Buffer == "", "nothing composed");
+                c.OnFocus("300:-4:2", 4);   // 検索欄へ
+                Check(Type(c, "a", 5).All(x => x) && Last<CheckFieldEffect>(Drain(c, 5).Effects) != null, "checked again in the new field");
+            });
+
             Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
             {
                 var c = Ready();
