@@ -8,7 +8,8 @@
   - Codex のレビューを 11 回通し、指摘をすべて直した。打ち切りの判断は D23 の末尾。
   - 途中で本人が追加した依頼で、実利用の記録（`history.jsonl`、D24）を入れた。
 - **本人に残ること**: Ctrl+Alt+Space で使い始め、ふだんのアプリで打つ。フックと SendInput と MS-IME の開閉は、本人の操作でしか確かめられない。使ったらトレイの「使用状況をコピー」を貼ってもらう。ThinkPad での実測（§2 の 1）も残っている。
-- **次の材料**: `history.jsonl` の別候補・取り消し・失敗の行が、誤変換の候補になる。`eval/sets/user_real.jsonl` に足す。
+- **誤変換を直す仕組み**（2026-10-17）: 利用履歴を AI が振り返ってユーザー辞書を育てる（REVIEW.md、D32）。1 回目は済んだ（辞書 6 行）。以後は ops-daily がマーカー以降の確定 200 件ごとに Opus（effort medium）で行う。合成セット（synth_user、EVAL.md）と本人の実入力（`%LOCALAPPDATA%\romaji-slm\review\real_local.jsonl`）で副作用を確かめる。
+- **未決**: 履歴の保持（振り返り済みの行の削除・期限・記録しないアプリ・外へ送る量）は本人の返事待ち。
 - **再開の手順**: `pwsh -NoProfile -File ime/install.ps1`（HEAD を入れ直す）。試験は次の 2 つ。
   - `pwsh -NoProfile -File ime/build.ps1 -Test`
   - `RomajiSlmIme.exe --selftest <打鍵列> <結果ファイル> [--root <repo>]`
