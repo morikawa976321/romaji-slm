@@ -501,7 +501,7 @@ namespace RomajiSlm
         long lastHookAt, lastRawAt, lastReinstallAt = -100000, lastStateAt;
         int hookEvents, reinstalls, physicalDowns, injectedDowns, hookErrors;
         string lastInjected = "";
-        int keyLogLeft = 30, traceLeft;
+        int keyLogLeft = 30, traceLeft, modTraceLeft = 300;
         long batchAt = -100000;
         readonly DebugLog dbg;
         readonly string statePath;
@@ -692,6 +692,16 @@ namespace RomajiSlm
                     bool swallow = comp.OnKey((int)k.vkCode, down, m, Now, Native.GetForegroundWindow(),
                                               (int)k.scanCode, (k.flags & 0x01) != 0, late);
                     if (!posted) { posted = true; popup.BeginInvoke((Action)Run); }
+                    // Handy のショートカット（Ctrl+Shift+F の押しっぱなし）の診断: Ctrl・Shift が絡む打鍵を 300 件まで残す（仮想キーと判断だけ）
+                    bool modKey = k.vkCode >= 0xA0 && k.vkCode <= 0xA3;
+                    if (modTraceLeft > 0 && (modKey || m.Ctrl || (m.Shift && (k.vkCode == 0x46 || k.vkCode == 0x20))))
+                    {
+                        modTraceLeft--;
+                        string ml = "mod vk=0x" + k.vkCode.ToString("X2") + (down ? " down" : " up") + " flags=0x" + k.flags.ToString("X") +
+                                    " extra=0x" + k.dwExtraInfo.ToInt64().ToString("X") + " swallow=" + swallow + " late=" + late +
+                                    " mode=" + comp.Mode + " holding=" + comp.Holding + " ctrl=" + m.Ctrl + " shift=" + m.Shift;
+                        popup.BeginInvoke((Action)(() => dbg.Write(ml)));
+                    }
                     if (down && keyLogLeft > 0)
                     {
                         // 起動直後の 30 打鍵だけ、判断を診断の記録に残す（仮想キーと判断だけ。1 回限り）

@@ -293,19 +293,22 @@ namespace RomajiSlm
                 Check(c.Context == "", "ctx popped");
             });
 
-            Run("記号: , . ? ! は打鍵列に入り、@ などは素通し", () =>
+            Run("記号: US 配列で打てる記号はすべて浮き窓に入る", () =>
             {
                 Check(Composer.CharFor(0xBF, Mods.ShiftOnly) == '?', "?");
                 Check(Composer.CharFor(0x31, Mods.ShiftOnly) == '!', "!");
-                Check(Composer.CharFor(0x32, Mods.ShiftOnly) == '\0', "@");
+                Check(Composer.CharFor(0x32, Mods.ShiftOnly) == '@', "@");
+                Check(Composer.CharFor(0x39, Mods.ShiftOnly) == '(' && Composer.CharFor(0x30, Mods.ShiftOnly) == ')', "()");
+                Check(Composer.CharFor(0xDB, Mods.None) == '[' && Composer.CharFor(0xC0, Mods.ShiftOnly) == '~', "[ ~");
+                Check(Composer.CharFor(0xDE, Mods.ShiftOnly) == '"' && Composer.CharFor(0xDC, Mods.None) == '\\', "\" \\");
                 Check(Composer.CharFor(0x41, new Mods(false, false, false, false, true)) == 'A', "caps");
+                Check(Composer.CharFor(0x70, Mods.None) == '\0', "F1 is not a char");
                 var c = Ready();
-                Check(!Press(c, 0x32, Mods.ShiftOnly, 0), "@ passes when idle");
+                Check(Press(c, 0x39, Mods.ShiftOnly, 0), "( starts composition");
                 Type(c, "a", 0);
-                Check(Press(c, 0x32, Mods.ShiftOnly, 0), "@ ignored while composing");
-                Check(c.Buffer == "a", "not added");
+                Check(Press(c, 0x32, Mods.ShiftOnly, 0), "@ appended");
+                Check(c.Buffer == "(a@", "buffer: " + c.Buffer);
             });
-
             Run("パスワード欄: 確かめ終わるまで打鍵を預かり、パスワード欄ならそのままの順で送って以後は素通し", () =>
             {
                 var c = Ready();

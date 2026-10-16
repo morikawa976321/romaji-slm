@@ -851,7 +851,8 @@ namespace RomajiSlm
             return (vk >= 0x30 && vk <= 0x5A) || (vk >= 0xBA && vk <= 0xC0) || (vk >= 0xDB && vk <= 0xDF);
         }
 
-        /// 未確定の欄にためる文字。変換器が打鍵列として扱う英数字と , . ? ! - ' / だけ。それ以外は '\0'
+        /// 未確定の欄にためる文字（US 配列）。英数字と、Shift 込みで打てる ASCII の記号すべて。変換器が記号を扱う
+        /// （( ) → （）、[ ] → 「」、~ → 〜、: → ：、% @ # などはそのまま。2026-10-16 に実サーバで確かめた）。それ以外は '\0'
         public static char CharFor(int vk, Mods m)
         {
             if (vk >= 0x41 && vk <= 0x5A)
@@ -860,17 +861,20 @@ namespace RomajiSlm
                 return (char)((upper ? 'A' : 'a') + (vk - 0x41));
             }
             if (vk >= 0x30 && vk <= 0x39)
-            {
-                if (!m.Shift) return (char)('0' + (vk - 0x30));
-                return vk == 0x31 ? '!' : '\0';
-            }
+                return m.Shift ? ")!@#$%^&*("[vk - 0x30] : (char)('0' + (vk - 0x30));
             switch (vk)
             {
-                case 0xBC: return m.Shift ? '\0' : ',';
-                case 0xBE: return m.Shift ? '\0' : '.';
-                case 0xBD: return m.Shift ? '\0' : '-';
+                case 0xBA: return m.Shift ? ':' : ';';
+                case 0xBB: return m.Shift ? '+' : '=';
+                case 0xBC: return m.Shift ? '<' : ',';
+                case 0xBD: return m.Shift ? '_' : '-';
+                case 0xBE: return m.Shift ? '>' : '.';
                 case 0xBF: return m.Shift ? '?' : '/';
-                case 0xDE: return m.Shift ? '\0' : '\'';
+                case 0xC0: return m.Shift ? '~' : '`';
+                case 0xDB: return m.Shift ? '{' : '[';
+                case 0xDC: return m.Shift ? '|' : '\\';
+                case 0xDD: return m.Shift ? '}' : ']';
+                case 0xDE: return m.Shift ? '"' : '\'';
             }
             return '\0';
         }
