@@ -21,6 +21,7 @@ namespace RomajiSlm
             c.SetServerReady(true, 0);
             c.OnForeground(W1, 0);
             c.SetEnabled(true, 0);
+            c.OnImeState(W1, true, 0);   // MS-IME が開いていた（日本語で始まる）
             c.TakeEffects();
             return c;
         }
@@ -107,13 +108,29 @@ namespace RomajiSlm
                 c.TakeEffects();
                 Check(Press(c, Composer.VK_SPACE, ctrlAlt, 0), "hotkey swallowed");
                 var e = c.TakeEffects();
-                Check(c.Mode == Mode.Japanese, "enabled -> Japanese");
-                Check(Last<SetImeEffect>(e) != null && !Last<SetImeEffect>(e).Open, "closes MS-IME");
+                Check(c.Mode == Mode.English && Last<QueryImeEffect>(e) != null && Last<QueryImeEffect>(e).Window == W1, "starts English, asks MS-IME state");
                 Check(e.OfType<AltMaskEffect>().Any(), "alt mask");
+                c.OnImeState(W1, true, 1);
+                e = c.TakeEffects();
+                Check(c.Mode == Mode.Japanese, "MS-IME was open -> Japanese");
+                Check(Last<SetImeEffect>(e) != null && !Last<SetImeEffect>(e).Open, "closes MS-IME");
                 Press(c, Composer.VK_SPACE, ctrlAlt, 0);
                 e = c.TakeEffects();
                 Check(c.Mode == Mode.Disabled, "disabled");
                 Check(Last<SetImeEffect>(e) != null && Last<SetImeEffect>(e).Open && Last<SetImeEffect>(e).Window == W1, "reopens MS-IME on W1");
+            });
+
+            Run("使い始めたとき MS-IME が閉じていれば英字のまま。習慣の Shift+Space で日本語になる", () =>
+            {
+                var c = new Composer();
+                c.OnForeground(W1, 0);
+                Press(c, Composer.VK_SPACE, ctrlAlt, 0);
+                c.OnImeState(W1, false, 1);
+                Check(c.Mode == Mode.English && !Type(c, "a", 2).Any(x => x), "english, letters pass");
+                Press(c, Composer.VK_SPACE, Mods.ShiftOnly, 3);
+                Check(c.Mode == Mode.Japanese && Type(c, "a", 4).All(x => x), "shift+space -> japanese");
+                c.OnImeState(W1, true, 5);   // 遅れて届いた結果は無視（すでに本人が切り替えた）
+                Check(c.Mode == Mode.Japanese, "still japanese");
             });
 
             Run("Shift+Space で日本語と英語を切り替える", () =>
@@ -216,6 +233,7 @@ namespace RomajiSlm
                 var c = new Composer();
                 c.OnForeground(W1, 0);
                 c.SetEnabled(true, 0);
+                c.OnImeState(W1, true, 0);
                 c.TakeEffects();
                 Type(c, "jr", 0);
                 c.Tick(500);

@@ -55,6 +55,8 @@ namespace RomajiSlm
     }
     /// MS-IME の開閉。Window は要求したときの前面の窓（遅れて実行しても宛先を変えない）
     public sealed class SetImeEffect : Effect { public bool Open; public IntPtr Window; public SetImeEffect(bool o, IntPtr w) { Open = o; Window = w; } }
+    /// 前面の窓の MS-IME が開いているかを調べる（結果は OnImeState）
+    public sealed class QueryImeEffect : Effect { public IntPtr Window; public QueryImeEffect(IntPtr w) { Window = w; } }
     public sealed class ModeEffect : Effect { public Mode Mode; public ModeEffect(Mode m) { Mode = m; } }
     public sealed class AltMaskEffect : Effect { }   // Alt を押したまま握りつぶしたキーのあと、Alt の単押し（メニュー起動）を防ぐ
     public sealed class RedrawEffect : Effect { }
@@ -765,14 +767,32 @@ namespace RomajiSlm
             }
             else
             {
-                Mode = Mode.Japanese;
-                effects.Add(new SetImeEffect(false, foreground));
+                // 「日本語か英字か」は、前面の窓の MS-IME の開閉を引き継ぐ（QueryImeEffect → OnImeState）。
+                // 決まるまでは英字。日本語で始めると、本人が習慣で Shift+Space（日本語へ）を押したとき英字に替わってしまう
+                // （2026-10-16 の本人の報告「アルファベットがそのまま入力されてしまう」）
+                Mode = Mode.English;
+                effects.Add(new QueryImeEffect(foreground));
             }
             passthrough = false;
             verified = false;
             effects.Add(new ModeEffect(Mode));
             effects.Add(new RedrawEffect());
         }
+
+        /// 使い始めたときの前面の窓の MS-IME の開閉。開いていれば日本語で始め、MS-IME は閉じる
+        public void OnImeState(IntPtr window, bool open, long now)
+        {
+            if (!open || Mode != Mode.English || window != foreground) return;
+            Mode = Mode.Japanese;
+            verified = false;
+            effects.Add(new SetImeEffect(false, foreground));
+            effects.Add(new ModeEffect(Mode));
+            effects.Add(new RedrawEffect());
+        }
+
+        // 診断用（ime-state.txt）。打った文字は出さない
+        public bool Passthrough { get { return passthrough; } }
+        public bool Verified { get { return verified; } }
 
         public void OnForeground(IntPtr fg, long now)
         {

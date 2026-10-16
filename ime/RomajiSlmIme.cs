@@ -331,6 +331,23 @@ namespace RomajiSlm
         }
     }
 
+    /// 診断の記録（ime-debug.log）。状態の変化・欄の確認の結果・フックの付け直しだけで、打った文字は書かない。1 MB で .old に回す
+    sealed class DebugLog
+    {
+        readonly string path;
+        public DebugLog(string path) { this.path = path; }
+        public void Write(string line)
+        {
+            try
+            {
+                var fi = new FileInfo(path);
+                if (fi.Exists && fi.Length > 1 << 20) { File.Delete(path + ".old"); File.Move(path, path + ".old"); }
+                File.AppendAllText(path, DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff") + " " + line + "\r\n", new UTF8Encoding(false));
+            }
+            catch { }
+        }
+    }
+
     /// 未確定の文と候補を出す浮き窓。フォーカスを奪わない（WS_EX_NOACTIVATE）
     sealed class Popup : Form
     {
@@ -366,10 +383,13 @@ namespace RomajiSlm
 
         protected override void WndProc(ref Message m)
         {
-            const int WM_MOUSEACTIVATE = 0x21, MA_NOACTIVATE = 3;
+            const int WM_MOUSEACTIVATE = 0x21, MA_NOACTIVATE = 3, WM_INPUT = 0x00FF;
             if (m.Msg == WM_MOUSEACTIVATE) { m.Result = (IntPtr)MA_NOACTIVATE; return; }
+            if (m.Msg == WM_INPUT && RawKey != null) RawKey();
             base.WndProc(ref m);
         }
+
+        public Action RawKey;   // キーボードの Raw Input が届いた（フックの見張りに使う）
 
         public void Flash(string text) { flash = text; }
         public void EndFlash() { flash = null; }
@@ -471,6 +491,13 @@ namespace RomajiSlm
         bool wasComposing, caps, posted, caretAnchor;
         long flashUntil, fieldDeadline;
         int fieldSeq;
+        string lastStatus = "";
+        // フックの見張り: Raw Input にはキーが届いているのにフックが呼ばれていなければ、Windows がフックを外した
+        // （LowLevelHooksTimeout を超えたとき黙って外す）とみなして付け直す
+        long lastHookAt, lastRawAt, lastReinstallAt = -100000, lastStateAt;
+        int hookEvents, reinstalls;
+        readonly DebugLog dbg;
+        readonly string statePath;
         const int FieldCheckMs = 300;   // UI Automation が応答しないアプリでは、この時間でパスワード欄ではないとみなす
 
         long Now { get { return clock.ElapsedMilliseconds; } }
@@ -479,6 +506,9 @@ namespace RomajiSlm
         {
             cfg = new Config(Path.Combine(data, "ime.ini"));
             if (!File.Exists(cfg.Path)) cfg.Save();
+            dbg = new DebugLog(Path.Combine(data, "ime-debug.log"));
+            statePath = Path.Combine(data, "ime-state.txt");
+            dbg.Write("start root=" + root + " enabled=" + cfg.Enabled);
             usage = new Usage(Path.Combine(data, "usage.txt"));
             history = new History(Path.Combine(data, "history.jsonl")) { Enabled = cfg.History };
             popup = new Popup(comp);
@@ -511,6 +541,7 @@ namespace RomajiSlm
             server.StateChanged += (ready, msg) => popup.BeginInvoke((Action)(() =>
             {
                 serverItem.Text = "変換サーバ: " + msg;
+                dbg.Write("server ready=" + ready + " " + msg);
                 comp.SetServerReady(ready, Now);
                 Run();
             }));
@@ -520,6 +551,9 @@ namespace RomajiSlm
             caps = Control.IsKeyLocked(Keys.CapsLock);
             hookProc = HookCallback;
             hook = Native.SetWindowsHookEx(13, hookProc, Native.GetModuleHandle(null), 0);   // WH_KEYBOARD_LL
+            dbg.Write("hook=" + hook);
+            popup.RawKey = () => { lastRawAt = Now; };
+            if (!Native.RegisterKeyboardRawInput(popup.Handle)) dbg.Write("raw input registration failed");
             fgProc = (h, ev, hwnd, idObj, idChild, thread, time) => { comp.OnForeground(hwnd, Now); Run(); };
             fgHook = Native.SetWinEventHook(3, 3, IntPtr.Zero, fgProc, 0, 0, 0);   // EVENT_SYSTEM_FOREGROUND, OUTOFCONTEXT
             // 同じ窓の中で別の欄に移ったことを知る（確定待ちの文を、移った先へ送らないため）。自分のプロセスの通知は除く
@@ -540,7 +574,14 @@ namespace RomajiSlm
             timer.Tick += (s, e) =>
             {
                 if (!comp.Holding) ResyncModifiers();   // 離鍵を取りこぼしても（管理者権限の窓の上で離した等）修飾キーが押されたままにならない
-                if (fieldDeadline != 0 && Now > fieldDeadline) { fieldDeadline = 0; comp.OnFieldChecked(fieldSeq, false, Now); }
+                WatchHook();
+                if (Now - lastStateAt > 5000) { lastStateAt = Now; WriteState(); }
+                if (fieldDeadline != 0 && Now > fieldDeadline)
+                {
+                    fieldDeadline = 0;
+                    dbg.Write("field check seq=" + fieldSeq + " timed out (treated as not password)");
+                    comp.OnFieldChecked(fieldSeq, false, Now);
+                }
                 comp.Tick(Now);
                 Run();
             };
@@ -548,6 +589,34 @@ namespace RomajiSlm
             // UI Automation の初回の呼び出しは初期化で遅く、欄の確認（0.3 秒で打ち切り）に間に合わないことがあるので、起動時に 1 回済ませる
             ThreadPool.QueueUserWorkItem(_ => { bool pw; Point q; Native.FocusedElement(out pw, out q); });
             timer.Start();
+        }
+
+        void WatchHook()
+        {
+            if (lastRawAt - lastHookAt < 1500 || Now - lastReinstallAt < 10000) return;
+            lastReinstallAt = Now;
+            reinstalls++;
+            var old = hook;
+            hook = Native.SetWindowsHookEx(13, hookProc, Native.GetModuleHandle(null), 0);
+            if (old != IntPtr.Zero) Native.UnhookWindowsHookEx(old);
+            lastHookAt = Now;
+            dbg.Write("hook reinstalled (raw input without hook calls) new=" + hook + " fg=" + Native.ForegroundExe());
+        }
+
+        /// 診断用の状態（5 秒ごと）。打った文字は出さない
+        void WriteState()
+        {
+            try
+            {
+                File.WriteAllText(statePath,
+                    "time=" + DateTime.Now.ToString("s") + "\r\nmode=" + comp.Mode + "\r\nphase=" + comp.Phase +
+                    "\r\ncomposing=" + comp.Composing + "\r\nfield_pending=" + comp.FieldPending + "\r\npassthrough=" + comp.Passthrough +
+                    "\r\nverified=" + comp.Verified + "\r\nwaiting=" + comp.Waiting + "\r\nserver_ready=" + comp.ServerReady +
+                    "\r\nhook=" + hook + "\r\nhook_events=" + hookEvents + "\r\nhook_ago_ms=" + (Now - lastHookAt) +
+                    "\r\nraw_ago_ms=" + (Now - lastRawAt) + "\r\nreinstalls=" + reinstalls + "\r\nforeground=" + Native.ForegroundExe() +
+                    "\r\nstatus=" + comp.Status + "\r\n", new UTF8Encoding(false));
+            }
+            catch { }
         }
 
         /// 確定待ちでない（修飾キーを積んでいない）間は、OS の状態が本人の押している状態と一致する
@@ -568,6 +637,8 @@ namespace RomajiSlm
             // フックの中の例外はネイティブの境界を越えてプロセスを落とすので、ここで止めて素通しにする
             if (nCode >= 0) try
             {
+                lastHookAt = Now;
+                hookEvents++;
                 var k = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
                 bool injected = (k.flags & 0x10) != 0;
                 int msg = wParam.ToInt32();
@@ -621,6 +692,21 @@ namespace RomajiSlm
                     }
                     else if (mode != null) OnMode(mode.Mode);
                     else if (stat != null) usage.Add(stat.Name, stat.Value);
+                    else if (e is QueryImeEffect)
+                    {
+                        var qw = ((QueryImeEffect)e).Window;
+                        IntPtr qime = Native.ImmGetDefaultIMEWnd(qw);
+                        ThreadPool.QueueUserWorkItem(_ =>
+                        {
+                            bool open = qime != IntPtr.Zero && Native.GetImeOpen(qime);
+                            popup.BeginInvoke((Action)(() =>
+                            {
+                                dbg.Write("ms-ime open=" + open + " fg=" + Native.ExeOf(qw));
+                                comp.OnImeState(qw, open, Now);
+                                Run();
+                            }));
+                        });
+                    }
                     else if (e is LogEffect) history.Write((LogEffect)e, Native.ExeOf(((LogEffect)e).Window));
                     else if (e is CheckFieldEffect) CheckField(((CheckFieldEffect)e).Seq, ((CheckFieldEffect)e).DelayMs);
                     else if (e is AltMaskEffect) Native.SendMask();
@@ -628,6 +714,7 @@ namespace RomajiSlm
                 }
                 if (effs.Any(x => x is StatEffect)) usage.Save(server.Describe);
             }
+            if (comp.Status != lastStatus) { lastStatus = comp.Status ?? ""; if (lastStatus.Length > 0) dbg.Write("status: " + lastStatus); }
             if (flashUntil != 0 && Now > flashUntil) { flashUntil = 0; popup.EndFlash(); redraw = true; }
             if (redraw) Redraw();
         }
@@ -675,9 +762,13 @@ namespace RomajiSlm
             {
                 if (delayMs > 0) Thread.Sleep(delayMs);   // 欄を移すキーを送った直後。アプリが移し終えるのを待つ
                 bool password; Point q;
+                var sw = Stopwatch.StartNew();
                 bool ok = Native.FocusedElement(out password, out q);
+                long took = sw.ElapsedMilliseconds;
                 popup.BeginInvoke((Action)(() =>
                 {
+                    dbg.Write("field check seq=" + seq + " ok=" + ok + " password=" + password + " ms=" + took +
+                              (seq != fieldSeq || fieldDeadline == 0 ? " (late, ignored)" : "") + " fg=" + Native.ForegroundExe());
                     if (seq != fieldSeq || fieldDeadline == 0) return;
                     fieldDeadline = 0;
                     if (ok && !caretAnchor && q != Point.Empty) anchor = q;
@@ -708,6 +799,7 @@ namespace RomajiSlm
 
         void OnMode(Mode m)
         {
+            dbg.Write("mode=" + m + " fg=" + Native.ForegroundExe());
             cfg.Enabled = m != Mode.Disabled;
             try { cfg.Save(); } catch { }
             UpdateTray();
@@ -763,6 +855,7 @@ namespace RomajiSlm
                 {
                     comp.OnForeground(w, 0);
                     comp.SetEnabled(true, 0);
+                    comp.OnImeState(w, true, 0);   // 日本語で始める
                     comp.SetServerReady(true, 0);
                     foreach (char ch in romaji)
                     {
@@ -898,6 +991,25 @@ namespace RomajiSlm
         {
             var a = new[] { Key(0xE8, 0, 0), Key(0xE8, 0, 0x0002) };
             SendInput(2, a, Marshal.SizeOf(typeof(INPUT)));
+        }
+
+        /// MS-IME が開いているか（IMC_GETOPENSTATUS）。応答しなければ閉じているとみなす
+        public static bool GetImeOpen(IntPtr imeWnd)
+        {
+            IntPtr r;
+            if (SendMessageTimeout(imeWnd, 0x0283, new IntPtr(0x0005), IntPtr.Zero, 0x0002, 300, out r) == IntPtr.Zero) return false;
+            return r != IntPtr.Zero;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct RAWINPUTDEVICE { public ushort usUsagePage, usUsage; public uint dwFlags; public IntPtr hwndTarget; }
+        [DllImport("user32.dll", SetLastError = true)] static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] d, uint n, uint size);
+
+        /// キーボードの Raw Input を、前面でなくても受ける（RIDEV_INPUTSINK）。フックが外れたことに気づくためだけに使う
+        public static bool RegisterKeyboardRawInput(IntPtr hwnd)
+        {
+            var d = new[] { new RAWINPUTDEVICE { usUsagePage = 1, usUsage = 6, dwFlags = 0x00000100, hwndTarget = hwnd } };
+            return RegisterRawInputDevices(d, 1, (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICE)));
         }
 
         /// MS-IME を開閉する（既定の IME 窓へ WM_IME_CONTROL / IMC_SETOPENSTATUS）。応答しないアプリでは 300 ms であきらめる
