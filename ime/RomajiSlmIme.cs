@@ -74,6 +74,7 @@ namespace RomajiSlm
         public string Device = "auto";
         public int Port = 8767;
         public bool History = true;
+        public bool AcceptInjected = true;
 
         public Config(string path)
         {
@@ -88,6 +89,7 @@ namespace RomajiSlm
                 else if (k == "device") Device = v;
                 else if (k == "port") int.TryParse(v, out Port);
                 else if (k == "history") History = v != "0";
+                else if (k == "accept_injected") AcceptInjected = v != "0";
             }
         }
 
@@ -100,7 +102,9 @@ namespace RomajiSlm
                 "device=" + Device + "\r\n" +
                 "port=" + Port + "\r\n" +
                 "# history: 1 なら確定・取り消しのたびに打鍵列・候補・確定文を history.jsonl に残す（次の改良の材料）。0 で止める\r\n" +
-                "history=" + (History ? "1" : "0") + "\r\n", new UTF8Encoding(false));
+                "history=" + (History ? "1" : "0") + "\r\n" +
+                "# accept_injected: 1 なら他のアプリが送り込んだキーも本人の打鍵として扱う（打鍵を送り直す常駐アプリがあるとき要る）\r\n" +
+                "accept_injected=" + (AcceptInjected ? "1" : "0") + "\r\n", new UTF8Encoding(false));
         }
     }
 
@@ -662,7 +666,10 @@ namespace RomajiSlm
                 // 修飾キーの状態は自分で追う。確定待ちの間は修飾キーも積んで OS に渡さないので、GetAsyncKeyState は使えない。
                 // 他のアプリが送り込んだ修飾キー（貼り付けの Ctrl+V など）も OS の状態を変えるので追う。自分の送り直しは除く
                 if (k.dwExtraInfo != Native.Magic && k.vkCode < 256) keyDown[k.vkCode] = down;
-                if (!injected)
+                // この機械では、本人の打鍵がすべて送り込まれたキー（LLKHF_INJECTED、extra=0）として届く（2026-10-16 の実測で
+                // 実際のキー 0・送り込み 239。常駐の Handy などが全打鍵を横取りして送り直しているとみられる）。
+                // そのため、自分が送ったもの（Magic）以外の送り込みも本人の打鍵として扱う。ime.ini の accept_injected=0 で元に戻す
+                if (!injected || (cfg.AcceptInjected && k.dwExtraInfo != Native.Magic))
                 {
                     if (down && k.vkCode == Composer.VK_CAPITAL) caps = !caps;
                     var m = new Mods(keyDown[0xA0] || keyDown[0xA1], keyDown[0xA2] || keyDown[0xA3],
