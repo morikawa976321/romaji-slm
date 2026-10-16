@@ -69,6 +69,8 @@ namespace RomajiSlm
     {
         public string Event, Romaji, Context, Text, Note; public string[] Candidates; public int Chosen; public bool Raw;
         public IntPtr Window;   // 打った窓（記録の app はこの窓のアプリ。書く時点の前面ではない）
+        // 確定の直後に Backspace で消してから打ち直した確定（手で直したとみられる）: 直前の確定と、消した字数
+        public string PrevText, PrevRomaji; public int Backspaces;
     }
 
     public sealed class Composer
@@ -115,6 +117,9 @@ namespace RomajiSlm
         bool passthrough, deliverPosted, reprocessing;
         // postMove: 欄を移しうるキーの後ろの打鍵を預かっている。awaitingMove: そのキーをまだアプリに送っていない（確認はまだ出さない）
         bool postMove, awaitingMove;
+        // 直前に送った確定と、その後に同じ欄で素通しした Backspace の数（打ち直しの記録用。他のキーや欄の移動で消える）
+        Item lastDelivered;
+        int bsAfter;
         long lastMoveAt = long.MinValue / 2, nowKey;   // 欄を移しうるキーが最後にアプリに届いた時刻
         // 今の欄をパスワード欄でないと確かめた。窓・欄が替わる、Tab・Enter・Esc を素通しする、で消える。
         // フォーカスの通知を出さないアプリ（focus が空）では欄の移動が分からないので、未確定の文が終わるたびに消す
@@ -263,9 +268,17 @@ namespace RomajiSlm
             }
             if (HandleDown(vk, m, now)) { held[vk] = Swallowed; return true; }
             ReachesApp(vk, m);
+            NoteRetype(vk);
             if (Enqueue(kev, late, MayMoveFocus(vk, m))) { held[vk] = Queued; return true; }
             held[vk] = Passed;
             return false;
+        }
+
+        /// 確定の直後にアプリへ届いた Backspace を数える。それ以外のキー（修飾キーを除く）が届いたら打ち直しの見込みは消す
+        void NoteRetype(int vk)
+        {
+            if (vk == VK_BACK) { if (lastDelivered != null) bsAfter++; }
+            else if (!IsModifier(vk)) { lastDelivered = null; bsAfter = 0; }
         }
 
         /// アプリに届く押下（素通し・積んで後で送る）が欄を移しうるなら、「確かめた」印とパスワード欄の素通しをやめる
@@ -514,8 +527,17 @@ namespace RomajiSlm
                 {
                     var it = e.Commit;
                     effects.Add(new StatEffect(it.Raw ? "commit_raw" : it.CandIndex > 0 ? "commit_other" : "commit_first", 1));
-                    effects.Add(new LogEffect { Event = "commit", Romaji = it.Romaji, Context = it.Context, Text = it.Text,
-                                                Candidates = it.Cands, Chosen = it.Raw ? -1 : it.CandIndex, Raw = it.Raw, Window = it.Window });
+                    var log = new LogEffect { Event = "commit", Romaji = it.Romaji, Context = it.Context, Text = it.Text,
+                                              Candidates = it.Cands, Chosen = it.Raw ? -1 : it.CandIndex, Raw = it.Raw, Window = it.Window };
+                    if (lastDelivered != null && bsAfter > 0 && lastDelivered.Window == it.Window && lastDelivered.Focus == it.Focus)
+                    {
+                        log.PrevText = lastDelivered.Text;
+                        log.PrevRomaji = lastDelivered.Romaji;
+                        log.Backspaces = bsAfter;
+                    }
+                    effects.Add(log);
+                    lastDelivered = it;
+                    bsAfter = 0;
                     AppendContext(it.Text, now);
                 }
                 else if (e.Key.Down)
@@ -799,6 +821,7 @@ namespace RomajiSlm
         {
             if (fg == foreground) return;
             DropFieldHold();
+            lastDelivered = null;
             foreground = fg;
             focus = "";   // 新しい窓の欄はまだ分からない（前の窓の欄の組を使い回さない）
             verified = false;
@@ -816,6 +839,7 @@ namespace RomajiSlm
         {
             if (key == focus) return;
             DropFieldHold();
+            lastDelivered = null;
             focus = key;
             verified = false;
             passthrough = false;

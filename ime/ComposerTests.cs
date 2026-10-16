@@ -633,6 +633,29 @@ namespace RomajiSlm
                 Check(Type(c, "a", 5).All(x => x) && Last<CheckFieldEffect>(Drain(c, 5).Effects) != null, "checked again in the new field");
             });
 
+            Run("記録: 確定の直後に Backspace で消して打ち直したら、直前の確定と消した字数を添える", () =>
+            {
+                var c = Ready();
+                Type(c, "a", 0);
+                Press(c, Composer.VK_RETURN, Mods.ShiftOnly, 1);
+                Drain(c, 1);
+                Check(!Press(c, Composer.VK_BACK, Mods.None, 2) && !Press(c, Composer.VK_BACK, Mods.None, 3), "backspaces pass");
+                Type(c, "b", 4);
+                Press(c, Composer.VK_RETURN, Mods.ShiftOnly, 5);
+                var log = Last<LogEffect>(Drain(c, 5).Effects);
+                Check(log != null && log.Backspaces == 2 && log.PrevText == "a" && log.PrevRomaji == "a", "retype noted");
+                Type(c, "c", 6);
+                Press(c, Composer.VK_RETURN, Mods.ShiftOnly, 7);
+                log = Last<LogEffect>(Drain(c, 7).Effects);
+                Check(log != null && log.Backspaces == 0, "no backspace, no retype");
+                Press(c, Composer.VK_BACK, Mods.None, 8);
+                Press(c, Composer.VK_LEFT, Mods.None, 9);   // 他のキーで見込みは消える
+                Type(c, "d", 10);
+                Press(c, Composer.VK_RETURN, Mods.ShiftOnly, 11);
+                log = Last<LogEffect>(Drain(c, 11).Effects);
+                Check(log != null && log.Backspaces == 0, "arrow cancels");
+            });
+
             Run("確定待ちの間の Enter は、確定文を送ったあとに送る", () =>
             {
                 var c = Ready();

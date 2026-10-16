@@ -330,7 +330,9 @@ namespace RomajiSlm
             string line = "{\"time\":" + J(DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff")) + ",\"event\":" + J(e.Event) +
                           ",\"romaji\":" + J(e.Romaji) + ",\"context\":" + J(e.Context) + ",\"text\":" + J(e.Text) +
                           ",\"candidates\":" + c + ",\"chosen\":" + e.Chosen + ",\"raw\":" + (e.Raw ? "true" : "false") +
-                          ",\"app\":" + J(app) + ",\"note\":" + J(e.Note) + "}\n";
+                          ",\"app\":" + J(app) + ",\"note\":" + J(e.Note) +
+                          (e.Backspaces > 0 ? ",\"retype\":{\"backspaces\":" + e.Backspaces + ",\"prev_text\":" + J(e.PrevText) + ",\"prev_romaji\":" + J(e.PrevRomaji) + "}" : "") +
+                          "}\n";
             try { File.AppendAllText(path, line, new UTF8Encoding(false)); } catch { }
         }
     }
