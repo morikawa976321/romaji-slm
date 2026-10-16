@@ -91,7 +91,7 @@ class CorePipeline:
                  n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None,
                  batched: bool = True, punct: str = "insert", en_case: str = "typed",
                  tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None,
-                 preselect: bool = True, n_pre: int = 30):
+                 preselect: bool = True, n_pre: int = 30, punct_end: bool = False):
         """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
         punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
         既定の punct="insert"・en_case="typed" は本人の選択（docs/decisions.md「本人の回答」2026-10-15）。
@@ -110,6 +110,9 @@ class CorePipeline:
         self.batched = batched  # k 件の制約付き生成を1バッチで回す（False は1件ずつ。速度の比較用）
         self.punct, self.en_case = punct, en_case
         self.tau_comma, self.tau_end, self.tau_q = tau_comma, tau_end, tau_q
+        # punct_end: 句読点 B で文末の「。」「？」も補うか。既定は補わない（本人の決定 2026-10-17「Aを採用する」:
+        # 常駐入力では文節ごとに確定することが多く、文の途中に句点が付いた。句点は本人が「.」を打つ）
+        self.punct_end = punct_end
         # preselect: 読み段の候補 n_pre 件を辞書の変換コストで並べ直して上位 k 件を選ぶ（core.preselect、PR #11）
         self.preselect, self.n_pre = preselect, n_pre
         self.name = name or f"core(k={k},w_read={w_read})"
@@ -184,7 +187,7 @@ class CorePipeline:
 
         # 2 段で選ぶ（まず文末の 3 候補、次にその文末で読点の位置）。全組合せ（3 × 切れ目の数）を1バッチで採点すると
         # CPU で 1 件 300 ms ほど増えた（user_style_nopunct で中央値 379 → 703 ms）。段階に分けると採点する文が約 1/3 になる
-        end = pick([v for v in vs if v[3] is None])[2]
+        end = pick([v for v in vs if v[3] is None])[2] if self.punct_end else ""
         new_text, _, _, b = pick([v for v in vs if v[2] == end])
         if b is not None:
             bounds = tuple(sorted({x if x < b else x + 1 for x in bounds} | {b, b + 1}))
