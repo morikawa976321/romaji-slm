@@ -70,7 +70,8 @@ def test_chunk_with_dot_and_digits():
     r = top("llama.cppdemoderuwougokasu.")[0]
     assert r.segs[0].kind == "en" and r.segs[0].text == "llama.cpp"
     r = top("claude.mdnikomitto")[0]
-    assert r.segs[0].text == "claude.md"
+    # 拡張子の弧（.md）があるので「claude」「.md」の 2 区間にもなる。どちらでも読みには claude.md が英字のまま残る
+    assert r.zenz_input().startswith("claude.md")
     assert any(s.kind == "en" and s.text == "gpt-2" for s in top("gpt-2wotsukau")[0].segs)
     assert any(s.kind == "en" and s.text == "v3.1" for s in top("v3.1nishita")[0].segs)
 

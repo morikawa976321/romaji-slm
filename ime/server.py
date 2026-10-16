@@ -102,7 +102,19 @@ def main(argv=None):
     holder = {}
 
     def convert(romaji, ctx):
+        reload_user_dict()
         return holder["p"].convert_nbest(romaji, ctx)
+
+    def reload_user_dict():
+        """ユーザー辞書が更新されていたら読み直す（振り返りの後に再起動しなくてよいように）。変換の錠の中で呼ばれる"""
+        from core.userdict import default_path, load as load_user
+        p = default_path()
+        m = p.stat().st_mtime if p.exists() else 0.0
+        if m != holder.get("ud_mtime"):
+            holder["ud_mtime"] = m
+            ud = load_user(p)
+            holder["p"].set_user_dict(ud)
+            print(f"user dict reloaded: en={len(ud.en)} word={len(ud.words)} fix={len(ud.fixes)} errors={len(ud.errors)}", flush=True)
 
     # 先に待ち受けを開く。トレイアプリは /health が返るまで「準備中」と表示する
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(convert, ready))
@@ -111,7 +123,11 @@ def main(argv=None):
     from core.pipeline import CorePipeline  # 既定は本人の選択（句読点 B・英字は打ったまま。docs/decisions.md D14）
     device = pick_device(args.device)
     t0 = time.perf_counter()
-    holder["p"] = CorePipeline(model=args.model, device=device)
+    from core.userdict import default_path, load as load_user
+    ud = load_user(default_path())   # 本人のユーザー辞書（docs/REVIEW.md）。中身はログに書かない（件数だけ）
+    print(f"user dict: {default_path()} en={len(ud.en)} word={len(ud.words)} fix={len(ud.fixes)} errors={len(ud.errors)}", flush=True)
+    holder["p"] = CorePipeline(model=args.model, device=device, user_dict=ud)
+    holder["ud_mtime"] = default_path().stat().st_mtime if default_path().exists() else 0.0
     holder["p"].convert_nbest("konnichiha")  # 最初の 1 件の遅さ（CUDA の初期化・辞書の索引）を起動時に済ませる
     ready.set()
     print(f"romaji-slm ime server: 127.0.0.1:{args.port} device={device} ready in {time.perf_counter() - t0:.1f}s",

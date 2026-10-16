@@ -65,6 +65,26 @@ class _DictIndex:
         return self._d[k]
 
 
+class _MergedIndex:
+    """Mozc の索引に、本人のユーザー辞書の語（core.userdict の word）を重ねた索引。"""
+
+    def __init__(self, base, extra: _DictIndex):
+        self.base, self.extra = base, extra
+
+    def prefixes(self, s: str) -> list[str]:
+        return list(dict.fromkeys(self.base.prefixes(s) + self.extra.prefixes(s)))
+
+    def __getitem__(self, k: str) -> list[bytes]:
+        try:
+            vals = list(self.base[k])
+        except KeyError:
+            vals = []
+        vals += self.extra._d.get(k, [])
+        if not vals:
+            raise KeyError(k)
+        return vals
+
+
 def _build_index(items):
     if marisa_trie is not None:
         return marisa_trie.BytesTrie(items)
@@ -131,6 +151,14 @@ class Dictionary:
         if i is None:
             raise KeyError(f"id.def に品詞がない: {name}")
         return i
+
+    def add_user_words(self, words: list[tuple[str, str, int]]) -> None:
+        """本人のユーザー辞書の語 (読み, 表記, コスト) を一般名詞として足す（core.userdict）。読みはひらがな・カタカナどちらでも。"""
+        if not words:
+            return
+        items = [(hira_to_kata(r), _ENTRY.pack(self.noun_id, self.noun_id, c) + s.encode("utf-8")) for r, s, c in words]
+        base = self.index.base if isinstance(self.index, _MergedIndex) else self.index
+        self.index = _MergedIndex(base, _DictIndex(items))
 
     def conn(self, rid: int, lid: int) -> int:
         return self.matrix[rid * self.pos_size + lid]

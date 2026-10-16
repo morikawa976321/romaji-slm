@@ -169,7 +169,8 @@ def make_converter(name: str, device: str = "cpu", model: str | None = None,
                   en_case=opts.get("e", "typed"), tau_comma=float(opts.get("tc", -0.5)),
                   tau_end=float(opts.get("te", -6.0)), tau_q=float(opts.get("tq", -5.0)), name=name,
                   preselect=opts.get("ps", "1") == "1",  # ps=0 で読み段の上位をそのまま使う（D18 以前の振る舞い）
-                  punct_end=opts.get("pe", "0") == "1")  # pe=1 で句読点 B が文末の句点も補う（D31 より前の既定）
+                  punct_end=opts.get("pe", "0") == "1",  # pe=1 で句読点 B が文末の句点も補う（D31 より前の既定）
+                  user_dict=opts.get("ud") or None)  # ud=<パス> で本人のユーザー辞書を読む（docs/REVIEW.md の検証）
         if name.startswith("core-llama"):
             # core-llama:np=5,t=8,...（--model は GGUF。np=llama-server のスロット数、t=スレッド数、
             # url=起動済みの llama-server に繋ぐ）

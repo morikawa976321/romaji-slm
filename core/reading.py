@@ -21,7 +21,7 @@ import sys
 from dataclasses import dataclass
 from functools import lru_cache
 
-from .english import FUZZY_MIN_LEN, SHORT_OK, lexicon
+from .english import _USER_EN, FUZZY_MIN_LEN, SHORT_OK, lexicon, user_bonus
 from .kana_lm import AFTER_EN, AFTER_NUM, BOS, EOS, ORDER, load as load_lm, word_cost
 from .keyboard import NEIGHBORS
 from .romaji_table import MAXLEN, TABLE, VOWELS
@@ -50,6 +50,10 @@ COST = {
     "raw_token_ok": 1.0,  # 同じく、かなに読める英字1字あたり（cdma の m・a。raw_char と同じ）
     "num_in_word": 1.5,  # 英字に挟まれた数字（dai2shou は正しいが、打鍵ミスの o→9 なども同じ形になる）
     "num_cut": 2.5,  # 母音・n 以外の英字の直後の数字（ローマ字の音節が途中で切れている）
+    "num_unit": 0.3,  # 数字＋子音で終わる単位（0.2mm、5v、10k、3d）。次の字が子音のときだけ作るので、かなと競わない
+    "num_unit_vowel": 2.0,  # 数字＋母音で終わる単位（20ma）。かなでも読める（20made）ので高め。採点に任せる
+    "num_unit_long": 0.8,  # 数字＋2 字以上の子音の単位で、次が母音（0.2mmookiku）。「っも」とも読めるのでやや高め
+    "ext": 0.3,  # 英数字の直後の .md などの拡張子
     "sym_dash": 1.0,  # `-` を長音でなく記号として読む
     "sym_dash_vowel": 3.0,  # 母音の直後の `-` を記号として読む
     "lm_weight": 0.3,  # 文字 4-gram の -log P に掛ける重み
@@ -484,6 +488,9 @@ def _en_cost(w) -> tuple[tuple[str, float], ...]:
     parts = [("en", base + freq)]
     if _parses_as_romaji(w.spelling):
         parts.append(("en_romaji", COST["en_romaji_tech" if w.tech else "en_romaji"]))
+    bonus = user_bonus(w.spelling)
+    if bonus:
+        parts.append(("user", -bonus))   # 本人のユーザー辞書の加点（core.userdict）
     return tuple(parts)
 
 
@@ -516,7 +523,7 @@ def _en_arcs(s: str, i: int) -> list[Arc]:
             break
         w = s[i:j]
         e = lex.get(w)
-        if e is not None and (len(w) >= 3 or w in SHORT_OK) and s[j - 1] not in ".-":
+        if e is not None and (len(w) >= 3 or w in SHORT_OK or w in _USER_EN) and s[j - 1] not in ".-":
             out.append(Arc(i, j, "en", w, e.surfaces, _en_cost(e) + _cut(s, j, w)))
         if w.isalpha() and FUZZY_MIN_LEN - 1 <= len(w) <= 17:
             for f in lex.fuzzy(w):
@@ -608,7 +615,18 @@ def _num_sym_arcs(s: str, i: int) -> list[Arc]:
             parts.append(("num_cut", COST["num_cut"]))
         elif prev.isalpha() and j < L and s[j].isalpha():
             parts.append(("num_in_word", COST["num_in_word"]))
-        return [Arc(i, j, "num", s[i:j], parts=tuple(parts))]
+        # 単位が続くなら数字は語の途中ではない（tate10cm の 10）。num_in_word は付けない
+        unit_parts = tuple(p for p in parts if p[0] != "num_in_word")
+        return [Arc(i, j, "num", s[i:j], parts=tuple(parts))] + _unit_arcs(s, i, j, unit_parts)
+    if ch == "/" and 0 < i < L - 1 and s[i - 1].isdigit() and s[i + 1].isdigit():
+        # 数字の間の / は日付・分数（12/25、1/3）。半角を第1候補にする（合成セットで 12・25 になっていた。EVAL.md）
+        return [Arc(i, i + 1, "sym", "/", ("/", "／"))]
+    if ch == "." and (i == 0 or s[i - 1].isalnum()):
+        ext = next((e for e in _EXTENSIONS if s.startswith(e, i + 1) and _ext_ok(s, i + 1 + len(e), e)), None)
+        if ext:
+            # 英数字の直後の .md・.py などは拡張子。英字のまま 1 区間で残す（「。目」になっていた）
+            k = i + 1 + len(ext)
+            return [Arc(i, k, "en", s[i:k], (s[i:k],), (("ext", COST["ext"]),))]
     if ch.isalpha():
         return []
     if ch in ".," and 0 < i < L - 1 and s[i - 1].isdigit() and s[i + 1].isdigit():
@@ -620,6 +638,56 @@ def _num_sym_arcs(s: str, i: int) -> list[Arc]:
         cost = COST["sym_dash_vowel"] if i and s[i - 1] in VOWELS else COST["sym_dash"]
         return [Arc(i, i + 1, "sym", "-", ("-", "－"), (("sym", cost),))]
     return [Arc(i, i + 1, "sym", ch, SYMBOLS.get(ch, (ch,)))]
+
+
+# 数字の直後に打たれる単位（本人の電子工作・3D プリンタの文で、0.2mm → 0.2も、20ma → 20枚、10k → 10位、3d → 3で に
+# なっていた。EVAL.md「本人の文体の合成セット」）。数字と 1 区間の英字にする。
+# 1 字の子音の単位（v、k、g、w、d）は、次の字が母音・y なら作らない（10ko の k は「個」の頭、3de の d は「で」の頭）。
+# 2 字以上の子音の単位（mm、cm …）は、次が母音でも高めのコストで作る（0.2mmookiku）。
+# 母音で終わる単位（ma、pa …）は かな としても読める（20made は「20まで」）ので、コストを高めにして採点に任せる
+_UNITS = sorted("""mm cm km nm um kg mg ml kv mv kw mw kwh wh mah hz khz mhz ghz kb mb gb tb ms fps dpi px pt rpm
+                   mpa kpa ma v k g w d""".split(), key=len, reverse=True)
+_EXTENSIONS = sorted("""md py txt json csv js ts tsx jsx html css pdf png jpg jpeg gif svg env yml yaml toml ini sh ps1
+                        bat cmd exe zip log cs cpp rs go sql stl obj gcode""".split(), key=len, reverse=True)
+
+
+def _ext_ok(s: str, k: int, ext: str) -> bool:
+    """拡張子の後ろが、かなとして読み続けられる形でないか（kamo.gomen の .go は「ご」、.tsugi の .ts は「つ」の頭）。
+    後ろが英字でなければ拡張子とみなす。"""
+    nxt = s[k] if k < len(s) else ""
+    if not nxt.isalpha():
+        return True
+    if _parses_as_romaji(ext):
+        return False
+    return not (ext[-1] not in VOWELS and (nxt in VOWELS or nxt == "y"))
+
+
+def _unit_follows(s: str, i: int) -> bool:
+    """位置 i から始まる数字の連続の直後に単位があるか。"""
+    j = i
+    while j < len(s) and (s[j].isdigit() or (s[j] == "." and j + 1 < len(s) and s[j + 1].isdigit())):
+        j += 1
+    return any(s.startswith(u, j) for u in _UNITS if len(u) >= 2)
+
+
+def _unit_arcs(s: str, i: int, j: int, parts: tuple) -> list[Arc]:
+    L = len(s)
+    out = []
+    for u in _UNITS:
+        if not s.startswith(u, j):
+            continue
+        k = j + len(u)
+        nxt = s[k] if k < L else ""
+        if u[-1] in VOWELS:
+            cost = COST["num_unit_vowel"]
+        elif nxt in VOWELS or nxt == "y":
+            if len(u) == 1:
+                continue
+            cost = COST["num_unit_long"]   # 0.2mmo の mm（「っも」とも読める）
+        else:
+            cost = COST["num_unit"]
+        out.append(Arc(i, k, "en", s[i:k], (s[i:k],), parts + (("unit", cost),)))
+    return out
 
 
 _PARTICLES = frozenset({"to", "no", "ni", "wo", "de", "ga", "ha", "mo", "ya", "ka", "he"})
@@ -665,7 +733,9 @@ def build_arcs(keys: str) -> list[list[Arc]]:
     brk = [s[i].isalpha() and not kana[i] for i in range(L)]
     pre_digit = [False] * (L + 1)  # すぐ後ろに数字が続く英字の連続
     for i in range(L - 2, -1, -1):
-        pre_digit[i] = s[i].isalpha() and (s[i + 1].isdigit() or pre_digit[i + 1])
+        # 数字の後ろに単位が続くなら、前の英字は型番の一部ではない（tate10cm の tate は「縦」）
+        digit_next = s[i + 1].isdigit() and not _unit_follows(s, i + 1)
+        pre_digit[i] = s[i].isalpha() and (digit_next or pre_digit[i + 1])
     cheap = [b or d for b, d in zip(brk, pre_digit)]
     zone = _dict_zone(s, kana)
     arcs = []

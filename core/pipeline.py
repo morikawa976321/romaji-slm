@@ -8,6 +8,7 @@
 """
 
 import time
+from dataclasses import replace
 
 from eval.converters import Result
 
@@ -15,6 +16,9 @@ from .constrained import ConstrainedZenz
 from .kanakanji import Dictionary
 from .reading import readings
 from .select import ZenzScorer, fluency
+from .types import Edit
+
+FIX_COST = 0.5  # ユーザー辞書の打ち間違いの癖で直した読みに足すコスト（1 編集ぶんより安い。直すかは採点が決める）
 
 
 _TYPED_PUNCT = frozenset(",.?!")  # 打鍵列に句読点として打たれうる記号
@@ -91,7 +95,7 @@ class CorePipeline:
                  n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None,
                  batched: bool = True, punct: str = "insert", en_case: str = "typed",
                  tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None,
-                 preselect: bool = True, n_pre: int = 30, punct_end: bool = False):
+                 preselect: bool = True, n_pre: int = 30, punct_end: bool = False, user_dict=None):
         """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
         punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
         既定の punct="insert"・en_case="typed" は本人の選択（docs/decisions.md「本人の回答」2026-10-15）。
@@ -102,6 +106,14 @@ class CorePipeline:
         None なら model を transformers で読む。
         """
         self.dic = Dictionary.load()
+        # user_dict: 本人のユーザー辞書（core.userdict）。None なら読まない（評価の再現性のため。常駐入力は既定の置き場所を渡す）
+        from .userdict import UserDict, load as load_user
+        ud = user_dict if isinstance(user_dict, UserDict) else (load_user(user_dict) if user_dict else UserDict())
+        from .english import set_user_words
+        set_user_words(ud.en)
+        self.dic.add_user_words(ud.words)
+        self.fixes = ud.fixes
+        self.user_dict = ud
         self.backend = backend
         if backend is None:
             self.scorer = ZenzScorer(model, device)
@@ -121,6 +133,14 @@ class CorePipeline:
         else:
             self.n_params = sum(p.numel() for p in self.scorer.model.parameters())
 
+    def set_user_dict(self, ud) -> None:
+        """本人のユーザー辞書を入れ替える（常駐の変換サーバは、ファイルが更新されたら読み直して呼ぶ）。"""
+        from .english import set_user_words
+        set_user_words(ud.en)
+        self.dic.add_user_words(ud.words)
+        self.fixes = ud.fixes
+        self.user_dict = ud
+
     def candidates(self, romaji: str, left_context: str = "") -> list[dict]:
         """読みの上位 k 件の変換と点数（点数の高い順）。"""
         out = []
@@ -139,6 +159,15 @@ class CorePipeline:
             if r.segs not in seen:
                 rs.append(r)
                 seen.add(r.segs)
+        # 本人の打ち間違いの癖（ユーザー辞書の fix）: 打鍵列に含まれていれば、直した打鍵列の読みも比べる
+        for typed, intended in self.fixes:
+            if typed in romaji.lower():
+                fixed = romaji.lower().replace(typed, intended)
+                for r in readings(fixed, n=2):
+                    if r.segs not in seen:
+                        rs.append(replace(r, edits=r.edits + (Edit("fix", romaji.lower().find(typed), f"{typed}>{intended}"),),
+                                          cost=r.cost + FIX_COST))
+                        seen.add(r.segs)
         if rs and all(r.edits for r in rs):
             # 打鍵を直さない読みも必ず比べる。辞書に無い略語・型番（cdma, jr, scc-0210）は、読みの段では
             # 直す経路のほうが安くなりやすい。直すかどうかは zenz の尤度との比較に任せる

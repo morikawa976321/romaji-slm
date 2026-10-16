@@ -99,6 +99,21 @@ def _wordfreq_top(n: int) -> list[tuple[str, float]]:
     return out
 
 
+# 本人のユーザー辞書の英単語（core.userdict の en）。綴り → (表記, 加点)。set_user_words で入れ替える
+_USER_EN: dict[str, tuple[str, float]] = {}
+
+
+def set_user_words(words: dict[str, tuple[str, float]]) -> None:
+    _USER_EN.clear()
+    _USER_EN.update(words)
+    lexicon.cache_clear()
+
+
+def user_bonus(spelling: str) -> float:
+    v = _USER_EN.get(spelling)
+    return v[1] if v else 0.0
+
+
 @lru_cache(maxsize=1)
 def lexicon() -> Lexicon:
     words: dict[str, EnWord] = {}
@@ -111,7 +126,9 @@ def lexicon() -> Lexicon:
         from wordfreq import zipf_frequency
     except ImportError:
         zipf_frequency = None
-    for spelling, surface in load_tech().items():
+    tech = load_tech()
+    tech.update({s: surface for s, (surface, _) in _USER_EN.items()})
+    for spelling, surface in tech.items():
         z = words[spelling].zipf if spelling in words else (zipf_frequency(spelling, "en") if zipf_frequency else 0.0)
         surfaces = (surface,) if surface == spelling else (surface, spelling)
         words[spelling] = EnWord(spelling, z, True, surfaces)
