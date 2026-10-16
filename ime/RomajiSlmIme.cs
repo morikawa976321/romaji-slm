@@ -501,7 +501,8 @@ namespace RomajiSlm
         long lastHookAt, lastRawAt, lastReinstallAt = -100000, lastStateAt;
         int hookEvents, reinstalls, physicalDowns, injectedDowns, hookErrors;
         string lastInjected = "";
-        int keyLogLeft = 30;
+        int keyLogLeft = 30, traceLeft;
+        long batchAt = -100000;
         readonly DebugLog dbg;
         readonly string statePath;
         const int FieldCheckMs = 300;   // UI Automation が応答しないアプリでは、この時間でパスワード欄ではないとみなす
@@ -669,7 +670,18 @@ namespace RomajiSlm
                 // この機械では、本人の打鍵がすべて送り込まれたキー（LLKHF_INJECTED、extra=0）として届く（2026-10-16 の実測で
                 // 実際のキー 0・送り込み 239。常駐の Handy などが全打鍵を横取りして送り直しているとみられる）。
                 // そのため、自分が送ったもの（Magic）以外の送り込みも本人の打鍵として扱う。ime.ini の accept_injected=0 で元に戻す
-                if (!injected || (cfg.AcceptInjected && k.dwExtraInfo != Native.Magic))
+                // VK_PACKET（0xE7）は文字そのものの送り込みで、本人の打鍵ではない（自分が送った確定文が他の常駐アプリを
+                // 通って印なしで戻ってくることもある）。解釈も送り直しもせずに通す
+                bool packet = k.vkCode == 0xE7;
+                if (traceLeft > 0 && Now - batchAt < 1000)
+                {
+                    traceLeft--;
+                    string tl = "trace +" + (Now - batchAt) + "ms vk=0x" + k.vkCode.ToString("X2") + (down ? " down" : " up") +
+                                " flags=0x" + k.flags.ToString("X") + " extra=0x" + k.dwExtraInfo.ToInt64().ToString("X") +
+                                " dt=" + unchecked((int)(k.time - batchTick));
+                    popup.BeginInvoke((Action)(() => dbg.Write(tl)));
+                }
+                if (!packet && (!injected || (cfg.AcceptInjected && k.dwExtraInfo != Native.Magic)))
                 {
                     if (down && k.vkCode == Composer.VK_CAPITAL) caps = !caps;
                     var m = new Mods(keyDown[0xA0] || keyDown[0xA1], keyDown[0xA2] || keyDown[0xA3],
@@ -767,6 +779,10 @@ namespace RomajiSlm
             else if (!Native.SendBatch(ds))
                 why = "この窓には入力できませんでした（管理者権限の窓など）。Esc で捨てます";
             batchTick = unchecked((uint)Environment.TickCount);
+            batchAt = Now;
+            traceLeft = 80;   // 送った直後 1 秒のフックの様子を診断の記録に残す（文字の中身は残さない）
+            dbg.Write("deliver items=" + ds.Count + " chars=" + ds.Where(x => !x.IsKey).Sum(x => x.Text.Length) +
+                      " keys=" + ds.Count(x => x.IsKey) + (why != null ? " FAILED " + why : ""));
             if (why != null) { comp.DeliveryFailed(why, Now); return; }
             if (ds.Any(d => !d.IsKey)) usage.App(Native.ForegroundExe());
             comp.Delivered(Now);
