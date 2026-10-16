@@ -626,8 +626,11 @@ namespace RomajiSlm
                 keyDown[vk] = Native.Down(vk);
         }
 
+        string modeSource = "hotkey";   // 次の SetEnabled の出どころ（記録用）
+
         void Toggle()
         {
+            modeSource = "tray";
             comp.SetEnabled(comp.Mode == Mode.Disabled, Now);
             Run();
         }
@@ -690,7 +693,7 @@ namespace RomajiSlm
                         bool open = ime.Open;
                         if (imeWnd != IntPtr.Zero) ThreadPool.QueueUserWorkItem(_ => Native.SetImeOpen(imeWnd, open));
                     }
-                    else if (mode != null) OnMode(mode.Mode);
+                    else if (mode != null) OnMode(mode.Mode, mode.Source);
                     else if (stat != null) usage.Add(stat.Name, stat.Value);
                     else if (e is QueryImeEffect)
                     {
@@ -797,9 +800,10 @@ namespace RomajiSlm
             });
         }
 
-        void OnMode(Mode m)
+        void OnMode(Mode m, string source)
         {
-            dbg.Write("mode=" + m + " fg=" + Native.ForegroundExe());
+            dbg.Write("mode=" + m + " by=" + (source.Length > 0 ? source : modeSource) + " fg=" + Native.ForegroundExe());
+            modeSource = "hotkey";
             cfg.Enabled = m != Mode.Disabled;
             try { cfg.Save(); } catch { }
             UpdateTray();

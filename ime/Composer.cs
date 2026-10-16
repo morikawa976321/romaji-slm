@@ -57,7 +57,7 @@ namespace RomajiSlm
     public sealed class SetImeEffect : Effect { public bool Open; public IntPtr Window; public SetImeEffect(bool o, IntPtr w) { Open = o; Window = w; } }
     /// 前面の窓の MS-IME が開いているかを調べる（結果は OnImeState）
     public sealed class QueryImeEffect : Effect { public IntPtr Window; public QueryImeEffect(IntPtr w) { Window = w; } }
-    public sealed class ModeEffect : Effect { public Mode Mode; public ModeEffect(Mode m) { Mode = m; } }
+    public sealed class ModeEffect : Effect { public Mode Mode; public string Source; public ModeEffect(Mode m, string src = "") { Mode = m; Source = src; } }
     public sealed class AltMaskEffect : Effect { }   // Alt を押したまま握りつぶしたキーのあと、Alt の単押し（メニュー起動）を防ぐ
     public sealed class RedrawEffect : Effect { }
     /// 欄の確認。DelayMs だけ待ってから確かめる（欄を移すキーを送った直後は、アプリが移し終えるのを待つ）
@@ -316,7 +316,7 @@ namespace RomajiSlm
                 passthrough = false;
                 verified = false;   // 英字の間に欄を移っても分かるとは限らないので、日本語に戻ったら確かめ直す
                 effects.Add(new SetImeEffect(false, foreground));
-                effects.Add(new ModeEffect(Mode));
+                effects.Add(new ModeEffect(Mode, "shift+space"));
                 effects.Add(new RedrawEffect());
                 return true;
             }
@@ -767,11 +767,9 @@ namespace RomajiSlm
             }
             else
             {
-                // 「日本語か英字か」は、前面の窓の MS-IME の開閉を引き継ぐ（QueryImeEffect → OnImeState）。
-                // 決まるまでは英字。日本語で始めると、本人が習慣で Shift+Space（日本語へ）を押したとき英字に替わってしまう
-                // （2026-10-16 の本人の報告「アルファベットがそのまま入力されてしまう」）
-                Mode = Mode.English;
-                effects.Add(new QueryImeEffect(foreground));
+                // 使い始めたら日本語（D26。トレイのクリックで始めた本人は、そのまま日本語で打てることを期待した）
+                Mode = Mode.Japanese;
+                effects.Add(new SetImeEffect(false, foreground));
             }
             passthrough = false;
             verified = false;
