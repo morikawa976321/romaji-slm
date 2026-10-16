@@ -65,7 +65,7 @@ pwsh -NoProfile -File ime/uninstall.ps1
 ```
 
 - 設定は `%LOCALAPPDATA%\romaji-slm\ime.ini` にある（`device=auto|cuda|cpu`、`port`、前回の on/off）。変えたらトレイの「終了」から起動し直す。
-- **実利用の記録**（本人の依頼）: `%LOCALAPPDATA%\romaji-slm\history.jsonl` に 1 行 1 件の JSON で残す。残すのは、確定（`commit`）・Esc で捨てた文（`cancel`）・変換や送信に失敗して浮き窓に戻した文（`restore`）。項目は `time` `event` `romaji`（打った打鍵列） `context`（左文脈） `candidates`（出ていた候補） `chosen`（選んだ番号。1 位なら 0、打鍵列のままなら -1） `text`（入れた文） `raw` `app`（入力先の exe 名） `note`、確定の直後に Backspace で消して打ち直したときは `retype`（`backspaces` 消した字数、`prev_text` `prev_romaji` 直前の確定）。パスワード欄の打鍵は変換せずにそのまま送るので残らない。確定した後にアプリの中で直した結果は見えない。止めるには `ime.ini` を `history=0` にする。
+- **実利用の記録**（本人の依頼）: `%LOCALAPPDATA%\romaji-slm\history.jsonl` に 1 行 1 件の JSON で残す。残すのは、確定（`commit`）・Esc で捨てた文（`cancel`）・変換や送信に失敗して浮き窓に戻した文（`restore`）。項目は `time` `event` `romaji`（打った打鍵列） `context`（左文脈） `candidates`（出ていた候補） `chosen`（選んだ番号。1 位なら 0、打鍵列のままなら -1） `text`（入れた文） `raw` `app`（入力先の exe 名） `note`、確定の直後に Backspace で消して打ち直したときは `retype`（`backspaces` 消した字数、`prev_text` `prev_romaji` 直前の確定）。パスワード欄の打鍵は変換せずにそのまま送るので残らない。確定した後にアプリの中で直した結果は見えない。止めるには `ime.ini` を `history=0` にする。30 日を過ぎた行は常駐アプリが消し（起動時と 1 時間ごと）、振り返り済みの行は振り返りの道具が消す（REVIEW.md「消すこと」）。`no_history_apps` に並べたアプリ（既定はパスワード管理のアプリ）は記録しない。
 - サーバのログは `server.log`（打った文字列は残さない）。
 - 診断: `ime-state.txt`（5 秒ごとの状態。モード・確認待ち・フックの呼ばれた回数と最後に呼ばれてからの時間など）と `ime-debug.log`（モードの変化・欄の確認の結果・フックの付け直し・浮き窓の知らせ）。どちらも打った文字は書かない。
 - フックの見張り: キーボードの Raw Input（`RIDEV_INPUTSINK`）にはキーが届いているのに、フックが 1.5 秒呼ばれていなければ、Windows がフックを外したとみなして付け直す（10 秒に 1 回まで）。管理者権限の窓が前面の間も付け直しが起きうるが、害はない。トレイの「使用状況をコピー」で、確定の回数・別候補を選んだ回数・待ち時間の中央値・アプリ別の回数を、貼れる文にして出す。数だけで、文字列は持たない。

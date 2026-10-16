@@ -75,6 +75,8 @@ namespace RomajiSlm
         public int Port = 8767;
         public bool History = true;
         public bool AcceptInjected = true;
+        // 記録しないアプリの既定: パスワード管理（打った文字は変換に回らないはずだが、念のため記録からも外す）
+        public string NoHistoryApps = "1password,keepass,keepassxc,bitwarden,dashlane,lastpass,enpass,roboform";
 
         public Config(string path)
         {
@@ -90,6 +92,7 @@ namespace RomajiSlm
                 else if (k == "port") int.TryParse(v, out Port);
                 else if (k == "history") History = v != "0";
                 else if (k == "accept_injected") AcceptInjected = v != "0";
+                else if (k == "no_history_apps") NoHistoryApps = v;
             }
         }
 
@@ -104,7 +107,9 @@ namespace RomajiSlm
                 "# history: 1 なら確定・取り消しのたびに打鍵列・候補・確定文を history.jsonl に残す（次の改良の材料）。0 で止める\r\n" +
                 "history=" + (History ? "1" : "0") + "\r\n" +
                 "# accept_injected: 1 なら他のアプリが送り込んだキーも本人の打鍵として扱う（打鍵を送り直す常駐アプリがあるとき要る）\r\n" +
-                "accept_injected=" + (AcceptInjected ? "1" : "0") + "\r\n", new UTF8Encoding(false));
+                "accept_injected=" + (AcceptInjected ? "1" : "0") + "\r\n" +
+                "# no_history_apps: 記録（history.jsonl）に残さないアプリの exe 名（拡張子なし、カンマ区切り）。例: slack,line\r\n" +
+                "no_history_apps=" + NoHistoryApps + "\r\n", new UTF8Encoding(false));
         }
     }
 
@@ -308,7 +313,35 @@ namespace RomajiSlm
     {
         readonly string path;
         public bool Enabled = true;
+        // 記録しないアプリ（exe 名、小文字）。ime.ini の no_history_apps（本人の決定 2026-10-17「1-4をいれて」）
+        public HashSet<string> ExcludedApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public const int KeepDays = 30;   // これより古い行は、振り返られなくても消す（同上）
         public History(string path) { this.path = path; }
+
+        /// KeepDays より古い行を消す。振り返りの道具（tools/review_history.py）が同時に名前を替えていたら何もしない
+        public int Prune()
+        {
+            try
+            {
+                if (!File.Exists(path)) return 0;
+                string limit = DateTime.Now.AddDays(-KeepDays).ToString("yyyy-MM-ddTHH:mm:ss");
+                var lines = File.ReadAllLines(path, Encoding.UTF8);
+                var keep = lines.Where(l => l.Length > 0 && TimeOf(l).CompareTo(limit) > 0).ToArray();
+                if (keep.Length == lines.Length) return 0;
+                string tmp = path + ".tmp";
+                File.WriteAllLines(tmp, keep, new UTF8Encoding(false));
+                File.Copy(tmp, path, true);
+                File.Delete(tmp);
+                return lines.Length - keep.Length;
+            }
+            catch { return 0; }
+        }
+
+        static string TimeOf(string line)
+        {
+            int i = line.IndexOf("\"time\":\"", StringComparison.Ordinal);
+            return i < 0 ? "" : line.Substring(i + 8, Math.Min(19, Math.Max(0, line.Length - i - 8)));
+        }
 
         static string J(string s)
         {
@@ -325,7 +358,7 @@ namespace RomajiSlm
 
         public void Write(LogEffect e, string app)
         {
-            if (!Enabled) return;
+            if (!Enabled || ExcludedApps.Contains(app ?? "")) return;
             var c = e.Candidates == null ? "null" : "[" + string.Join(",", e.Candidates.Select(J)) + "]";
             string line = "{\"time\":" + J(DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff")) + ",\"event\":" + J(e.Event) +
                           ",\"romaji\":" + J(e.Romaji) + ",\"context\":" + J(e.Context) + ",\"text\":" + J(e.Text) +
@@ -500,7 +533,7 @@ namespace RomajiSlm
         string lastStatus = "";
         // フックの見張り: Raw Input にはキーが届いているのにフックが呼ばれていなければ、Windows がフックを外した
         // （LowLevelHooksTimeout を超えたとき黙って外す）とみなして付け直す
-        long lastHookAt, lastRawAt, lastReinstallAt = -100000, lastStateAt;
+        long lastHookAt, lastRawAt, lastReinstallAt = -100000, lastStateAt, lastPruneAt;
         int hookEvents, reinstalls, physicalDowns, injectedDowns, hookErrors;
         string lastInjected = "";
         int keyLogLeft = 30, traceLeft, modTraceLeft = 300;
@@ -520,6 +553,9 @@ namespace RomajiSlm
             dbg.Write("start root=" + root + " enabled=" + cfg.Enabled);
             usage = new Usage(Path.Combine(data, "usage.txt"));
             history = new History(Path.Combine(data, "history.jsonl")) { Enabled = cfg.History };
+            foreach (var a in cfg.NoHistoryApps.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)) history.ExcludedApps.Add(a.Trim());
+            int pruned = history.Prune();
+            if (pruned > 0) dbg.Write("history: removed " + pruned + " rows older than " + History.KeepDays + " days");
             popup = new Popup(comp);
             var unused = popup.Handle;   // BeginInvoke の宛先にするため、表示せずにハンドルを作る
 
@@ -585,6 +621,12 @@ namespace RomajiSlm
                 if (!comp.Holding) ResyncModifiers();   // 離鍵を取りこぼしても（管理者権限の窓の上で離した等）修飾キーが押されたままにならない
                 WatchHook();
                 if (Now - lastStateAt > 5000) { lastStateAt = Now; WriteState(); }
+                if (Now - lastPruneAt > 3600000)
+                {
+                    lastPruneAt = Now;   // 1 時間ごとに、30 日より古い記録を消す（常駐し続けても溜まらないように）
+                    int n = history.Prune();
+                    if (n > 0) dbg.Write("history: removed " + n + " rows older than " + History.KeepDays + " days");
+                }
                 if (fieldDeadline != 0 && Now > fieldDeadline)
                 {
                     fieldDeadline = 0;
