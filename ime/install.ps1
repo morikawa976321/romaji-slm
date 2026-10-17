@@ -125,7 +125,11 @@ function Swap-In {
         $deadline = (Get-Date).AddSeconds(60)
         $d = ''
         while (-not $d) {
-            if (Test-Path $decision) { $d = (Get-Content -Raw $decision).Trim() }
+            if (Test-Path $decision) {
+                # 作った側が書き終える前は、空か開けない。読めるまで待つ
+                try { $c = [IO.File]::ReadAllText($decision).Trim() } catch { $c = '' }
+                if ($c -in 'go', 'cancel', 'timeout') { $d = $c } else { Start-Sleep -Milliseconds 50 }
+            }
             elseif (-not (Get-Tray)) { $d = 'go' }   # 決定を書かずに終わった（落ちたときも、起こし直すほうがよい）
             elseif ((Get-Date) -gt $deadline) {
                 try { $f = [IO.File]::Open($decision, 'CreateNew', 'Write'); $f.Write([byte[]][char[]]'timeout', 0, 7); $f.Dispose(); $d = 'timeout' }
@@ -134,7 +138,8 @@ function Swap-In {
             else { Start-Sleep -Milliseconds 200 }
         }
         Remove-Item $ready -ErrorAction SilentlyContinue
-        if ($d -ne 'go') { Remove-Item $decision -ErrorAction SilentlyContinue; Write-Host "差し替えを見送った（$d）"; exit 5 }
+        # 見送るときは決定を消さない（消すと、遅れて来たトレイアプリの go が勝ち、誰も起こし直さない）。次の -Swap の前にトレイアプリが消す
+        if ($d -ne 'go') { Write-Host "差し替えを見送った（$d）"; exit 5 }
         # go のあとはトレイアプリが自分で終わる。終わりきらなければ止める（もう打鍵は受けていない）
         foreach ($t in @(Get-Tray)) { if (-not $t.WaitForExit(30000)) { $t | Stop-Process -Force; $t.WaitForExit(5000) | Out-Null } }
         Remove-Item $decision -ErrorAction SilentlyContinue
