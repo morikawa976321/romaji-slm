@@ -17,8 +17,7 @@
 # トレイアプリの自動更新は -Stage を裏で動かし、打っていない間にトレイ自身が -Swap を起動して自分から終わる
 # （外から止めると、打ちかけの文が消える）。
 
-# -Update は 2026-10-18 の 1 日だけ入っていたトレイアプリが呼ぶ（手で入れるときと同じに扱う）
-param([switch]$NoStartup, [switch]$NoLaunch, [switch]$Stage, [switch]$Swap, [switch]$Update)
+param([switch]$NoStartup, [switch]$NoLaunch, [switch]$Stage, [switch]$Swap)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -29,7 +28,7 @@ $prev = Join-Path $dst 'app.prev'
 $exe = Join-Path $dst 'RomajiSlmIme.exe'
 $exePrev = "$exe.prev"
 $resultPath = Join-Path $dst 'update-result.txt'
-$fromTray = $Stage -or $Swap -or $Update
+$fromTray = $Stage -or $Swap
 New-Item -ItemType Directory -Force $dst | Out-Null
 Set-Location $repo
 
@@ -44,7 +43,7 @@ $swapped = $false
 $exeSaved = $false
 function Write-Result([string]$status, [string]$detail) {
     # 書けなくても、このあとの起こし直しは続ける
-    try { Set-Content -NoNewline -Encoding utf8NoBOM $resultPath "$status $hash $((Get-Date).ToString('s')) $detail" } catch { }
+    try { Set-Content -NoNewline -Encoding utf8NoBOM -LiteralPath $resultPath -Value "$status $hash $((Get-Date).ToString('s')) $detail" } catch { }
 }
 function Get-Tray { Get-Process RomajiSlmIme -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dst*" } }
 
@@ -109,7 +108,7 @@ function Build-Next {
     if ($p.ExitCode -ne 0 -or -not $got) { throw "自己試験に失敗した（終了コード $($p.ExitCode)）: $got" }
     Write-Host "  kyouhaiitenki → $got"
     # VERSION は試験を通してから書く（-Swap は VERSION のある app.next だけを差し替える）
-    Set-Content -NoNewline -Encoding utf8NoBOM (Join-Path $next 'VERSION') "$hash $((Get-Date).ToString('yyyy-MM-dd'))"
+    Set-Content -NoNewline -Encoding utf8NoBOM -LiteralPath (Join-Path $next 'VERSION') -Value "$hash $((Get-Date).ToString('yyyy-MM-dd'))"
 }
 
 function Swap-In {
@@ -117,21 +116,28 @@ function Swap-In {
     $script:hash = (Get-Content -Raw (Join-Path $next 'VERSION')).Split(' ')[0].Trim()
     Write-Host "差し替え: $hash"
     if ($Swap) {
-        # トレイアプリとの受け渡し: 準備ができたら swap.ready に PID を書き、トレイアプリが自分から終わるのを待つ。
-        # トレイアプリは、そのとき打ちかけていれば swap.cancel を書いて終わらない。こちらからは止めない（打ちかけの文が消える）
+        # トレイアプリとの受け渡し: 準備ができたら swap.ready に PID を書く。トレイアプリは swap.decision に go（自分から
+        # 終わる）か cancel（打ちかけている）を書く。こちらは 60 秒で timeout を書く。swap.decision は先に作った側の
+        # 決定だけが残る（CreateNew）ので、期限ちょうどに go と timeout がすれ違わない。こちらからは止めない（打ちかけの文が消える）
         $ready = Join-Path $dst 'swap.ready'
-        $cancel = Join-Path $dst 'swap.cancel'
-        Set-Content -NoNewline (Join-Path $dst 'swap.ready') "$PID"
+        $decision = Join-Path $dst 'swap.decision'
+        Set-Content -NoNewline -LiteralPath $ready -Value "$PID"   # 名前付きで渡す（位置で渡すと値のほうがファイル名になった）
         $deadline = (Get-Date).AddSeconds(60)
-        while (Get-Tray) {
-            if ((Test-Path $cancel) -or (Get-Date) -gt $deadline) {
-                Remove-Item $ready, $cancel -ErrorAction SilentlyContinue
-                Write-Host '差し替えを見送った（トレイアプリが終わらなかった）'
-                exit 5
+        $d = ''
+        while (-not $d) {
+            if (Test-Path $decision) { $d = (Get-Content -Raw $decision).Trim() }
+            elseif (-not (Get-Tray)) { $d = 'go' }   # 決定を書かずに終わった（落ちたときも、起こし直すほうがよい）
+            elseif ((Get-Date) -gt $deadline) {
+                try { $f = [IO.File]::Open($decision, 'CreateNew', 'Write'); $f.Write([byte[]][char[]]'timeout', 0, 7); $f.Dispose(); $d = 'timeout' }
+                catch { Start-Sleep -Milliseconds 50 }   # トレイアプリが先に決めた。読み直す
             }
-            Start-Sleep -Milliseconds 200
+            else { Start-Sleep -Milliseconds 200 }
         }
-        Remove-Item $ready, $cancel -ErrorAction SilentlyContinue
+        Remove-Item $ready -ErrorAction SilentlyContinue
+        if ($d -ne 'go') { Remove-Item $decision -ErrorAction SilentlyContinue; Write-Host "差し替えを見送った（$d）"; exit 5 }
+        # go のあとはトレイアプリが自分で終わる。終わりきらなければ止める（もう打鍵は受けていない）
+        foreach ($t in @(Get-Tray)) { if (-not $t.WaitForExit(30000)) { $t | Stop-Process -Force; $t.WaitForExit(5000) | Out-Null } }
+        Remove-Item $decision -ErrorAction SilentlyContinue
         $script:stopped = $true
     }
     else {
@@ -151,7 +157,7 @@ function Swap-In {
     $script:swapped = $true
     Move-Item $next $app
     Copy-Item (Join-Path $app 'ime\bin\RomajiSlmIme.exe') $exe -Force
-    Set-Content -NoNewline -Encoding utf8NoBOM (Join-Path $dst 'source.txt') $repo
+    Set-Content -NoNewline -Encoding utf8NoBOM -LiteralPath (Join-Path $dst 'source.txt') -Value $repo
 }
 
 try {

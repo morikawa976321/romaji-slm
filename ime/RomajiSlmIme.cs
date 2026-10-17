@@ -586,7 +586,13 @@ namespace RomajiSlm
                     bool fresh = r != null && r.Length > 2 && DateTime.TryParse(r[2], out at) && at >= started;
                     var h = StageFinished;
                     if (p.ExitCode == 3) { if (h != null) h(false, null); return; }   // 別の更新が動いていた
-                    if (p.ExitCode == 0 && fresh && r[0] == "staged") { Staged = r[1]; if (h != null) h(true, ""); return; }
+                    if (p.ExitCode == 0 && fresh && r[0] == "staged")
+                    {
+                        Staged = r[1];
+                        if (FailedHead == r[1]) FailedHead = null;   // 前に失敗した版を試し直して通った
+                        if (h != null) h(true, "");
+                        return;
+                    }
                     // 結果を書く前に落ちたときも、試した版を失敗として覚える（同じ版を繰り返し試さない）
                     FailedHead = fresh && r[0] == "fail" ? r[1] : target;
                     if (h != null) h(false, fresh && r[0] == "fail" && r.Length > 3 ? r[3] : "終了コード " + p.ExitCode);
@@ -603,7 +609,26 @@ namespace RomajiSlm
         }
 
         public string ReadyPath { get { return Path.Combine(data, "swap.ready"); } }
-        public string CancelPath { get { return Path.Combine(data, "swap.cancel"); } }
+        public string DecisionPath { get { return Path.Combine(data, "swap.decision"); } }
+
+        /// swap.decision に決定を書く。-Swap（期限の timeout）と先を争い、先に作った側の決定だけが残る。残った決定を返す
+        public string Decide(string d)
+        {
+            try
+            {
+                using (var f = new FileStream(DecisionPath, FileMode.CreateNew, FileAccess.Write))
+                {
+                    var b = Encoding.ASCII.GetBytes(d);
+                    f.Write(b, 0, b.Length);
+                }
+                return d;
+            }
+            catch (IOException)
+            {
+                try { return File.ReadAllText(DecisionPath).Trim(); } catch { return "error"; }
+            }
+            catch { return "error"; }   // 書けなければ終わらない側に倒す
+        }
 
         /// 組み立てた版への差し替え（install.ps1 -Swap）を起動する。-Swap は準備ができたら swap.ready に PID を書き、
         /// このプロセスが終わるのを待つ。起動できなければ null
@@ -612,7 +637,7 @@ namespace RomajiSlm
             try
             {
                 File.Delete(ReadyPath);
-                File.Delete(CancelPath);
+                File.Delete(DecisionPath);
                 return Process.Start(Pwsh("-Swap"));
             }
             catch { return null; }
@@ -713,6 +738,7 @@ namespace RomajiSlm
             updateItem = new ToolStripMenuItem("", null, (s, e) =>
             {
                 manualUpdate = true;
+                updater.FailedHead = null;   // 手で頼まれたら、前に失敗した版も試し直す
                 // 押したときの HEAD を組み立てたものが無ければ組み立てる（最新でも入れ直す）。組み立てたら WatchUpdate が差し替える
                 if (updater.Staged == null || updater.Staged != (updater.Latest ?? updater.Staged)) StartStage("menu");
             });
@@ -1133,31 +1159,32 @@ namespace RomajiSlm
         bool swapCancelled;
         long lastSwapAt = -60000;
 
-        /// -Swap の準備ができたら（swap.ready にその PID）、まだ止めてよければ自分から終わる。打ち始めていたら見送らせる
+        /// -Swap の準備ができたら（swap.ready にその PID）、まだ止めてよければ go を決めて自分から終わる。
+        /// 打ち始めていれば cancel を決めて見送らせる。決定は -Swap の timeout と先を争う（Updater.Decide）
         void WatchSwap()
         {
-            string ready = null;
-            try { ready = File.ReadAllText(updater.ReadyPath).Trim(); } catch { }
-            if (ready == swapProc.Id.ToString() && !swapCancelled)
-            {
-                if (SafeToStop())
-                {
-                    dbg.Write("update swap: exiting for " + swapTarget);
-                    swapProc = null;
-                    ExitThread();   // -Swap はこのプロセスが終わったのを見て差し替え、起動し直す
-                    return;
-                }
-                // 一度見送らせたら、この回では終わらない（-Swap は見送りを見て終わるので、終わると常駐が止まったままになる）
-                swapCancelled = true;
-                try { File.WriteAllText(updater.CancelPath, "busy"); } catch { }
-                dbg.Write("update swap: postponed (typing)");
-            }
             if (!swapProc.HasExited)
             {
-                if (Now - lastSwapAt > 90000)   // -Swap は 60 秒で見切るはず。応答しなければ止めて、次の機会にする
+                string ready = null;
+                try { ready = File.ReadAllText(updater.ReadyPath).Trim(); } catch { }
+                if (ready == swapProc.Id.ToString() && !swapCancelled)
                 {
-                    try { File.WriteAllText(updater.CancelPath, "timeout"); swapProc.Kill(); } catch { }
+                    string won = updater.Decide(SafeToStop() ? "go" : "cancel");
+                    if (won == "go")
+                    {
+                        dbg.Write("update swap: exiting for " + swapTarget);
+                        swapProc = null;
+                        ExitThread();   // -Swap はこのプロセスが終わるのを待って差し替え、起動し直す
+                        return;
+                    }
+                    swapCancelled = true;   // この回ではもう終わらない
+                    dbg.Write("update swap: postponed (" + won + ")");
+                }
+                else if (Now - lastSwapAt > 90000 && !swapCancelled)   // -Swap は 60 秒で見切るはず。応答しなければ止めて次の機会にする
+                {
                     swapCancelled = true;
+                    updater.Decide("cancel");
+                    try { swapProc.Kill(); } catch { }
                 }
                 return;
             }
