@@ -571,7 +571,9 @@ namespace RomajiSlm
         {
             if (!Enabled || Running) return;
             Running = true;
+            Staged = null;   // -Stage は始めにすぐ app.next の VERSION を消す（組み立て済みでなくなる）
             string target = Latest;
+            DateTime started = DateTime.Now.AddSeconds(-2);
             try
             {
                 var p = new Process { StartInfo = Pwsh("-Stage"), EnableRaisingEvents = true };
@@ -579,12 +581,15 @@ namespace RomajiSlm
                 {
                     Running = false;
                     var r = LastResult();
+                    DateTime at;
+                    // この回の結果か（前の回の結果が残っていることがある）
+                    bool fresh = r != null && r.Length > 2 && DateTime.TryParse(r[2], out at) && at >= started;
                     var h = StageFinished;
                     if (p.ExitCode == 3) { if (h != null) h(false, null); return; }   // 別の更新が動いていた
-                    if (p.ExitCode == 0 && r != null && r.Length > 1 && r[0] == "staged") { Staged = r[1]; if (h != null) h(true, ""); return; }
+                    if (p.ExitCode == 0 && fresh && r[0] == "staged") { Staged = r[1]; if (h != null) h(true, ""); return; }
                     // 結果を書く前に落ちたときも、試した版を失敗として覚える（同じ版を繰り返し試さない）
-                    FailedHead = r != null && r.Length > 1 && r[0] == "fail" ? r[1] : target;
-                    if (h != null) h(false, r != null && r[0] == "fail" && r.Length > 3 ? r[3] : "終了コード " + p.ExitCode);
+                    FailedHead = fresh && r[0] == "fail" ? r[1] : target;
+                    if (h != null) h(false, fresh && r[0] == "fail" && r.Length > 3 ? r[3] : "終了コード " + p.ExitCode);
                 };
                 p.Start();
             }
@@ -597,11 +602,20 @@ namespace RomajiSlm
             }
         }
 
-        /// 組み立てた版への差し替え（install.ps1 -Swap）を起動する。呼んだ側はすぐに終わる（-Swap はその終わりを待つ）
-        public bool Swap()
+        public string ReadyPath { get { return Path.Combine(data, "swap.ready"); } }
+        public string CancelPath { get { return Path.Combine(data, "swap.cancel"); } }
+
+        /// 組み立てた版への差し替え（install.ps1 -Swap）を起動する。-Swap は準備ができたら swap.ready に PID を書き、
+        /// このプロセスが終わるのを待つ。起動できなければ null
+        public Process Swap()
         {
-            try { Process.Start(Pwsh("-Swap")); return true; }
-            catch { return false; }
+            try
+            {
+                File.Delete(ReadyPath);
+                File.Delete(CancelPath);
+                return Process.Start(Pwsh("-Swap"));
+            }
+            catch { return null; }
         }
 
         ProcessStartInfo Pwsh(string mode)
@@ -1085,6 +1099,7 @@ namespace RomajiSlm
                 lastUpdateCheckAt = Now;
                 ThreadPool.QueueUserWorkItem(_ => { updater.Check(); popup.BeginInvoke((Action)RefreshUpdateItem); });
             }
+            if (swapProc != null) { WatchSwap(); return; }
             if (updater.Running) return;
             string want = updater.Latest, staged = updater.Staged;
             // 自動の組み立ては 5 分に 1 回まで（別の更新が動いていて すぐ返ったときに、起動し直し続けない）
@@ -1093,19 +1108,74 @@ namespace RomajiSlm
                 StartStage("auto");
                 return;
             }
-            bool ready = staged != null && (manualUpdate ? staged == (want ?? staged) : staged == want);
-            bool idle = manualUpdate || (cfg.AutoUpdate > 0 && Now - lastKeyAt > cfg.AutoUpdate * 60000L);
-            if (ready && idle && !comp.Composing && !comp.Waiting && !comp.Holding)
+            bool ready = staged != null && staged != updater.FailedHead && (manualUpdate ? staged == (want ?? staged) : staged == want);
+            // 差し替えの試みは 1 分に 1 回まで（見送られたとき・別の更新が動いていたときに、起動し直し続けない）
+            if (ready && SafeToStop() && Now - lastSwapAt > 60000)
             {
-                dbg.Write("update swap " + updater.Installed + " -> " + staged + (manualUpdate ? " (menu)" : " (auto)"));
-                if (updater.Swap()) ExitThread();   // -Swap はこのプロセスが終わるのを待ってから差し替え、起動し直す
-                else
-                {
-                    manualUpdate = false;
-                    updater.FailedHead = staged;
-                    tray.ShowBalloonTip(5000, "romaji-slm", "新しい版に切り替えられませんでした（pwsh を起動できません）", ToolTipIcon.Warning);
-                }
+                lastSwapAt = Now;
+                dbg.Write("update swap start " + updater.Installed + " -> " + staged + (manualUpdate ? " (menu)" : " (auto)"));
+                swapProc = updater.Swap();
+                swapTarget = staged;
+                swapCancelled = false;
+                if (swapProc == null) SwapFailed("pwsh を起動できません");
             }
+        }
+
+        /// 打鍵が途切れていて（メニューから頼まれたときは問わない）、変換中・確定待ち・欄の確認待ちでもない
+        bool SafeToStop()
+        {
+            bool idle = manualUpdate || (cfg.AutoUpdate > 0 && Now - lastKeyAt > cfg.AutoUpdate * 60000L);
+            return idle && !comp.Composing && !comp.Waiting && !comp.Holding;
+        }
+
+        Process swapProc;
+        string swapTarget;
+        bool swapCancelled;
+        long lastSwapAt = -60000;
+
+        /// -Swap の準備ができたら（swap.ready にその PID）、まだ止めてよければ自分から終わる。打ち始めていたら見送らせる
+        void WatchSwap()
+        {
+            string ready = null;
+            try { ready = File.ReadAllText(updater.ReadyPath).Trim(); } catch { }
+            if (ready == swapProc.Id.ToString() && !swapCancelled)
+            {
+                if (SafeToStop())
+                {
+                    dbg.Write("update swap: exiting for " + swapTarget);
+                    swapProc = null;
+                    ExitThread();   // -Swap はこのプロセスが終わったのを見て差し替え、起動し直す
+                    return;
+                }
+                // 一度見送らせたら、この回では終わらない（-Swap は見送りを見て終わるので、終わると常駐が止まったままになる）
+                swapCancelled = true;
+                try { File.WriteAllText(updater.CancelPath, "busy"); } catch { }
+                dbg.Write("update swap: postponed (typing)");
+            }
+            if (!swapProc.HasExited)
+            {
+                if (Now - lastSwapAt > 90000)   // -Swap は 60 秒で見切るはず。応答しなければ止めて、次の機会にする
+                {
+                    try { File.WriteAllText(updater.CancelPath, "timeout"); swapProc.Kill(); } catch { }
+                    swapCancelled = true;
+                }
+                return;
+            }
+            int code = swapProc.ExitCode;
+            swapProc = null;
+            if (code == 3 || code == 5) dbg.Write("update swap: not now (exit " + code + ")");   // 別の更新が動いていた・見送った
+            else SwapFailed("終了コード " + code);
+        }
+
+        void SwapFailed(string msg)
+        {
+            swapProc = null;
+            manualUpdate = false;
+            updater.FailedHead = swapTarget;
+            updater.Staged = null;
+            dbg.Write("update swap failed: " + msg);
+            tray.ShowBalloonTip(5000, "romaji-slm", "新しい版に切り替えられませんでした（今の版のまま使えます）: " + msg, ToolTipIcon.Warning);
+            RefreshUpdateItem();
         }
 
         long lastStageAt = -300000;

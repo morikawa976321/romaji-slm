@@ -41,6 +41,7 @@ if ($fromTray) { try { Start-Transcript -Path (Join-Path $dst 'update.log') -App
 $hash = ''
 $stopped = $false
 $swapped = $false
+$exeSaved = $false
 function Write-Result([string]$status, [string]$detail) {
     # 書けなくても、このあとの起こし直しは続ける
     try { Set-Content -NoNewline -Encoding utf8NoBOM $resultPath "$status $hash $((Get-Date).ToString('s')) $detail" } catch { }
@@ -115,12 +116,32 @@ function Swap-In {
     if (-not (Test-Path (Join-Path $next 'VERSION'))) { throw "組み立て済みの版が無い（$next）" }
     $script:hash = (Get-Content -Raw (Join-Path $next 'VERSION')).Split(' ')[0].Trim()
     Write-Host "差し替え: $hash"
-    foreach ($t in @(Get-Tray)) {
-        # -Swap はトレイアプリが自分で終わってから呼ぶ。手で入れるときと、終わりきらないときだけ止める
-        if (-not ($Swap -and $t.WaitForExit(10000))) { $t | Stop-Process -Force; $t.WaitForExit(5000) | Out-Null }
+    if ($Swap) {
+        # トレイアプリとの受け渡し: 準備ができたら swap.ready に PID を書き、トレイアプリが自分から終わるのを待つ。
+        # トレイアプリは、そのとき打ちかけていれば swap.cancel を書いて終わらない。こちらからは止めない（打ちかけの文が消える）
+        $ready = Join-Path $dst 'swap.ready'
+        $cancel = Join-Path $dst 'swap.cancel'
+        Set-Content -NoNewline (Join-Path $dst 'swap.ready') "$PID"
+        $deadline = (Get-Date).AddSeconds(60)
+        while (Get-Tray) {
+            if ((Test-Path $cancel) -or (Get-Date) -gt $deadline) {
+                Remove-Item $ready, $cancel -ErrorAction SilentlyContinue
+                Write-Host '差し替えを見送った（トレイアプリが終わらなかった）'
+                exit 5
+            }
+            Start-Sleep -Milliseconds 200
+        }
+        Remove-Item $ready, $cancel -ErrorAction SilentlyContinue
         $script:stopped = $true
     }
-    if ($Swap) { $script:stopped = $true }
+    else {
+        foreach ($t in @(Get-Tray)) {
+            $t | Stop-Process -Force   # 手で入れるとき。変換サーバはジョブオブジェクトで一緒に終わる
+            $t.WaitForExit(5000) | Out-Null
+            $script:stopped = $true
+        }
+    }
+    if (Test-Path $exe) { Copy-Item $exe $exePrev -Force; $script:exeSaved = $true }
     if (Test-Path $prev) { Remove-Item -Recurse -Force $prev }
     # 止めた直後は .venv の DLL がまだ掴まれていることがあるので、移せるまで少し待つ
     for ($i = 0; $i -lt 20 -and (Test-Path $app); $i++) {
@@ -129,7 +150,6 @@ function Swap-In {
     if (Test-Path $app) { throw "$app を移せなかった（使っているプロセスがある）" }
     $script:swapped = $true
     Move-Item $next $app
-    if (Test-Path $exe) { Copy-Item $exe $exePrev -Force }
     Copy-Item (Join-Path $app 'ime\bin\RomajiSlmIme.exe') $exe -Force
     Set-Content -NoNewline -Encoding utf8NoBOM (Join-Path $dst 'source.txt') $repo
 }
@@ -176,7 +196,7 @@ catch {
                     Remove-Item (Join-Path $next 'VERSION') -ErrorAction SilentlyContinue   # 組み立て済みとみなさない
                 }
                 Move-Item $prev $app
-                if (Test-Path $exePrev) { Copy-Item $exePrev $exe -Force }
+                if ($exeSaved) { Copy-Item $exePrev $exe -Force }   # この回に取った控えだけを戻す
             }
             elseif (-not (Test-Path $app) -and (Test-Path $prev)) { Move-Item $prev $app }
         }
