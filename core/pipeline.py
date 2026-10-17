@@ -14,7 +14,7 @@ from eval.converters import Result
 
 from .constrained import ConstrainedZenz
 from .kanakanji import Dictionary
-from .reading import readings
+from .reading import readings, verbatim_spans
 from .select import ZenzScorer, fluency
 from .types import Edit
 
@@ -41,6 +41,28 @@ def punct_variants(text: str, bounds: tuple[int, ...]) -> list[tuple[str, int, s
             t = text if b is None else text[:b] + "、" + text[b:]
             out.append((t + e, int(b is not None), e, b))
     return out
+
+
+def apply_fix(romaji: str, typed: str, intended: str) -> tuple[str, int] | None:
+    """ユーザー辞書の fix を当てた打鍵列と、最初に当てた位置。当たらなければ None。
+    大文字で打った区間（そのまま残す区間）に重なる一致は置き換えない。fix は小文字だが、数字・記号を含むと
+    区間に重なりうる（4a → ta を GPT-4aru に当てると GPT-4 が壊れる）。"""
+    if not typed:
+        return None
+    spans = verbatim_spans(romaji)
+    out, pos, first = [], 0, -1
+    i = romaji.find(typed)
+    while i >= 0:
+        j = i + len(typed)
+        if any(i < b and a < j for a, b in spans):
+            i = romaji.find(typed, i + 1)
+            continue
+        out += [romaji[pos:i], intended]
+        pos, first = j, first if first >= 0 else i
+        i = romaji.find(typed, j)
+    if first < 0:
+        return None
+    return "".join(out) + romaji[pos:], first
 
 
 _AUTO_UPPER_MAX = 4  # en_case=auto: 辞書に無いこの長さ以下の英字列は頭字語とみなして大文字にする（jr→JR、scc→SCC）
@@ -159,14 +181,14 @@ class CorePipeline:
             if r.segs not in seen:
                 rs.append(r)
                 seen.add(r.segs)
-        # 本人の打ち間違いの癖（ユーザー辞書の fix）: 打鍵列に含まれていれば、直した打鍵列の読みも比べる。
-        # fix は小文字なので、大文字で打った区間（そのまま残す区間）には当たらない
+        # 本人の打ち間違いの癖（ユーザー辞書の fix）: 打鍵列に含まれていれば、直した打鍵列の読みも比べる
         for typed, intended in self.fixes:
-            if typed in romaji:
-                fixed = romaji.replace(typed, intended)
+            hit = apply_fix(romaji, typed, intended)
+            if hit:
+                fixed, at = hit
                 for r in readings(fixed, n=2):
                     if r.segs not in seen:
-                        rs.append(replace(r, edits=r.edits + (Edit("fix", romaji.find(typed), f"{typed}>{intended}"),),
+                        rs.append(replace(r, edits=r.edits + (Edit("fix", at, f"{typed}>{intended}"),),
                                           cost=r.cost + FIX_COST))
                         seen.add(r.segs)
         if rs and all(r.edits for r in rs):

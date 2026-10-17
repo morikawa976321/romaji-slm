@@ -35,3 +35,13 @@ def test_user_words_are_merged_into_the_index():
     assert "チミモウリョウ" in dic.index.prefixes("チミモウリョウデ")
     dic.add_user_words([("あ", "亜", 3000)])   # 入れ直しても Mozc の索引は残る
     assert {s for *_, s in dic.lookup("デンアツ")} == {"電圧"}
+
+
+def test_fix_skips_matches_inside_uppercase_span():
+    from core.pipeline import apply_fix
+
+    assert apply_fix("GPT-4aru", "4a", "ta") is None          # 4a は大文字の区間 GPT-4 に重なる
+    assert apply_fix("4aruGPT-4a", "4a", "ta") == ("taruGPT-4a", 0)
+    assert apply_fix("teinekiUIteineki", "tein", "tan") == ("tanekiUItaneki", 0)
+    assert apply_fix("kyouha", "xx", "yy") is None
+    assert apply_fix("kyouha", "", "yy") is None

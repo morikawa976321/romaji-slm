@@ -67,7 +67,7 @@ def search_cost(r: Reading) -> float:
 
 def _has_raw(r: Reading) -> bool:
     """辞書に無い英字列を含むか。Reading は弧の raw を持たないので、英単語リストに無い英語区間で見分ける
-    （llama.cpp のような塊も数える）。大文字で打った区間（綴りが大文字のまま。core.reading._verbatim_spans）は
+    （llama.cpp のような塊も数える）。大文字で打った区間（綴りが大文字のまま。core.reading.verbatim_spans）は
     どの候補も同じに持つので数えない（数えると全候補が英字列あり扱いになり、上限と仮説の枠が効かない）。"""
     lex = lexicon()
     return any(s.kind == "en" and s.text == s.text.lower() and lex.get(s.text) is None for s in r.segs)

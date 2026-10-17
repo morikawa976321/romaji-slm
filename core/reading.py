@@ -725,7 +725,7 @@ def _raw_arcs(s: str, i: int, brk: list[bool], cheap: list[bool]) -> list[Arc]:
     return out
 
 
-def _verbatim_spans(keys: str) -> list[tuple[int, int]]:
+def verbatim_spans(keys: str) -> list[tuple[int, int]]:
     """大文字で打った、変換せずにそのまま残す区間 [(始まり, 終わり)]（本人の決定 2026-10-18、docs/decisions.md D34）。
     大文字で始まり、大文字・数字と、大文字・数字にはさまれた . - が続くところまで（GUI、GPT-4、A100）。"""
     out = []
@@ -751,7 +751,7 @@ def _shift(a: Arc, d: int) -> Arc:
 def build_arcs(keys: str) -> list[list[Arc]]:
     """各位置から出る弧。大文字の区間は打ったままの英語区間1本にし、その間の小文字の部分は、それぞれを
     1つの打鍵列として弧を張る（区間の手前の n が「ン」になるよう、次の字を見る弧も区間の手前で切る）。"""
-    spans = _verbatim_spans(keys)
+    spans = verbatim_spans(keys)
     if not spans:
         return _build_arcs(keys.lower())
     arcs: list[list[Arc]] = [[] for _ in keys]
