@@ -7,7 +7,8 @@
 # （5.1 は BOM 無しの UTF-8 を ANSI として読む。trial/run.ps1 と同じ罠）。
 # 設定（ime.ini）・記録（history.jsonl）・ユーザー辞書（user_dict.tsv）は入れ替えない（その PC のものを残す）。
 
-param([string]$Target = (Join-Path $env:LOCALAPPDATA 'romaji-slm'), [switch]$NoStartup, [switch]$NoLaunch)
+param([string]$Target = (Join-Path $env:LOCALAPPDATA 'romaji-slm'), [switch]$NoStartup, [switch]$NoLaunch,
+      [switch]$NoShortcuts)   # NoShortcuts: ショートカットを一切作らない（別のフォルダに試しに入れるとき。今のショートカットを上書きしない）
 
 $ErrorActionPreference = 'Stop'
 $Src = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)   # zip のルート（このファイルは <ルート>\app\ime\ にある）
@@ -49,6 +50,7 @@ try {
 } finally { Pop-Location }
 
 Write-Host '[5/5] ショートカットを作ります'
+if ($NoShortcuts) { Write-Host '      作りません（-NoShortcuts）'; exit 0 }
 $exe = Join-Path $Target 'RomajiSlmIme.exe'
 $shell = New-Object -ComObject WScript.Shell
 function New-Shortcut([string]$path) {

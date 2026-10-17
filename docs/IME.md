@@ -71,6 +71,22 @@ pwsh -NoProfile -File ime/uninstall.ps1
 - フックの見張り: キーボードの Raw Input（`RIDEV_INPUTSINK`）にはキーが届いているのに、フックが 1.5 秒呼ばれていなければ、Windows がフックを外したとみなして付け直す（10 秒に 1 回まで）。管理者権限の窓が前面の間も付け直しが起きうるが、害はない。トレイの「使用状況をコピー」で、確定の回数・別候補を選んだ回数・待ち時間の中央値・アプリ別の回数を、貼れる文にして出す。数だけで、文字列は持たない。
 - 初めて起動したときは「使っていない」状態で始まる。Ctrl+Alt+Space で使い始める。
 
+## 別の PC（ThinkPad）に入れる
+
+開発機で配布 zip を作り、その PC で展開して入れる。リポジトリ・git・GPU は要らない。
+
+1. 開発機で `pwsh -NoProfile -File tools/pack-ime.ps1` を実行する。`dist/romaji-slm-ime-<日付>-<hash>.zip`（約 170 MB）ができる。中身は HEAD のコード、辞書と読みの LM、zenz-v3.1-small、CPU 版 torch の uv.lock、ビルド済みのトレイアプリ。
+2. zip を ThinkPad に写し、展開する。
+3. 展開したフォルダの `install.cmd` をダブルクリックする。`%LOCALAPPDATA%\romaji-slm` に入り、ログオン時の起動を登録して起動する。
+   - uv が無ければ公式のインストーラで入れる（ネットワークが要る）。
+   - Python と部品の用意は初回だけ数分かかる。
+4. 展開したフォルダは消してよい。
+
+- 更新するときは、新しい zip で同じことをする。設定（ime.ini）・記録・ユーザー辞書は、その PC のものが残る。
+- 変換は CPU で動く（`device=auto`）。このデスクトップの CPU では 1 文の中央値 552 ms だった。ThinkPad での速さは未測定。
+- ユーザー辞書と利用履歴の振り返りは PC ごと。振り返り（ops-daily）はこのデスクトップでだけ動く。ThinkPad の辞書を揃えたいときは、`user_dict.tsv` を写す。
+- 試しに別のフォルダへ入れるとき: `powershell -ExecutionPolicy Bypass -File app\ime\install-zip.ps1 -Target <フォルダ> -NoShortcuts -NoLaunch`。`-NoShortcuts` を付けないと、今のショートカットを上書きする。
+
 ## 仕組み
 
 ```
