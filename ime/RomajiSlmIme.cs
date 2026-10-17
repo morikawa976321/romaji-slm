@@ -1061,9 +1061,12 @@ namespace RomajiSlm
             RefreshUpdateItem();
         }
 
+        string shownLatest;
+
         void RefreshUpdateItem()
         {
             string latest = updater.Latest;
+            if (latest != shownLatest) { shownLatest = latest; dbg.Write("update available: " + (latest ?? "none")); }
             updateItem.Text = updater.Running ? "新しい版を組み立てて試しています…（終わると数秒止まって切り替わる）"
                             : latest != null ? "新しい版に更新する（" + updater.Installed + " → " + latest + "）"
                             : "最新の版です（" + updater.Installed + "）。押すと入れ直す";
