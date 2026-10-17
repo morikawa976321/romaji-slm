@@ -520,10 +520,12 @@ namespace RomajiSlm
         // この下が変わったときだけ入れ直す（docs だけのコミットでは止めない）。install.ps1 が写すものと揃える
         const string Paths = "core eval ime pyproject.toml uv.lock";
         readonly string data, repo, installed;
-        public string Latest;          // 入れ替えるべき HEAD（無ければ null）
-        public string FailedHead;      // 入れ替えに失敗した HEAD（自動ではもう試さない）
+        // Check（別スレッド）と UI スレッドの両方から触る
+        public volatile string Latest;       // 入れ替えるべき HEAD（無ければ null）
+        public volatile string Staged;       // 組み立てて試験を通した版（app.next）
+        public volatile string FailedHead;   // 組み立てか試験に失敗した版（自動ではもう試さない）
         public volatile bool Running;
-        public event Action<string> Finished;   // 失敗したときの説明（成功したときはこのプロセスごと止められる）
+        public event Action<bool, string> StageFinished;   // (通ったか, 失敗の説明。別の更新が動いていたときは null)
 
         public Updater(string root, string data)
         {
@@ -531,12 +533,21 @@ namespace RomajiSlm
             try { repo = File.ReadAllText(Path.Combine(data, "source.txt"), Encoding.UTF8).Trim(); } catch { }
             try { installed = File.ReadAllText(Path.Combine(root, "VERSION"), Encoding.UTF8).Split(' ')[0].Trim(); } catch { }
             if (repo == "" || !Directory.Exists(repo ?? "")) repo = null;
+            var r = LastResult();
+            if (r != null && r.Length > 1 && r[0] == "fail") FailedHead = r[1];
+            try
+            {
+                // 前の常駐が組み立てたまま終わっていれば、それを使う
+                string v = File.ReadAllText(Path.Combine(data, "app.next", "VERSION"), Encoding.UTF8).Split(' ')[0].Trim();
+                if (r != null && r.Length > 1 && r[0] == "staged" && r[1] == v) Staged = v;
+            }
+            catch { }
         }
 
         public bool Enabled { get { return repo != null && !string.IsNullOrEmpty(installed); } }
         public string Installed { get { return installed; } }
 
-        /// 前回の更新の結果（update-result.txt の「ok|fail <hash> <時刻> <説明>」）
+        /// 前回の更新の結果（update-result.txt の「staged|ok|fail <版> <時刻> <説明>」）
         public string[] LastResult()
         {
             try { return File.ReadAllText(Path.Combine(data, "update-result.txt"), Encoding.UTF8).Split(new[] { ' ' }, 4); }
@@ -555,38 +566,49 @@ namespace RomajiSlm
             Latest = code == 0 ? null : head;
         }
 
-        public void Start()
+        /// 組み立てと試験（install.ps1 -Stage）。動いている常駐には触れない
+        public void Stage()
         {
             if (!Enabled || Running) return;
             Running = true;
+            string target = Latest;
             try
             {
-                var p = new Process
-                {
-                    StartInfo = new ProcessStartInfo("pwsh.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" +
-                                                     Path.Combine(repo, "ime", "install.ps1") + "\" -Update")
-                    { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = repo },
-                    EnableRaisingEvents = true,
-                };
+                var p = new Process { StartInfo = Pwsh("-Stage"), EnableRaisingEvents = true };
                 p.Exited += (s, e) =>
                 {
                     Running = false;
-                    if (p.ExitCode == 3) return;   // 別の更新が動いていた
                     var r = LastResult();
-                    string msg = r != null && r[0] == "fail" && r.Length > 3 ? r[3] : "終了コード " + p.ExitCode;
-                    if (r != null && r.Length > 1) FailedHead = r[1];
-                    var h = Finished;
-                    if (h != null) h(msg);
+                    var h = StageFinished;
+                    if (p.ExitCode == 3) { if (h != null) h(false, null); return; }   // 別の更新が動いていた
+                    if (p.ExitCode == 0 && r != null && r.Length > 1 && r[0] == "staged") { Staged = r[1]; if (h != null) h(true, ""); return; }
+                    // 結果を書く前に落ちたときも、試した版を失敗として覚える（同じ版を繰り返し試さない）
+                    FailedHead = r != null && r.Length > 1 && r[0] == "fail" ? r[1] : target;
+                    if (h != null) h(false, r != null && r[0] == "fail" && r.Length > 3 ? r[3] : "終了コード " + p.ExitCode);
                 };
                 p.Start();
             }
             catch (Exception ex)
             {
                 Running = false;
-                FailedHead = Latest;
-                var h = Finished;
-                if (h != null) h("pwsh を起動できません（" + ex.Message + "）");
+                FailedHead = target;
+                var h = StageFinished;
+                if (h != null) h(false, "pwsh を起動できません（" + ex.Message + "）");
             }
+        }
+
+        /// 組み立てた版への差し替え（install.ps1 -Swap）を起動する。呼んだ側はすぐに終わる（-Swap はその終わりを待つ）
+        public bool Swap()
+        {
+            try { Process.Start(Pwsh("-Swap")); return true; }
+            catch { return false; }
+        }
+
+        ProcessStartInfo Pwsh(string mode)
+        {
+            return new ProcessStartInfo("pwsh.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" +
+                                        Path.Combine(repo, "ime", "install.ps1") + "\" " + mode)
+            { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = repo };
         }
 
         string Git(string args) { int c; return Git(args, out c); }
@@ -674,7 +696,12 @@ namespace RomajiSlm
             menu.Items.Add(enabledItem);
             menu.Items.Add(serverItem);
             updater = new Updater(root, data);
-            updateItem = new ToolStripMenuItem("", null, (s, e) => StartUpdate("menu"));
+            updateItem = new ToolStripMenuItem("", null, (s, e) =>
+            {
+                manualUpdate = true;
+                // 押したときの HEAD を組み立てたものが無ければ組み立てる（最新でも入れ直す）。組み立てたら WatchUpdate が差し替える
+                if (updater.Staged == null || updater.Staged != (updater.Latest ?? updater.Staged)) StartStage("menu");
+            });
             if (updater.Enabled) menu.Items.Add(updateItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("使用状況をコピー", null, (s, e) =>
@@ -689,18 +716,27 @@ namespace RomajiSlm
             menu.Items.Add("終了", null, (s, e) => ExitThread());
             tray = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
             tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) Toggle(); };
-            updater.Finished += msg => popup.BeginInvoke((Action)(() =>
+            updater.StageFinished += (ok, msg) => popup.BeginInvoke((Action)(() =>
             {
-                dbg.Write("update failed: " + msg);
-                tray.ShowBalloonTip(5000, "romaji-slm", "新しい版にできませんでした（今の版のまま使えます）: " + msg, ToolTipIcon.Warning);
+                dbg.Write("update stage ok=" + ok + " staged=" + updater.Staged + " " + msg);
+                if (!ok && msg != null)
+                {
+                    manualUpdate = false;
+                    tray.ShowBalloonTip(5000, "romaji-slm", "新しい版にできませんでした（今の版のまま使えます）: " + msg, ToolTipIcon.Warning);
+                }
                 RefreshUpdateItem();
             }));
+            // 差し替えた直後（-Swap が起動し直した）なら結果を知らせる
             var last = updater.Enabled ? updater.LastResult() : null;
             DateTime at;
-            if (last != null && last.Length > 2 && last[0] == "fail") updater.FailedHead = last[1];
-            else if (last != null && last.Length > 2 && last[0] == "ok" && last[1] == updater.Installed &&
-                     DateTime.TryParse(last[2], out at) && (DateTime.Now - at).TotalMinutes < 10)
-                tray.ShowBalloonTip(3000, "romaji-slm", "新しい版にしました（" + updater.Installed + "）", ToolTipIcon.None);
+            if (last != null && last.Length > 2 && DateTime.TryParse(last[2], out at) && (DateTime.Now - at).TotalMinutes < 10)
+            {
+                if (last[0] == "ok" && last[1] == updater.Installed)
+                    tray.ShowBalloonTip(3000, "romaji-slm", "新しい版にしました（" + updater.Installed + "）", ToolTipIcon.None);
+                else if (last[0] == "fail")
+                    tray.ShowBalloonTip(5000, "romaji-slm", "新しい版にできませんでした（前の版で動いています）: " +
+                                        (last.Length > 3 ? last[3] : ""), ToolTipIcon.Warning);
+            }
             RefreshUpdateItem();
 
             server = new Server(root, data, cfg);
@@ -1040,7 +1076,8 @@ namespace RomajiSlm
             }
         }
 
-        /// 1 分ごとに新しい版を見て、あれば、打っていない間（変換中・確定待ちでもない）に入れ替える
+        /// 1 分ごとに新しい版を見る。あれば裏で組み立てて試験し（打っている間でもよい。常駐には触れない）、
+        /// 打っていない間（変換中・確定待ちでもない）に差し替える
         void WatchUpdate()
         {
             if (!updater.Running && Now - lastUpdateCheckAt > 60000)
@@ -1048,16 +1085,38 @@ namespace RomajiSlm
                 lastUpdateCheckAt = Now;
                 ThreadPool.QueueUserWorkItem(_ => { updater.Check(); popup.BeginInvoke((Action)RefreshUpdateItem); });
             }
-            if (updater.Latest != null && !updater.Running && cfg.AutoUpdate > 0 && updater.Latest != updater.FailedHead &&
-                Now - lastKeyAt > cfg.AutoUpdate * 60000L && !comp.Composing && !comp.Waiting)
-                StartUpdate("auto");
+            if (updater.Running) return;
+            string want = updater.Latest, staged = updater.Staged;
+            // 自動の組み立ては 5 分に 1 回まで（別の更新が動いていて すぐ返ったときに、起動し直し続けない）
+            if (want != null && want != staged && want != updater.FailedHead && cfg.AutoUpdate > 0 && Now - lastStageAt > 300000)
+            {
+                StartStage("auto");
+                return;
+            }
+            bool ready = staged != null && (manualUpdate ? staged == (want ?? staged) : staged == want);
+            bool idle = manualUpdate || (cfg.AutoUpdate > 0 && Now - lastKeyAt > cfg.AutoUpdate * 60000L);
+            if (ready && idle && !comp.Composing && !comp.Waiting && !comp.Holding)
+            {
+                dbg.Write("update swap " + updater.Installed + " -> " + staged + (manualUpdate ? " (menu)" : " (auto)"));
+                if (updater.Swap()) ExitThread();   // -Swap はこのプロセスが終わるのを待ってから差し替え、起動し直す
+                else
+                {
+                    manualUpdate = false;
+                    updater.FailedHead = staged;
+                    tray.ShowBalloonTip(5000, "romaji-slm", "新しい版に切り替えられませんでした（pwsh を起動できません）", ToolTipIcon.Warning);
+                }
+            }
         }
 
-        void StartUpdate(string source)
+        long lastStageAt = -300000;
+        bool manualUpdate;   // メニューから頼まれた（打鍵の途切れを待たずに切り替える）
+
+        void StartStage(string source)
         {
             if (updater.Running) return;
-            dbg.Write("update start (" + source + ") " + updater.Installed + " -> " + (updater.Latest ?? "HEAD"));
-            updater.Start();
+            lastStageAt = Now;
+            dbg.Write("update stage start (" + source + ") " + updater.Installed + " -> " + (updater.Latest ?? "HEAD"));
+            updater.Stage();
             RefreshUpdateItem();
         }
 
@@ -1067,7 +1126,8 @@ namespace RomajiSlm
         {
             string latest = updater.Latest;
             if (latest != shownLatest) { shownLatest = latest; dbg.Write("update available: " + (latest ?? "none")); }
-            updateItem.Text = updater.Running ? "新しい版を組み立てて試しています…（終わると数秒止まって切り替わる）"
+            updateItem.Text = updater.Running ? "新しい版を組み立てて試しています…（今の版はそのまま使えます）"
+                            : latest != null && latest == updater.Staged ? "新しい版に切り替える（" + updater.Installed + " → " + latest + "。数秒〜1 分止まる）"
                             : latest != null ? "新しい版に更新する（" + updater.Installed + " → " + latest + "）"
                             : "最新の版です（" + updater.Installed + "）。押すと入れ直す";
             updateItem.Enabled = !updater.Running;
