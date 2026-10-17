@@ -123,6 +123,8 @@ user_style の先頭 30 文、句読点 B・英字打ったまま（既定）。
 
 サーバの起動から準備完了まで約 5〜7 秒。
 
+メモリ・GPU・CPU・ディスクの内訳と、使っているうちに増える分（読み段のキャッシュ）、減らす手の候補は [RESOURCES.md](RESOURCES.md)。
+
 ### 試験
 
 - `pwsh -NoProfile -File ime/build.ps1 -Test`: Composer の状態機械（合成した打鍵で 48 件）。`tests/test_ime_server.py` もこれを呼ぶ。

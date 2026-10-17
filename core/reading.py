@@ -795,7 +795,8 @@ _START = BOS * (ORDER - 1)
 _CTX_AFTER = {"en": BOS * (ORDER - 2) + AFTER_EN, "num": BOS * (ORDER - 2) + AFTER_NUM}
 
 
-@lru_cache(maxsize=None)  # 文脈2字×弧のかな（4字以下）なので、実際に現れる組は数十万で頭打ちになる
+# 上限なし。頭打ちにならない: 常駐で 1 件あたり約 2,500 項目増え、600 件で 151 万項目（docs/RESOURCES.md）
+@lru_cache(maxsize=None)
 def _lm_step(ctx: str, text: str) -> tuple[float, str]:
     lm = load_lm()
     total = 0.0

@@ -12,4 +12,5 @@
 - 学習データ生成（ローマ字化・打鍵ミス・読み付与）: [docs/DATA.md](docs/DATA.md)、`python -m data.build`
 - 変換コア 工程2「読みラティス」（打鍵列 → 読みの N-best）: [docs/READING.md](docs/READING.md)、`python -m core.reading "ローマ字"`
 - 推論 CLI・GGUF 変換: [docs/INFER.md](docs/INFER.md)、`python -m infer "ローマ字"`、`python -m infer.to_gguf`
+- 常駐入力の資源（メモリ・GPU・CPU・ディスクの内訳と増え方、減らす手の候補）: [docs/RESOURCES.md](docs/RESOURCES.md)、`python -m tools.memprof out.jsonl`
 - 辞書による変換候補（読み → 表記の N-best、Mozc 辞書）: [docs/KANAKANJI.md](docs/KANAKANJI.md)、`python -m core.fetch_mozc`、`python -m core.kanakanji "キョウハイイテンキデスネ"`
