@@ -40,6 +40,8 @@ foreach ($d in 'core', 'eval', 'ime', 'tools') { if (Test-Path "$App\$d") { Remo
 robocopy (Join-Path $Src 'app') $App /E /XD .venv /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { Write-Host "写せませんでした（robocopy $LASTEXITCODE）"; exit 1 }
 Copy-Item (Join-Path $Src 'RomajiSlmIme.exe') (Join-Path $Target 'RomajiSlmIme.exe') -Force
+# リポジトリから入れた版の印（トレイアプリが新しい版を見に行く先）。zip の版はリポジトリと無関係なので消す
+Remove-Item (Join-Path $Target 'source.txt') -ErrorAction SilentlyContinue
 
 Write-Host '[4/5] Python と部品を用意します（初回は数分かかります）'
 $env:UV_PYTHON_DOWNLOADS = 'automatic'   # uv の設定で Python の自動取得が manual でも取る（trial/run.ps1 と同じ）

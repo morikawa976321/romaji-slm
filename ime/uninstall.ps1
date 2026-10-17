@@ -16,7 +16,8 @@ foreach ($dir in [Environment]::GetFolderPath('Startup'), [Environment]::GetFold
 }
 if (Test-Path $dst) {
     if ($KeepData) {
-        Remove-Item -Recurse -Force (Join-Path $dst 'app'), (Join-Path $dst 'RomajiSlmIme.exe') -ErrorAction SilentlyContinue
+        $gone = 'app', 'app.next', 'app.prev', 'RomajiSlmIme.exe', 'source.txt', 'update.lock', 'update.log', 'update-result.txt'
+        Remove-Item -Recurse -Force ($gone | ForEach-Object { Join-Path $dst $_ }) -ErrorAction SilentlyContinue
     } else {
         Remove-Item -Recurse -Force $dst
     }

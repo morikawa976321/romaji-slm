@@ -77,6 +77,7 @@ namespace RomajiSlm
         public int Port = 8767;
         public bool History = true;
         public bool AcceptInjected = true;
+        public int AutoUpdate = 3;   // 新しい版があるとき、この分数だけ打鍵が無ければ自動で入れ替える（0 で自動ではしない）
         // 記録しないアプリの既定: パスワード管理（打った文字は変換に回らないはずだが、念のため記録からも外す）
         public string NoHistoryApps = "1password,keepass,keepassxc,bitwarden,dashlane,lastpass,enpass,roboform";
 
@@ -95,6 +96,7 @@ namespace RomajiSlm
                 else if (k == "history") History = v != "0";
                 else if (k == "accept_injected") AcceptInjected = v != "0";
                 else if (k == "no_history_apps") NoHistoryApps = v;
+                else if (k == "auto_update") int.TryParse(v, out AutoUpdate);
             }
         }
 
@@ -111,7 +113,9 @@ namespace RomajiSlm
                 "# accept_injected: 1 なら他のアプリが送り込んだキーも本人の打鍵として扱う（打鍵を送り直す常駐アプリがあるとき要る）\r\n" +
                 "accept_injected=" + (AcceptInjected ? "1" : "0") + "\r\n" +
                 "# no_history_apps: 記録（history.jsonl）に残さないアプリの exe 名（拡張子なし、カンマ区切り）。例: slack,line\r\n" +
-                "no_history_apps=" + NoHistoryApps + "\r\n", new UTF8Encoding(false));
+                "no_history_apps=" + NoHistoryApps + "\r\n" +
+                "# auto_update: リポジトリから入れたとき、新しい版があり、この分数だけ打鍵が無ければ自動で入れ替える。0 で自動ではしない\r\n" +
+                "auto_update=" + AutoUpdate + "\r\n", new UTF8Encoding(false));
         }
     }
 
@@ -509,6 +513,103 @@ namespace RomajiSlm
         }
     }
 
+    /// 写し元のリポジトリ（install.ps1 が source.txt に書く）に新しい版があるかを見て、ime/install.ps1 -Update で入れ替える。
+    /// 配布 zip から入れた PC では source.txt が無いので何もしない
+    sealed class Updater
+    {
+        // この下が変わったときだけ入れ直す（docs だけのコミットでは止めない）。install.ps1 が写すものと揃える
+        const string Paths = "core eval ime pyproject.toml uv.lock";
+        readonly string data, repo, installed;
+        public string Latest;          // 入れ替えるべき HEAD（無ければ null）
+        public string FailedHead;      // 入れ替えに失敗した HEAD（自動ではもう試さない）
+        public volatile bool Running;
+        public event Action<string> Finished;   // 失敗したときの説明（成功したときはこのプロセスごと止められる）
+
+        public Updater(string root, string data)
+        {
+            this.data = data;
+            try { repo = File.ReadAllText(Path.Combine(data, "source.txt"), Encoding.UTF8).Trim(); } catch { }
+            try { installed = File.ReadAllText(Path.Combine(root, "VERSION"), Encoding.UTF8).Split(' ')[0].Trim(); } catch { }
+            if (repo == "" || !Directory.Exists(repo ?? "")) repo = null;
+        }
+
+        public bool Enabled { get { return repo != null && !string.IsNullOrEmpty(installed); } }
+        public string Installed { get { return installed; } }
+
+        /// 前回の更新の結果（update-result.txt の「ok|fail <hash> <時刻> <説明>」）
+        public string[] LastResult()
+        {
+            try { return File.ReadAllText(Path.Combine(data, "update-result.txt"), Encoding.UTF8).Split(new[] { ' ' }, 4); }
+            catch { return null; }
+        }
+
+        /// UI スレッドの外で呼ぶ（git を起動する）
+        public void Check()
+        {
+            if (!Enabled) return;
+            string head = Git("rev-parse --short HEAD").Trim();
+            if (head == "" || head == installed) { Latest = null; return; }
+            // 入れた版がリポジトリに無い（履歴を書き換えた）ときも入れ直す
+            int code;
+            Git("diff --quiet " + installed + " " + head + " -- " + Paths, out code);
+            Latest = code == 0 ? null : head;
+        }
+
+        public void Start()
+        {
+            if (!Enabled || Running) return;
+            Running = true;
+            try
+            {
+                var p = new Process
+                {
+                    StartInfo = new ProcessStartInfo("pwsh.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" +
+                                                     Path.Combine(repo, "ime", "install.ps1") + "\" -Update")
+                    { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = repo },
+                    EnableRaisingEvents = true,
+                };
+                p.Exited += (s, e) =>
+                {
+                    Running = false;
+                    if (p.ExitCode == 3) return;   // 別の更新が動いていた
+                    var r = LastResult();
+                    string msg = r != null && r[0] == "fail" && r.Length > 3 ? r[3] : "終了コード " + p.ExitCode;
+                    if (r != null && r.Length > 1) FailedHead = r[1];
+                    var h = Finished;
+                    if (h != null) h(msg);
+                };
+                p.Start();
+            }
+            catch (Exception ex)
+            {
+                Running = false;
+                FailedHead = Latest;
+                var h = Finished;
+                if (h != null) h("pwsh を起動できません（" + ex.Message + "）");
+            }
+        }
+
+        string Git(string args) { int c; return Git(args, out c); }
+
+        string Git(string args, out int code)
+        {
+            code = -1;
+            try
+            {
+                using (var p = Process.Start(new ProcessStartInfo("git", "-C \"" + repo + "\" " + args)
+                       { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true }))
+                {
+                    string o = p.StandardOutput.ReadToEnd();
+                    p.StandardError.ReadToEnd();
+                    if (!p.WaitForExit(10000)) { try { p.Kill(); } catch { } return ""; }
+                    code = p.ExitCode;
+                    return o;
+                }
+            }
+            catch { return ""; }
+        }
+    }
+
     sealed class App : ApplicationContext
     {
         readonly Composer comp = new Composer();
@@ -518,7 +619,9 @@ namespace RomajiSlm
         readonly History history;
         readonly Popup popup;
         readonly NotifyIcon tray;
-        readonly ToolStripMenuItem enabledItem, serverItem;
+        readonly ToolStripMenuItem enabledItem, serverItem, updateItem;
+        readonly Updater updater;
+        long lastKeyAt, lastUpdateCheckAt = -45000;   // 起動の 15 秒後に最初の確認
         readonly System.Windows.Forms.Timer timer;
         readonly Stopwatch clock = Stopwatch.StartNew();
         readonly Dictionary<int, long> sentAt = new Dictionary<int, long>();
@@ -570,6 +673,9 @@ namespace RomajiSlm
             var menu = new ContextMenuStrip();
             menu.Items.Add(enabledItem);
             menu.Items.Add(serverItem);
+            updater = new Updater(root, data);
+            updateItem = new ToolStripMenuItem("", null, (s, e) => StartUpdate("menu"));
+            if (updater.Enabled) menu.Items.Add(updateItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("使用状況をコピー", null, (s, e) =>
             {
@@ -583,6 +689,19 @@ namespace RomajiSlm
             menu.Items.Add("終了", null, (s, e) => ExitThread());
             tray = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
             tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) Toggle(); };
+            updater.Finished += msg => popup.BeginInvoke((Action)(() =>
+            {
+                dbg.Write("update failed: " + msg);
+                tray.ShowBalloonTip(5000, "romaji-slm", "新しい版にできませんでした（今の版のまま使えます）: " + msg, ToolTipIcon.Warning);
+                RefreshUpdateItem();
+            }));
+            var last = updater.Enabled ? updater.LastResult() : null;
+            DateTime at;
+            if (last != null && last.Length > 2 && last[0] == "fail") updater.FailedHead = last[1];
+            else if (last != null && last.Length > 2 && last[0] == "ok" && last[1] == updater.Installed &&
+                     DateTime.TryParse(last[2], out at) && (DateTime.Now - at).TotalMinutes < 10)
+                tray.ShowBalloonTip(3000, "romaji-slm", "新しい版にしました（" + updater.Installed + "）", ToolTipIcon.None);
+            RefreshUpdateItem();
 
             server = new Server(root, data, cfg);
             server.StateChanged += (ready, msg) => popup.BeginInvoke((Action)(() =>
@@ -629,6 +748,7 @@ namespace RomajiSlm
                     int n = history.Prune();
                     if (n > 0) dbg.Write("history: removed " + n + " rows older than " + History.KeepDays + " days");
                 }
+                if (updater.Enabled) WatchUpdate();
                 if (fieldDeadline != 0 && Now > fieldDeadline)
                 {
                     fieldDeadline = 0;
@@ -703,6 +823,7 @@ namespace RomajiSlm
                 bool down = msg == 0x100 || msg == 0x104;
                 if (down)
                 {
+                    lastKeyAt = Now;
                     if (!injected) physicalDowns++;
                     else if (k.dwExtraInfo != Native.Magic)
                     {
@@ -919,6 +1040,37 @@ namespace RomajiSlm
             }
         }
 
+        /// 1 分ごとに新しい版を見て、あれば、打っていない間（変換中・確定待ちでもない）に入れ替える
+        void WatchUpdate()
+        {
+            if (!updater.Running && Now - lastUpdateCheckAt > 60000)
+            {
+                lastUpdateCheckAt = Now;
+                ThreadPool.QueueUserWorkItem(_ => { updater.Check(); popup.BeginInvoke((Action)RefreshUpdateItem); });
+            }
+            if (updater.Latest != null && !updater.Running && cfg.AutoUpdate > 0 && updater.Latest != updater.FailedHead &&
+                Now - lastKeyAt > cfg.AutoUpdate * 60000L && !comp.Composing && !comp.Waiting)
+                StartUpdate("auto");
+        }
+
+        void StartUpdate(string source)
+        {
+            if (updater.Running) return;
+            dbg.Write("update start (" + source + ") " + updater.Installed + " -> " + (updater.Latest ?? "HEAD"));
+            updater.Start();
+            RefreshUpdateItem();
+        }
+
+        void RefreshUpdateItem()
+        {
+            string latest = updater.Latest;
+            updateItem.Text = updater.Running ? "新しい版を組み立てて試しています…（終わると数秒止まって切り替わる）"
+                            : latest != null ? "新しい版に更新する（" + updater.Installed + " → " + latest + "）"
+                            : "最新の版です（" + updater.Installed + "）。押すと入れ直す";
+            updateItem.Enabled = !updater.Running;
+            UpdateTray();
+        }
+
         void UpdateTray()
         {
             var m = comp.Mode;
@@ -926,6 +1078,7 @@ namespace RomajiSlm
             tray.Text = m == Mode.Disabled ? "romaji-slm: 使っていない（MS-IME）。Ctrl+Alt+Space で使う"
                       : m == Mode.Japanese ? "romaji-slm: 日本語（Shift+Space で英字）"
                       : "romaji-slm: 英字（Shift+Space で日本語）";
+            if (updater != null && updater.Latest != null) tray.Text += "・新しい版あり";
             enabledItem.Checked = m != Mode.Disabled;
         }
 
