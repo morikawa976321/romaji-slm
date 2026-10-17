@@ -739,8 +739,8 @@ namespace RomajiSlm
             {
                 manualUpdate = true;
                 updater.FailedHead = null;   // 手で頼まれたら、前に失敗した版も試し直す
-                // 押したときの HEAD を組み立てたものが無ければ組み立てる（最新でも入れ直す）。組み立てたら WatchUpdate が差し替える
-                if (updater.Staged == null || updater.Staged != (updater.Latest ?? updater.Staged)) StartStage("menu");
+                // 押したときの HEAD を毎回組み立て直す（前に組み立てた別の版が残っていても使わない）。組み立てたら WatchUpdate が差し替える
+                StartStage("menu");
             });
             if (updater.Enabled) menu.Items.Add(updateItem);
             menu.Items.Add(new ToolStripSeparator());
