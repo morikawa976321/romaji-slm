@@ -1170,7 +1170,9 @@ namespace RomajiSlm
                 if (ready == swapProc.Id.ToString() && !swapCancelled)
                 {
                     string won = updater.Decide(SafeToStop() ? "go" : "cancel");
-                    if (won == "go")
+                    // go を書くまでに -Swap が見切って終わっていたら、終わらない（起こし直す者がいなくなる）
+                    swapProc.Refresh();
+                    if (won == "go" && !swapProc.HasExited)
                     {
                         dbg.Write("update swap: exiting for " + swapTarget);
                         swapProc = null;

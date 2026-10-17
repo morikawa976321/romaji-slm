@@ -125,21 +125,19 @@ function Swap-In {
         $deadline = (Get-Date).AddSeconds(60)
         $d = ''
         while (-not $d) {
-            if (Test-Path $decision) {
-                # 作った側が書き終える前は、空か開けない。読めるまで待つ
-                try { $c = [IO.File]::ReadAllText($decision).Trim() } catch { $c = '' }
-                if ($c -in 'go', 'cancel', 'timeout') { $d = $c }
-                elseif (-not (Get-Tray)) { $d = 'go' }
-                # 書けずに空のまま残った（トレイアプリは go を勝ち取れなかったので終わらない）。ロックを持ったまま待ち続けない
-                elseif ((Get-Date) -gt $deadline.AddSeconds(30)) { $d = 'unreadable' }
-                else { Start-Sleep -Milliseconds 50 }
-            }
+            $c = ''
+            # 作った側が書き終える前は、空か開けない。そのときは読み直す
+            if (Test-Path $decision) { try { $c = [IO.File]::ReadAllText($decision).Trim() } catch { } }
+            if ($c -in 'go', 'cancel', 'timeout') { $d = $c }
             elseif (-not (Get-Tray)) { $d = 'go' }   # 決定を書かずに終わった（落ちたときも、起こし直すほうがよい）
-            elseif ((Get-Date) -gt $deadline) {
+            # 決定が読めない・作れないまま期限をさらに 30 秒過ぎた。ロックを持ったまま待ち続けない
+            # （トレイアプリは go を勝ち取ったあと、こちらが生きているのを確かめてから終わる）
+            elseif ((Get-Date) -gt $deadline.AddSeconds(30)) { $d = 'stuck' }
+            elseif ((Get-Date) -gt $deadline -and -not (Test-Path $decision)) {
                 try { $f = [IO.File]::Open($decision, 'CreateNew', 'Write'); $f.Write([byte[]][char[]]'timeout', 0, 7); $f.Dispose(); $d = 'timeout' }
-                catch { Start-Sleep -Milliseconds 50 }   # トレイアプリが先に決めた。読み直す
+                catch { }   # トレイアプリが先に決めたか、作れない。読み直す
             }
-            else { Start-Sleep -Milliseconds 200 }
+            if (-not $d) { Start-Sleep -Milliseconds 100 }
         }
         Remove-Item $ready -ErrorAction SilentlyContinue
         # 見送るときは決定を消さない（消すと、遅れて来たトレイアプリの go が勝ち、誰も起こし直さない）。次の -Swap の前にトレイアプリが消す
