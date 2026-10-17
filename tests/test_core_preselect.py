@@ -48,6 +48,16 @@ def test_preselect_all_raw_fills_slots(dic):
     assert len(preselect(readings("sftnoatonidpowokakeru", 30), dic, 5)) == 5
 
 
+def test_preselect_ignores_uppercase_span_for_raw_quota(dic):
+    from core.preselect import _has_raw, preselect
+    from core.reading import readings
+
+    assert not _has_raw(readings("UInoseiyaku", 1)[0])
+    # 大文字の区間を英字列として数えると、全候補が英字列あり扱いになって sft を soft に直す候補が落ちる
+    rs = readings("UIsftnoatonidpowokakeru", 30)
+    assert "UIsoftノアトニドヲカケル" in [r.zenz_input() for r in preselect(rs, dic, 5)]
+
+
 def test_typo_hard_set_format():
     from eval.romaji_kana import romaji_to_katakana
     from eval.reading_bench import norm
