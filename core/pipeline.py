@@ -159,13 +159,14 @@ class CorePipeline:
             if r.segs not in seen:
                 rs.append(r)
                 seen.add(r.segs)
-        # 本人の打ち間違いの癖（ユーザー辞書の fix）: 打鍵列に含まれていれば、直した打鍵列の読みも比べる
+        # 本人の打ち間違いの癖（ユーザー辞書の fix）: 打鍵列に含まれていれば、直した打鍵列の読みも比べる。
+        # fix は小文字なので、大文字で打った区間（そのまま残す区間）には当たらない
         for typed, intended in self.fixes:
-            if typed in romaji.lower():
-                fixed = romaji.lower().replace(typed, intended)
+            if typed in romaji:
+                fixed = romaji.replace(typed, intended)
                 for r in readings(fixed, n=2):
                     if r.segs not in seen:
-                        rs.append(replace(r, edits=r.edits + (Edit("fix", romaji.lower().find(typed), f"{typed}>{intended}"),),
+                        rs.append(replace(r, edits=r.edits + (Edit("fix", romaji.find(typed), f"{typed}>{intended}"),),
                                           cost=r.cost + FIX_COST))
                         seen.add(r.segs)
         if rs and all(r.edits for r in rs):

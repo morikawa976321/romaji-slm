@@ -18,7 +18,7 @@ import gc
 import heapq
 import itertools
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from .english import _USER_EN, FUZZY_MIN_LEN, SHORT_OK, lexicon, user_bonus
@@ -725,9 +725,50 @@ def _raw_arcs(s: str, i: int, brk: list[bool], cheap: list[bool]) -> list[Arc]:
     return out
 
 
+def _verbatim_spans(keys: str) -> list[tuple[int, int]]:
+    """大文字で打った、変換せずにそのまま残す区間 [(始まり, 終わり)]（本人の決定 2026-10-18、docs/decisions.md D34）。
+    大文字で始まり、大文字・数字と、大文字・数字にはさまれた . - が続くところまで（GUI、GPT-4、A100）。"""
+    out = []
+    i, L = 0, len(keys)
+    while i < L:
+        if not "A" <= keys[i] <= "Z":
+            i += 1
+            continue
+        j = i + 1
+        while j < L and ("A" <= keys[j] <= "Z" or keys[j].isdigit()
+                         or (keys[j] in ".-" and j + 1 < L and ("A" <= keys[j + 1] <= "Z" or keys[j + 1].isdigit()))):
+            j += 1
+        out.append((i, j))
+        i = j
+    return out
+
+
+def _shift(a: Arc, d: int) -> Arc:
+    return replace(a, start=a.start + d, end=a.end + d,
+                   edit=a.edit and replace(a.edit, pos=a.edit.pos + d), edit2=a.edit2 and replace(a.edit2, pos=a.edit2.pos + d))
+
+
 def build_arcs(keys: str) -> list[list[Arc]]:
-    """各位置から出る弧。"""
-    s = keys.lower()
+    """各位置から出る弧。大文字の区間は打ったままの英語区間1本にし、その間の小文字の部分は、それぞれを
+    1つの打鍵列として弧を張る（区間の手前の n が「ン」になるよう、次の字を見る弧も区間の手前で切る）。"""
+    spans = _verbatim_spans(keys)
+    if not spans:
+        return _build_arcs(keys.lower())
+    arcs: list[list[Arc]] = [[] for _ in keys]
+    pos = 0
+    for a, b in spans + [(len(keys), len(keys))]:
+        if pos < a:
+            for k, lst in enumerate(_build_arcs(keys[pos:a].lower()), pos):
+                arcs[k] = [_shift(x, pos) for x in lst]
+        if a < b:
+            # 綴りも打ったまま（大文字）にして zenz に見せる。どの読みも同じ区間を持つので、読みどうしの比較は歪まない
+            # （英字の登録表記を採点させない理由（_en_surface）は、英語かかなかを競う区間の話）
+            arcs[a] = [Arc(a, b, "en", keys[a:b], (keys[a:b],), (("verbatim", 0.0),))]
+        pos = b
+    return arcs
+
+
+def _build_arcs(s: str) -> list[list[Arc]]:
     L = len(s)
     kana = [_kana_arcs(s, i) for i in range(L)]
     brk = [s[i].isalpha() and not kana[i] for i in range(L)]

@@ -261,3 +261,29 @@ def test_dictionary_word_arcs_do_not_change_clean_first():
     for keys in ("kyouhaiitenkidesune", "kaizentenwokajougakidedashite.", "yomikominijikangakakaru."):
         r = top(keys, 5)[0]
         assert r.edits == ()
+
+
+def test_uppercase_spans_are_kept_verbatim():
+    from core.reading import _verbatim_spans
+
+    assert _verbatim_spans("imaGUI") == [(3, 6)]
+    assert _verbatim_spans("GPT-4womiru") == [(0, 5)]   # 大文字・数字にはさまれた - は区間に入る
+    assert _verbatim_spans("A100degakushuu") == [(0, 4)]
+    assert _verbatim_spans("UI.") == [(0, 2)]           # 文末の . は句読点
+    assert _verbatim_spans("aUIbMOE") == [(1, 3), (4, 7)]
+    assert _verbatim_spans("kyouhaiitenki") == []
+    for keys, want in [("sokomadeikutoUInoseiyaku", "ソコマデイクトUIノセイヤク"), ("honUI", "ホンUI"),
+                       ("UI", "UI"), ("A", "A"), ("GPT-4womiru", "GPT-4ヲミル")]:
+        rs = top(keys, 5)
+        assert rs[0].zenz_input() == want
+        # どの候補も大文字の区間を打ったまま1区間で持つ
+        assert all(any(s.kind == "en" and s.text == keys[a:b] for s in r.segs)
+                   for r in rs for a, b in _verbatim_spans(keys))
+
+
+def test_edits_after_uppercase_span_point_into_typed_keys():
+    # 区間の後ろの小文字の部分は別の打鍵列として読むので、編集の位置を打鍵列全体の位置に直して返す
+    plain = {(e.kind, e.pos, e.detail) for r in top("kyouhaiitenki", 20) for e in r.edits}
+    shifted = {(e.kind, e.pos - 2, e.detail) for r in top("UIkyouhaiitenki", 20) for e in r.edits}
+    assert plain and plain & shifted
+    assert all(e.pos >= 2 for r in top("UIkyouhaiitenki", 20) for e in r.edits)
