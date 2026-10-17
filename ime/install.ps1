@@ -139,6 +139,12 @@ function Swap-In {
             }
             if (-not $d) { Start-Sleep -Milliseconds 100 }
         }
+        if ($d -ne 'go') {
+            # 見送る前に確かめ直す。ループで読んだ後に止まっていた間に、トレイアプリが go を書いて終わっていることがある
+            # （見送ると誰も起こし直さない）
+            try { $c = [IO.File]::ReadAllText($decision).Trim() } catch { $c = '' }
+            if ($c -eq 'go' -or -not (Get-Tray)) { $d = 'go' }
+        }
         Remove-Item $ready -ErrorAction SilentlyContinue
         # 見送るときは決定を消さない（消すと、遅れて来たトレイアプリの go が勝ち、誰も起こし直さない）。次の -Swap の前にトレイアプリが消す
         if ($d -ne 'go') { Write-Host "差し替えを見送った（$d）"; exit 5 }
