@@ -7,7 +7,7 @@
 // - 確定した文は SendInput（KEYEVENTF_UNICODE）で 1 回で送り込む。アプリ側の文字を消すことはしない。
 // - 他のアプリが送り込んだ打鍵（LLKHF_INJECTED）は扱わない（音声入力などの貼り付けを打鍵列として拾わない）。
 //
-// 起動: RomajiSlmIme.exe [--root <app のフォルダ>] [--selftest <打鍵列> <結果ファイル>]
+// 起動: RomajiSlmIme.exe [--root <app のフォルダ>] [--selftest <打鍵列> <結果ファイル> [--port <番号>]]
 
 using System;
 using System.Collections.Generic;
@@ -32,10 +32,12 @@ namespace RomajiSlm
         static int Main(string[] args)
         {
             string root = null, selftest = null, selfOut = null;
+            int port = 0;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--root" && i + 1 < args.Length) root = args[++i];
                 else if (args[i] == "--selftest" && i + 2 < args.Length) { selftest = args[++i]; selfOut = args[++i]; }
+                else if (args[i] == "--port" && i + 1 < args.Length) int.TryParse(args[++i], out port);   // 自己試験だけ
             }
             string exeDir = Path.GetDirectoryName(Application.ExecutablePath);
             if (root == null) root = Path.Combine(exeDir, "app");
@@ -47,7 +49,7 @@ namespace RomajiSlm
             Application.SetCompatibleTextRenderingDefault(false);
 
             if (selftest != null)
-                return SelfTest.Run(root, data, selftest, selfOut);
+                return SelfTest.Run(root, data, selftest, selfOut, port);
 
             // UI スレッドの例外で常駐ごと落とさない（既定はダイアログを出す）。記録して続ける
             string errLog = Path.Combine(data, "ime-error.log");
@@ -943,9 +945,10 @@ namespace RomajiSlm
     /// フックも送り込みもせず、本物のサーバで「打鍵 → Enter → 確定文」を通す（本人の入力を奪わずに配線を確かめる）
     static class SelfTest
     {
-        public static int Run(string root, string data, string romaji, string outPath)
+        public static int Run(string root, string data, string romaji, string outPath, int port = 0)
         {
             var cfg = new Config(Path.Combine(data, "ime.ini"));
+            if (port > 0) cfg.Port = port;   // 動いている常駐のサーバとぶつけずに試す
             var comp = new Composer();
             var clock = Stopwatch.StartNew();
             var w = new IntPtr(1);

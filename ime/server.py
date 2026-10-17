@@ -97,6 +97,9 @@ def main(argv=None):
         sys.stdout = sys.stderr = open(args.log, "a", encoding="utf-8", buffering=1)
         print(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} start", flush=True)
     os.environ.setdefault("HF_HUB_OFFLINE", "1")  # 常駐は起動のたびに Hugging Face へ問い合わせない（取得済みのキャッシュを使う）
+    hf = ROOT / "models" / "hf"
+    if (hf / "hub").exists():
+        os.environ.setdefault("HF_HOME", str(hf))   # 配布 zip（tools/pack-ime.ps1）はモデルを同梱する
 
     ready = threading.Event()
     holder = {}
