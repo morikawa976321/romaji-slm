@@ -128,7 +128,11 @@ function Swap-In {
             if (Test-Path $decision) {
                 # 作った側が書き終える前は、空か開けない。読めるまで待つ
                 try { $c = [IO.File]::ReadAllText($decision).Trim() } catch { $c = '' }
-                if ($c -in 'go', 'cancel', 'timeout') { $d = $c } else { Start-Sleep -Milliseconds 50 }
+                if ($c -in 'go', 'cancel', 'timeout') { $d = $c }
+                elseif (-not (Get-Tray)) { $d = 'go' }
+                # 書けずに空のまま残った（トレイアプリは go を勝ち取れなかったので終わらない）。ロックを持ったまま待ち続けない
+                elseif ((Get-Date) -gt $deadline.AddSeconds(30)) { $d = 'unreadable' }
+                else { Start-Sleep -Milliseconds 50 }
             }
             elseif (-not (Get-Tray)) { $d = 'go' }   # 決定を書かずに終わった（落ちたときも、起こし直すほうがよい）
             elseif ((Get-Date) -gt $deadline) {
