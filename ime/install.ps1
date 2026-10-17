@@ -29,12 +29,16 @@ $exe = Join-Path $dst 'RomajiSlmIme.exe'
 $exePrev = "$exe.prev"
 $resultPath = Join-Path $dst 'update-result.txt'
 $fromTray = $Stage -or $Swap
+# 外したあとにフォルダを作り直さない（下でロックを取ってからも確かめる）
+if ($fromTray -and -not (Test-Path (Join-Path $dst 'source.txt'))) { Write-Warning '外されている'; exit 3 }
 New-Item -ItemType Directory -Force $dst | Out-Null
 Set-Location $repo
 
 # 同時に 2 つ走らない（トレイの自動更新と手動の実行がぶつかる）。記録（update.log）を始めるのは取れてから
 try { $lock = [IO.File]::Open((Join-Path $dst 'update.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
 catch { Write-Warning '別の更新が動いている'; exit 3 }
+# トレイアプリから起動されたあと、ロックを取るまでの間に外された（uninstall.ps1 は source.txt を先に消す）
+if ($fromTray -and -not (Test-Path (Join-Path $dst 'source.txt'))) { $lock.Dispose(); Write-Warning '外されている'; exit 3 }
 if ($fromTray) { try { Start-Transcript -Path (Join-Path $dst 'update.log') -Append | Out-Null } catch { } }
 
 $hash = ''
