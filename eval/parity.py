@@ -153,14 +153,17 @@ def _reading_refs(set_file: str) -> dict[str, str]:
     if path is None or not path.exists():
         return {}
     lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
-    return {str(i): json.loads(l).get("reading", "") for i, l in enumerate(lines)}
+    rows = [json.loads(l) for l in lines]
+    if not any("reading" in r for r in rows):  # 読み段のセット（トップレベルに reading を持つ）だけ
+        return {}
+    return {str(i): r.get("reading", "") for i, r in enumerate(rows)}
 
 
 def table(tags: list[str], ref: str | None = None) -> str:
     """変種ごと・セットごとの精度。ref を渡すと、ref と出力が食い違った件数と、ref に対して正常入力で新たに壊れた件数も出す。"""
     sets = sorted({s for t in tags for s in _set_files(t)})
-    lines = ["| セット | 変種 | 件数 | 完全一致 | 正常入力の完全一致 | 誤補正 | 1位の読みが正解 | 食い違い（対 ref） "
-             "| 正常入力で ref だけ正解 / 変種だけ正解 |", "|---|---|---|---|---|---|---|---|---|"]
+    lines = ["| セット | 変種 | 件数 | 完全一致 | ゆるい一致 | 正常入力の完全一致 | 誤補正 | 1位の読みが正解 | 食い違い（対 ref） "
+             "| 正常入力で ref だけ正解 / 変種だけ正解 |", "|---|---|---|---|---|---|---|---|---|---|"]
     for s in sets:
         R = load(_set_files(ref)[s]) if ref and s in _set_files(ref) else None
         rrefs = _reading_refs(s)
@@ -176,6 +179,7 @@ def table(tags: list[str], ref: str | None = None) -> str:
             has_ref = any(r["refs"] for r in rs)
             clean = [r for r in rs if r["category"] not in _TYPO_CATS]
             ex = f"{sum(bool(r['exact']) for r in rs) / n:.1%}" if has_ref else "—"
+            lo = f"{sum(bool(r.get('loose')) for r in rs) / n:.1%}" if has_ref else "—"
             cex = f"{sum(bool(r['exact']) for r in clean) / max(1, len(clean)):.1%}" if has_ref and clean else "—"
             mis = f"{sum(bool(r['edited']) for r in clean) / max(1, len(clean)):.1%}" if clean else "—"
             rd = "—"
@@ -189,7 +193,7 @@ def table(tags: list[str], ref: str | None = None) -> str:
                     cl = [i for i in ids if rows[i]["category"] not in _TYPO_CATS]
                     br = (f"{sum(bool(R[i]['exact']) and not rows[i]['exact'] for i in cl)} / "
                           f"{sum(bool(rows[i]['exact']) and not R[i]['exact'] for i in cl)}")
-            lines.append(f"| {s} | {t} | {n} | {ex} | {cex} | {mis} | {rd} | {dv} | {br} |")
+            lines.append(f"| {s} | {t} | {n} | {ex} | {lo} | {cex} | {mis} | {rd} | {dv} | {br} |")
     return "\n".join(lines) + "\n"
 
 
