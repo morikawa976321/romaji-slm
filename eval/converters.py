@@ -177,10 +177,21 @@ def make_converter(name: str, device: str = "cpu", model: str | None = None,
             from core.llama_backend import LlamaCorePipeline
             if not (model or "url" in opts):
                 raise ValueError("core-llama には --model（GGUF）か url= が要る")
-            return LlamaCorePipeline(model, url=opts.get("url"), n_slots=int(opts.get("np", 5)),
-                                     threads=int(opts["t"]) if "t" in opts else None, **kw)
+            # 変種（docs/LLAMA_PARITY.md）: de=stop（行き止まりで未完にする）、fl=tok（自然さを正規の分割で強制）、
+            # rf=fast（取り直しをまとめる）、ka=1（HTTP の接続を使い回す）、ngl=<層数>（GPU に載せる層）、
+            # eos=3（GGUF の BOS/EOS の ID を起動時に上書きする。zenz の config.json は bos=1・eos=2 と書いていて、
+            # GGUF にはそれがそのまま入る。トークナイザの本当の値は <s>=2・</s>=3）
+            extra = (["--override-kv", "tokenizer.ggml.bos_token_id=int:2,tokenizer.ggml.eos_token_id=int:3"]
+                     if opts.get("eos") == "3" else None)
+            return LlamaCorePipeline(model, url=opts.get("url"), n_slots=int(opts.get("np", 5)), extra_args=extra,
+                                     threads=int(opts["t"]) if "t" in opts else None,
+                                     n_gpu_layers=int(opts["ngl"]) if "ngl" in opts else None,
+                                     dead_ends=opts.get("de", "prune"), fluency_mode=opts.get("fl", "gen"),
+                                     refill=opts.get("rf", "full"), keep_alive=opts.get("ka", "0") == "1", **kw)
         from core.pipeline import CorePipeline
-        return CorePipeline(model or "Miwa-Keita/zenz-v3.1-small", device, batched=opts.get("b", "1") != "0", **kw)
+        # mt=<数>（制約を満たすトークンを探す上位の数。0 は語彙全体）、dp=1（行き止まりを刈る。llama 版の文法と同じ制約）
+        return CorePipeline(model or "Miwa-Keita/zenz-v3.1-small", device, batched=opts.get("b", "1") != "0",
+                            max_tries=int(opts.get("mt", 2000)), prune=opts.get("dp", "0") == "1", **kw)
     if name == "reader+zenz":
         if not model:
             raise ValueError("reader+zenz には --model（読みを書く二段形式のモデル）が要る")

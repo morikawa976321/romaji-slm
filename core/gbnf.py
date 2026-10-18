@@ -31,17 +31,7 @@ def gbnf_literal(b: bytes) -> str:
 
 def _live_nodes(m: LatticeMatcher) -> set[int]:
     """終点へ届く節点（後ろ向きの到達可能性）。"""
-    back: dict[int, set[int]] = {}
-    for s, arcs in m.out.items():
-        for _, e in arcs:
-            back.setdefault(e, set()).add(s)
-    live, stack = {m.final}, [m.final]
-    while stack:
-        for s in back.get(stack.pop(), ()):
-            if s not in live:
-                live.add(s)
-                stack.append(s)
-    return live
+    return m.live_nodes()
 
 
 def matcher_grammar(m: LatticeMatcher) -> str | None:
@@ -73,6 +63,39 @@ def matcher_grammar(m: LatticeMatcher) -> str | None:
                     alts.append(a)
         if alts:
             rules[s] = alts
+    lines = ["root ::= n0"] + [f"n{s} ::= " + " | ".join(alts) for s, alts in rules.items()]
+    return "\n".join(lines) + "\n"
+
+
+DEAD_END = '"\\x7F"'  # 行き止まりの印（DEL。辞書の表層には現れない。zenz の語彙では1バイトの1トークン）
+
+
+def matcher_grammar_stop(m: LatticeMatcher, sentinel: str = DEAD_END) -> str:
+    """行き止まりを刈らない文法（torch 版 ConstrainedZenz の振る舞いを再現する変種）。
+
+    出ていく弧の無い節点（終点を除く）は印 sentinel だけを許す。印は logit_bias で最後の手段にしておき
+    （core.llama_backend）、出力に印が出たら「候補が尽きて止まった」= 未完とみなす。
+    """
+    if m.final == 0:
+        return 'root ::= ""\n'
+    reach, stack = {0}, [0]
+    while stack:
+        for _, e in m.out.get(stack.pop(), ()):
+            if e not in reach:
+                reach.add(e)
+                stack.append(e)
+    final_cont = bool(m.out.get(m.final))
+    rules: dict[int, list[str]] = {}
+    for s in sorted(reach):
+        if s == m.final and not final_cont:
+            continue
+        alts: list[str] = []
+        for b, e in m.out.get(s, ()):
+            lit = gbnf_literal(b)
+            for a in ([lit] if e == m.final else []) + ([f"{lit} n{e}"] if e != m.final or final_cont else []):
+                if a not in alts:
+                    alts.append(a)
+        rules[s] = alts or [sentinel]
     lines = ["root ::= n0"] + [f"n{s} ::= " + " | ".join(alts) for s, alts in rules.items()]
     return "\n".join(lines) + "\n"
 

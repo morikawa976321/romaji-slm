@@ -7,6 +7,7 @@
 """
 
 import json
+import re
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,7 +52,8 @@ def load_jsonl(path: Path | str, prefix: str = "") -> list[Item]:
     for i, line in enumerate(l for l in lines if l.strip()):
         d = json.loads(line)
         meta = d.get("meta") or {}
-        refs = [d["output"], *meta.get("alternatives", [])]
+        # 正解の無い行（読み段のセット typo_hard など）は refs が空。実行系どうしの出力の突き合わせ（eval.parity）にだけ使う
+        refs = [d["output"], *meta.get("alternatives", [])] if "output" in d else []
         items.append(Item(
             id=f"{prefix}{i}", romaji=d["romaji"], refs=refs,
             left_context=d.get("left_context") or "", category=meta.get("category", "all"), meta=meta,
@@ -78,6 +80,27 @@ def load_ajimee(use_context: bool, path: Path = AJIMEE_PATH) -> list[Item]:
     ]
 
 
+_WAC_SURF = re.compile(r"[ぁ-ゖァ-ヺー一-鿿々、。「」・]+")
+_WAC_KANA = re.compile(r"[ァ-ヴー、。「」・]+")
+
+
+def load_wac_test(limit: int = 200) -> list[Item]:
+    """京都大学 Wikipedia 注釈コーパスの test（読みの言語モデルの学習に使っていない）から、かな・漢字・句読点だけの
+    10〜45 字の文。正解は原文の表層、打鍵列は人手の読みをローマ字にしたもの。初回にコーパスを取りに行く
+    （models/wac。データはコミットしない）。読み段の調整に使った wac-test（eval/reading_bench.py）とは別で、漢字を含む。"""
+    from core.kana_lm import to_katakana, wac_sentences
+
+    items = []
+    for sent in wac_sentences(("test",)):
+        surf = "".join(s for s, _ in sent)
+        kana = "".join(s if s in "、。「」・" else to_katakana(r) for s, r in sent)
+        if not (10 <= len(surf) <= 45 and _WAC_SURF.fullmatch(surf) and _WAC_KANA.fullmatch(kana)):
+            continue
+        items.append(Item(id=str(len(items)), romaji=kata_to_romaji(kana), refs=[surf], category="wac",
+                          meta={"kana": kana}))
+    return items[:limit]
+
+
 def load_set(name: str, limit: int | None = None) -> list[Item]:
     """name: ajimee（左文脈あり）/ ajimee-noctx / user_style / gen_test / gen_dev / gen_val / file:<jsonl のパス>"""
     if name == "ajimee":
@@ -86,6 +109,8 @@ def load_set(name: str, limit: int | None = None) -> list[Item]:
         items = load_ajimee(False)
     elif name == "user_style":
         items = load_jsonl(USER_STYLE_PATH)
+    elif name == "wac_test":
+        items = load_wac_test()
     elif name in GEN_SETS:
         items = load_jsonl(SETS / f"{name}.jsonl")
     elif name.startswith("file:"):

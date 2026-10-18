@@ -117,7 +117,8 @@ class CorePipeline:
                  n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None,
                  batched: bool = True, punct: str = "insert", en_case: str = "typed",
                  tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None,
-                 preselect: bool = True, n_pre: int = 30, punct_end: bool = False, user_dict=None):
+                 preselect: bool = True, n_pre: int = 30, punct_end: bool = False, user_dict=None,
+                 max_tries: int = 2000, prune: bool = False):
         """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
         punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
         既定の punct="insert"・en_case="typed" は本人の選択（docs/decisions.md「本人の回答」2026-10-15）。
@@ -126,6 +127,8 @@ class CorePipeline:
         Wikipedia の断片（gen_test omit_punct）では文末に句点を付けすぎるが、本人の用途は完結した文なのでこちらに寄せた）。
         backend: 生成と採点の差し替え（core.llama_backend.LlamaBackend）。decode_batch と fluency を持つもの。
         None なら model を transformers で読む。
+        max_tries / prune: transformers 版の制約付き生成の探索の幅と行き止まりの刈り込み（core.constrained.ConstrainedZenz。
+        llama-server 版との比較用。docs/LLAMA_PARITY.md）。
         """
         self.dic = Dictionary.load()
         # user_dict: 本人のユーザー辞書（core.userdict）。None なら読まない（評価の再現性のため。常駐入力は既定の置き場所を渡す）
@@ -139,7 +142,7 @@ class CorePipeline:
         self.backend = backend
         if backend is None:
             self.scorer = ZenzScorer(model, device)
-            self.cz = ConstrainedZenz(self.scorer)
+            self.cz = ConstrainedZenz(self.scorer, max_tries=max_tries, prune=prune)
         self.k, self.n_read, self.w_read, self.w_flu = k, n_read, w_read, w_flu
         self.batched = batched  # k 件の制約付き生成を1バッチで回す（False は1件ずつ。速度の比較用）
         self.punct, self.en_case = punct, en_case
@@ -261,34 +264,11 @@ class CorePipeline:
         return Result(text, prompt=best["reading"], candidates=tuple(c["text"] for c in cands),
                       edited=bool(best["edits"]))
 
-    def convert_nbest(self, romaji: str, left_context: str = "", n: int = 6) -> list[str]:
-        """常駐の入力（ime/）が次候補に使う、重複のない候補の列。1 位は convert と同じ文。
-
-        2 位以下は句読点を補う採点をし直さず（1 件ごとに 100 ms 以上かかる）、1 位が文末に補った記号だけを同じく付ける。
-        最後に 1 位の読みのひらがなを置く（辞書に無い語を打ったときの逃げ道）。
-        """
-        cands = self.candidates(romaji, left_context)
-        if not cands:
-            return []
-        best = cands[0]
-        first = self._render_best(best, romaji, left_context)
-        end = first[-1] if first and first[-1] in "。？" and not best["text"].endswith(first[-1]) else ""
-        out = [first]
-        for c in cands[1:]:
-            if c["score"] == float("-inf"):
-                continue
-            t = c["text"]
-            if end and t and t[-1] not in _PUNCT:
-                t += end
-            out.append(render_en_case(t, c["reading_obj"], self.en_case, c["bounds"]))
-        reading = "".join(chr(ord(ch) - 0x60) if "ァ" <= ch <= "ヶ" else ch for ch in best["reading"])
-        if end and reading and reading[-1] not in _PUNCT:
-            reading += end
-        out = list(dict.fromkeys(t for t in out if t))
-        if reading in out[1:]:
-            out.remove(reading)
-        out = out[: n - 1]
-        return out + [reading] if reading and reading not in out else out
+    def convert_nbest(self, romaji: str, left_context: str = "", n: int = 6, order: str | None = None,
+                      edit_slots: int | None = None) -> list[str]:
+        """常駐の入力（ime/）が次候補に使う、重複のない候補の列。1 位は convert と同じ文。並べ方は core.window。"""
+        from . import window
+        return window.nbest(self, romaji, left_context, n, order or window.DEFAULT_ORDER, edit_slots)
 
     def convert(self, romaji: str, left_context: str = "") -> str:
         return self.convert_detailed(romaji, left_context).text

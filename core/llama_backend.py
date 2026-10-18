@@ -10,8 +10,13 @@ core.constrained.ConstrainedZenz（transformers）と同じ量を返す:
 読みの k 件は、llama-server のスロット（`-np`）の数まで並列に投げる。
 """
 
+import http.client
+import json
 import math
+import threading
 import time
+import urllib.parse
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -19,7 +24,7 @@ from eval.prompts import CONTEXT, INPUT
 from infer.llama import LlamaServer
 
 from .constrained import Decoded, LatticeMatcher
-from .gbnf import bounds_from_text, gbnf_literal, grammar_size, matcher_grammar
+from .gbnf import DEAD_END, bounds_from_text, gbnf_literal, grammar_size, matcher_grammar, matcher_grammar_stop
 from .kanakanji import Dictionary
 from .pipeline import CorePipeline
 from .select import scoring_text, zenz_prompt
@@ -82,10 +87,29 @@ class LlamaBackend:
 
     def __init__(self, model: str | Path | None = None, *, url: str | None = None, n_slots: int = 5,
                  threads: int | None = None, bin_dir: str | Path | None = None, n_gpu_layers: int | None = None,
-                 extra_args: list[str] | None = None):
+                 extra_args: list[str] | None = None, dead_ends: str = "prune", fluency_mode: str = "gen",
+                 refill: str = "full", keep_alive: bool = False):
+        """変種（docs/LLAMA_PARITY.md。既定はどれも従来の振る舞い）:
+
+        dead_ends: "prune" = 文法で行き止まりを刈る（従来）。"stop" = 刈らずに、行き止まりに入ったら未完にする
+          （torch 版 ConstrainedZenz と同じ探索）。
+        fluency_mode: "gen" = 文字列の文法で強制生成し、分割が正規と違えば位置ごとに取り直す（従来）。
+          "tok" = 正規のトークン列をトークン ID の文法（`<[id]>`）で強制する（分割の取り直しが起きない）。
+        refill: "full" = 載らなかった logprob を1位置1要求・語彙全体で取り直す（従来）。"fast" = 1候補の全位置を
+          1要求（プロンプトの配列）にまとめ、まず上位 64 で探し、無ければ語彙全体で取り直す。トークン化も覚えておく。
+          "eos" = "fast" に加えて、自然さ（fluency_mode="tok" のとき）は文の後ろの EOS の項目の上位から入力開始の印の
+          1 バイト目の確率を取り、2・3 バイト目は 0 とみなす（torch 版の実測で |logprob| < 1e-4。取り直しの要求が要らない）。
+        keep_alive: HTTP の接続をスレッドごとに使い回す（urllib は要求ごとに接続し直す）。
+        """
+        if dead_ends not in ("prune", "stop") or fluency_mode not in ("gen", "tok") or refill not in ("full", "fast", "eos"):
+            raise ValueError(f"変種の指定が想定外: {dead_ends=} {fluency_mode=} {refill=}")
         self.server = LlamaServer(model, url=url, bin_dir=bin_dir, threads=threads, n_gpu_layers=n_gpu_layers,
                                   extra_args=extra_args, n_slots=n_slots)
         self.n_slots = n_slots
+        self.dead_ends, self.fluency_mode, self.refill, self.keep_alive = dead_ends, fluency_mode, refill, keep_alive
+        self._local = threading.local()
+        self._tok_cache: dict[str, list[int]] = {}
+        self.http: list[dict] = []  # 1 HTTP 要求ごとの記録（速度の内訳。eval/parity_speed.py が読む）
         self.pool = ThreadPoolExecutor(max_workers=n_slots)
         models = self.server._request("GET", "/v1/models").get("data") or [{}]
         meta = models[0].get("meta") or {}
@@ -100,10 +124,59 @@ class LlamaBackend:
         # 単独では UTF-8 として完結しないトークン（字の途中のバイト）。強制生成の分割を正規の分割に揃えるのに使う
         self.partial = {i for i, b in enumerate(self.tok_bytes or []) if b and not _valid_utf8(b)}
         self.ban_partial = self.ban + [[i, False] for i in sorted(self.partial)]
+        # 行き止まりの印は、ほかに許すトークンが無いときだけ選ばれるようにする（dead_ends="stop"）
+        dead = self.tokenize("\x7f")
+        self.dead_id = dead[0] if len(dead) == 1 else None
+        self.ban_dead = self.ban + ([[self.dead_id, -1000.0]] if self.dead_id is not None else [])
+        self.n_dead = 0  # 行き止まりで止まった生成の数
+        self.input_ids = self.tokenize(INPUT)
         self.eos_logprob_included: bool | None = None  # EOS で止まった最初の応答で決まる（docs に記録する事実）
         self.n_refill = 0  # 載らなかった logprob を取り直した回数
         self.n_resplit = 0  # 自然さの強制生成が正規の分割にならず、位置ごとに取り直した回数
+        self.n_refill_wide = 0  # refill="fast" で上位に無く、語彙全体で取り直した回数
         self.log: list[dict] = []  # 1要求ごとの記録（文法の大きさ・timings）。eval/bench_backend.py が読む
+
+    def _post(self, path: str, body: dict, kind: str) -> dict | list:
+        """POST して JSON を返す。所要時間と大きさを self.http に記録する。"""
+        t0 = time.perf_counter()
+        data = json.dumps(body).encode()
+        if self.keep_alive:
+            conn = getattr(self._local, "conn", None)
+            if conn is None:
+                u = urllib.parse.urlsplit(self.server.url)
+                conn = self._local.conn = http.client.HTTPConnection(u.hostname, u.port, timeout=60)
+            conn.request("POST", path, body=data, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            raw = resp.read()
+            if resp.status != 200:
+                raise RuntimeError(f"HTTP {resp.status}: {path} {raw[:500]!r}")
+        else:
+            req = urllib.request.Request(self.server.url + path, data=data, method="POST",
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                raw = r.read()
+        t1 = time.perf_counter()
+        out = json.loads(raw.decode())
+        t2 = time.perf_counter()
+        res = out if isinstance(out, list) else [out]
+        tms = [x.get("timings") or {} for x in res if isinstance(x, dict)]
+        self.http.append({"kind": kind, "ms": (t2 - t0) * 1000, "parse_ms": (t2 - t1) * 1000,
+                          "req_bytes": len(data), "resp_bytes": len(raw), "n_prompts": len(res),
+                          "prompt_ms": sum(t.get("prompt_ms", 0) for t in tms),
+                          "predicted_ms": sum(t.get("predicted_ms", 0) for t in tms),
+                          "prompt_n": sum(t.get("prompt_n", 0) for t in tms),
+                          "predicted_n": sum(t.get("predicted_n", 0) for t in tms)})
+        return out
+
+    def tokenize(self, text: str) -> list[int]:
+        """`/completion` と同じ条件（特殊トークンを足す・解釈する）でトークン化する。"""
+        if self.refill != "full" and text in self._tok_cache:
+            return self._tok_cache[text]
+        ids = self._post("/tokenize", {"content": text, "add_special": True, "parse_special": True},
+                         "tokenize")["tokens"]
+        if self.refill != "full":
+            self._tok_cache[text] = ids
+        return ids
 
     def _vocab_bytes(self) -> list[bytes] | None:
         """トークン ID → バイト列。語彙全体の確率を1回取り、各項目の `bytes` から作る。古い版で無ければ None。"""
@@ -120,18 +193,18 @@ class LlamaBackend:
         return out
 
     def _complete(self, prompt: str, grammar: str, n_predict: int, kind: str,
-                  ban: list | None = None) -> tuple[dict, list[float]]:
+                  ban: list | None = None, n_probs: int = 1) -> tuple[dict, list[float]]:
         """制約付きで貪欲生成し、(応答, 生成した各トークンの logprob) を返す。"""
         t0 = time.perf_counter()
-        r = self.server._request("POST", "/completion", {
+        r = self._post("/completion", {
             "prompt": prompt, "grammar": grammar, "n_predict": n_predict, "temperature": 0, "top_k": 1,
-            "samplers": ["top_k"], "n_probs": 1, "cache_prompt": True, "return_tokens": True,
+            "samplers": ["top_k"], "n_probs": n_probs, "cache_prompt": True, "return_tokens": True,
             "logit_bias": self.ban if ban is None else ban,
-        })
+        }, kind)
         lps = self._token_logprobs(prompt, r)
         rules, nbytes = grammar_size(grammar)
         self.log.append({"kind": kind, "ms": (time.perf_counter() - t0) * 1000, "grammar_rules": rules,
-                         "grammar_bytes": nbytes, "timings": r.get("timings") or {}})
+                         "grammar_bytes": nbytes, "timings": r.get("timings") or {}, "prompt": prompt})
         return r, lps
 
     def _token_logprobs(self, prompt: str, r: dict) -> list[float]:
@@ -158,32 +231,65 @@ class LlamaBackend:
             self.eos_logprob_included = out[-1] is not None
         missing = [i for i, lp in enumerate(out) if lp is None]
         if missing:
-            ids = self.server.tokenize(prompt)
-            for i in missing:
-                out[i] = self._logprob_at(ids + toks[:i], toks[i])
+            ids = self.tokenize(prompt)
+            if self.refill != "full":
+                lps = self._logprobs_at([ids + toks[:i] for i in missing], [toks[i] for i in missing])
+                for i, lp in zip(missing, lps):
+                    out[i] = lp
+            else:
+                for i in missing:
+                    out[i] = self._logprob_at(ids + toks[:i], toks[i])
         return out
 
     def _logprob_at(self, ids: list[int], tok: int) -> float:
         """トークン列 ids の次に tok が来る対数確率（制約前）。語彙全体の確率を取る。"""
         self.n_refill += 1
-        r = self.server._request("POST", "/completion", {
+        r = self._post("/completion", {
             "prompt": ids, "n_predict": 1, "grammar": _ONLY_EOG, "n_probs": self.n_vocab, "temperature": 0,
-            "cache_prompt": True, "logit_bias": self.ban})
+            "cache_prompt": True, "logit_bias": self.ban}, "refill")
         for e in r["completion_probabilities"][0]["top_logprobs"]:
             if e["id"] == tok:
                 return entry_logprob(e)
         raise RuntimeError(f"トークン {tok} の確率が返らなかった")
 
+    _REFILL_TOP = 64  # refill="fast": まずこの上位で探す
+
+    def _logprobs_at(self, prefixes: list[list[int]], toks: list[int]) -> list[float]:
+        """_logprob_at の複数位置版。1要求（プロンプトの配列）で上位 _REFILL_TOP を取り、無い位置だけ語彙全体で取る。"""
+        self.n_refill += len(toks)
+        rs = self._post("/completion", {
+            "prompt": prefixes, "n_predict": 1, "grammar": _ONLY_EOG, "n_probs": self._REFILL_TOP,
+            "temperature": 0, "cache_prompt": True, "logit_bias": self.ban}, "refill")
+        rs = sorted(rs if isinstance(rs, list) else [rs], key=lambda r: r.get("index", 0))
+        out = []
+        for ids, tok, r in zip(prefixes, toks, rs):
+            hit = [e for e in r["completion_probabilities"][0]["top_logprobs"] if e["id"] == tok]
+            if hit:
+                out.append(entry_logprob(hit[0]))
+            else:
+                self.n_refill -= 1
+                self.n_refill_wide += 1
+                out.append(self._logprob_at(ids, tok))
+        return out
+
     def _decode_one(self, reading: Reading, dic: Dictionary, left_context: str, max_new: int | None,
                     punct: str, en_case: str) -> Decoded:
         m = LatticeMatcher(reading, dic, punct, en_case)
-        g = matcher_grammar(m)
+        stop = self.dead_ends == "stop" and self.dead_id is not None
+        g = matcher_grammar_stop(m) if stop else matcher_grammar(m)
         if g is None:
             # ラティスに終点まで届く経路が無い（ConstrainedZenz では最初の1手で候補が尽きるのと同じ）
             return Decoded("", 0.0, False, ())
         n_predict = max_new or 3 * len(reading.zenz_input()) + 8
-        r, lps = self._complete(zenz_prompt(reading.zenz_input(), left_context), g, n_predict, "decode")
+        r, lps = self._complete(zenz_prompt(reading.zenz_input(), left_context), g, n_predict, "decode",
+                                self.ban_dead if stop else None)
         text = r.get("content", "")
+        toks = r.get("tokens") or []
+        if stop and self.dead_id in toks:
+            # 行き止まりに入った（torch 版では許すトークンが尽きて止まる）。印から後ろは捨てる
+            self.n_dead += 1
+            text = text.split("\x7f")[0]
+            return Decoded(text, sum(lps[:toks.index(self.dead_id)]), False, bounds_from_text(m, text))
         return Decoded(text, sum(lps), _stopped_eos(r), bounds_from_text(m, text))
 
     def decode_batch(self, readings: list[Reading], dic: Dictionary, left_context: str = "",
@@ -197,12 +303,20 @@ class LlamaBackend:
         別の分割（字をバイトのトークンで出すなど）を選びうるので、正規の分割と照合し、違えば位置ごとに取り直す。"""
         target = scoring_text(text) + INPUT
         prompt = CONTEXT + left_context
-        canon = self.server.tokenize(target) if self.tok_bytes is not None else None
-        # 正規の分割に字の途中のバイトが無ければ、それを禁じて強制生成の分割を揃える
-        ban = self.ban_partial if canon is not None and not self.partial.intersection(canon) else None
+        canon = self.tokenize(target) if self.tok_bytes is not None else None
+        n_in = len(self.input_ids)
+        if self.refill == "eos" and self.fluency_mode == "tok" and canon and canon[-n_in:] == self.input_ids:
+            return self._fluency_eos(prompt, canon[:-n_in])
+        if self.fluency_mode == "tok" and canon:
+            # 正規のトークン列を ID の文法で強制する。字の途中のバイトのトークン（入力開始の印など）だけは文字で書く
+            # （b10549 は `<[id]>` で字の途中のバイトを受理すると、その後の EOG で 500 を返した）
+            grammar, ban = self._token_grammar(canon), None
+        else:
+            # 正規の分割に字の途中のバイトが無ければ、それを禁じて強制生成の分割を揃える
+            ban = self.ban_partial if canon is not None and not self.partial.intersection(canon) else None
+            grammar = f"root ::= {gbnf_literal(target.encode())}\n"
         # 生成するトークン数 ≤ バイト数（バイト単位 BPE）。最後に EOS が1つ来る
-        r, lps = self._complete(prompt, f"root ::= {gbnf_literal(target.encode())}\n", len(target.encode()) + 2,
-                                "fluency", ban)
+        r, lps = self._complete(prompt, grammar, len(target.encode()) + 2, "fluency", ban)
         if r.get("content", "") != target:
             raise RuntimeError(f"強制生成が文字列を出し切らなかった: {target!r} → {r.get('content')!r}")
         toks = r.get("tokens") or []
@@ -213,9 +327,43 @@ class LlamaBackend:
             lps = lps[:-1]
         if canon is not None and toks != canon:
             self.n_resplit += 1
-            ids = self.server.tokenize(prompt)
+            ids = self.tokenize(prompt)
             return sum(self._logprob_at(ids + canon[:i], t) for i, t in enumerate(canon))
         return sum(lps)
+
+    _EOS_TOP = 16  # refill="eos": EOS の項目に載せる上位の数（印の1バイト目は torch 版の実測で最悪 9 位）
+
+    def _fluency_eos(self, prompt: str, canon: list[int]) -> float:
+        """文の正規のトークン列だけを強制し、EOS の項目の上位から印の1バイト目の logprob を取る。"""
+        grammar = self._token_grammar(canon) if canon else _ONLY_EOG
+        r, lps = self._complete(prompt, grammar, len(canon) + 1, "fluency", None, self._EOS_TOP)
+        toks = r.get("tokens") or []
+        if toks[:len(canon)] != canon:
+            self.n_resplit += 1
+            ids = self.tokenize(prompt)
+            return sum(self._logprob_at(ids + canon[:i], t) for i, t in enumerate(canon + self.input_ids))
+        last = (r.get("completion_probabilities") or [{}])[-1].get("top_logprobs") or []
+        hit = [e for e in last if e["id"] == self.input_ids[0]] if len(toks) == len(canon) + 1 else []
+        if hit:
+            lp1 = entry_logprob(hit[0])
+        else:
+            self.n_refill_wide += 1
+            lp1 = self._logprob_at(self.tokenize(prompt) + canon, self.input_ids[0])
+        return sum(lps[:len(canon)]) + lp1
+
+    def _token_grammar(self, canon: list[int]) -> str:
+        parts, run = [], bytearray()
+        for t in canon:
+            if t not in self.partial and not run:
+                parts.append(f"<[{t}]>")
+                continue
+            run += self.tok_bytes[t]
+            if _valid_utf8(bytes(run)):
+                parts.append(gbnf_literal(bytes(run)))
+                run.clear()
+        if run:
+            raise RuntimeError(f"正規の分割が UTF-8 として閉じない: {canon}")
+        return "root ::= " + " ".join(parts) + "\n"
 
     def fluency(self, texts: list[str], left_context: str = "") -> list[float]:
         """core.select.fluency と同じ量（EOS は含めない）。"""
@@ -231,9 +379,11 @@ class LlamaCorePipeline(CorePipeline):
 
     def __init__(self, model: str | Path | None = None, *, url: str | None = None, n_slots: int = 5,
                  threads: int | None = None, bin_dir: str | Path | None = None, n_gpu_layers: int | None = None,
-                 name: str | None = None, **kwargs):
+                 name: str | None = None, dead_ends: str = "prune", fluency_mode: str = "gen", refill: str = "full",
+                 keep_alive: bool = False, extra_args: list[str] | None = None, **kwargs):
         backend = LlamaBackend(model, url=url, n_slots=n_slots, threads=threads, bin_dir=bin_dir,
-                               n_gpu_layers=n_gpu_layers)
+                               n_gpu_layers=n_gpu_layers, extra_args=extra_args, dead_ends=dead_ends,
+                               fluency_mode=fluency_mode, refill=refill, keep_alive=keep_alive)
         super().__init__(name=name or f"core-llama({Path(model).name if model else url})", backend=backend,
                          **kwargs)
 
