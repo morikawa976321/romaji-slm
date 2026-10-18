@@ -2,16 +2,17 @@
 #
 #   pwsh -NoProfile -File tools/pack-bench.ps1 [-HfHome <HF_HOME>] [-Gguf <GGUF>] [-LlamaBin <llama.cpp の実行ファイルのフォルダ>] [-OutDir dist]
 #
-# 出力: dist/romaji-slm-bench-<yyyymmdd>-<短いハッシュ>.zip（約 300 MB）
+# 出力: dist/romaji-slm-bench-<yyyymmdd>-<短いハッシュ>.zip（約 400 MB）
 #   bench.cmd              ダブルクリックで測る（tools\thinkpad-bench.ps1 を Windows PowerShell で呼ぶ）
 #   core\ eval\ infer\ ... HEAD のコード（未コミットの変更は入らない）
-#   models\                辞書と読みの LM、zenz-v3.1-small のキャッシュ（models\hf）、GGUF（Q8_0）
+#   models\                辞書と読みの LM、zenz-v3.1-small のキャッシュ（models\hf）、GGUF（Q8_0・F16）
 #   llama-cpu\             llama-server と CPU の部品だけ（CUDA の DLL は外す。ThinkPad に NVIDIA の GPU は無い）
 # - torch は CPU 版。pack-ime.ps1 と同じく pyproject の index を whl/cpu に差し替えて uv lock を取り直す。
 
 param(
     [string]$HfHome = $(if ($env:HF_HOME) { $env:HF_HOME } else { Join-Path $HOME '.cache/huggingface' }),
     [string]$Gguf = 'models/zenz-v3.1-small-gguf/zenz-v3.1-small-Q8_0.gguf',
+    [string]$GgufF16 = 'models/zenz-v3.1-small-gguf/zenz-v3.1-small-F16.gguf',
     [string]$LlamaBin = $(if ($env:LLAMA_CPP_BIN) { $env:LLAMA_CPP_BIN } else { 'C:\Users\tm976\mf\llama' }),
     [string]$OutDir = 'dist'
 )
@@ -70,9 +71,10 @@ Get-ChildItem -LiteralPath $snap -Recurse -File -Force | ForEach-Object {
     Copy-Item -LiteralPath $real $to
 }
 
-Write-Host "GGUF: $Gguf"
-if (-not (Test-Path $Gguf)) { throw "$Gguf が無い（docs/STATUS.md §4 の infer.to_gguf で作る）" }
+Write-Host "GGUF: $Gguf, $GgufF16"
+foreach ($g in $Gguf, $GgufF16) { if (-not (Test-Path $g)) { throw "$g が無い（docs/STATUS.md §4 の infer.to_gguf で作る）" } }
 Copy-Item $Gguf (Join-Path $stage 'models/zenz-v3.1-small-Q8_0.gguf')
+Copy-Item $GgufF16 (Join-Path $stage 'models/zenz-v3.1-small-F16.gguf')
 
 Write-Host "llama-server（CPU の部品だけ）: $LlamaBin"
 $lb = Join-Path $stage 'llama-cpu'

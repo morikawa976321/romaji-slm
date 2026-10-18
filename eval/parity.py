@@ -40,6 +40,9 @@ def run_one(conv, romaji: str, left: str) -> tuple[str, list[dict], bool, float]
 
 
 def cmd_run(args) -> None:
+    if args.torch_threads:
+        import torch
+        torch.set_num_threads(args.torch_threads)
     conv = make_converter(args.converter, args.device, args.model)
     env = env_info(args.device)
     for _ in range(2):
@@ -267,6 +270,7 @@ def main(argv: list[str] | None = None):
     r.add_argument("--set", action="append", required=True, dest="sets")
     r.add_argument("--tag", required=True, help="結果のファイル名の頭")
     r.add_argument("--limit", type=int)
+    r.add_argument("--torch-threads", type=int, help="torch のスレッド数（スレッド数で出力が変わらないかの確認用）")
     c = sub.add_parser("compare")
     c.add_argument("a")
     c.add_argument("b")

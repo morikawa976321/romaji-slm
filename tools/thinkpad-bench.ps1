@@ -9,6 +9,7 @@
 
 param(
     [string]$Gguf = '',
+    [string]$GgufF16 = '',
     [string]$LlamaBin = '',
     [switch]$Quick
 )
@@ -17,6 +18,7 @@ $ErrorActionPreference = 'Continue'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 if (-not $Gguf) { $Gguf = Join-Path $Root 'models\zenz-v3.1-small-Q8_0.gguf' }
+if (-not $GgufF16) { $GgufF16 = Join-Path $Root 'models\zenz-v3.1-small-F16.gguf' }
 if (-not $LlamaBin) { $LlamaBin = Join-Path $Root 'llama-cpu' }
 $Out = Join-Path $Root 'bench-out'
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
@@ -54,31 +56,38 @@ $head = @(
     "- 版: $(if (Test-Path (Join-Path $Root 'VERSION')) { Get-Content (Join-Path $Root 'VERSION') } else { (git rev-parse --short HEAD) })", ''
 )
 
+# 設定の意味は docs/LLAMA_PARITY.md「変種」。torch は今の常駐入力と同じ（句読点 B あり、スレッドは既定）。
+# llama は BOS/EOS を直し（eos=3）、取り直しを無くし（fl=tok,rf=eos）、接続を使い回す（ka=1）。ort は forward だけ ONNX Runtime
 $np = 'file:eval/sets/user_style_nopunct.jsonl'
-$llamaFast = 'np=5,t=8,eos=3,fl=tok,rf=eos,ka=1,p=insert'
+$fast = 'eos=3,fl=tok,rf=eos,ka=1,p=insert'
+$ort = @('--with', 'onnxruntime', '--with', 'onnx')
 $runs = @(
-    @{ tag = 'torch';           args = @('--converter', 'core:p=insert') },
-    @{ tag = 'torch-nopunct';   args = @('--converter', 'core:p=insert', '--set', $np) },
-    @{ tag = 'llama';           args = @('--converter', "core-llama:$llamaFast", '--model', $Gguf) },
-    @{ tag = 'llama-nopunct';   args = @('--converter', "core-llama:$llamaFast", '--model', $Gguf, '--set', $np) }
+    @{ tag = 'torch';            args = @('--converter', 'core:p=insert') },
+    @{ tag = 'torch-t4';         args = @('--converter', 'core:p=insert', '--torch-threads', '4') },
+    @{ tag = 'llama-f16-np1';    args = @('--converter', "core-llama:np=1,t=4,$fast", '--model', $GgufF16) },
+    @{ tag = 'llama-f16-np5';    args = @('--converter', "core-llama:np=5,t=4,$fast", '--model', $GgufF16) },
+    @{ tag = 'ort-t4';           args = @('--converter', 'core-ort:t=4,p=insert'); with = $ort },
+    @{ tag = 'torch-nopunct';    args = @('--converter', 'core:p=insert', '--set', $np) },
+    @{ tag = 'llama-f16-np5-nopunct'; args = @('--converter', "core-llama:np=5,t=4,$fast", '--model', $GgufF16, '--set', $np) }
 )
 if (-not $Quick) {
     $runs += @(
-        @{ tag = 'torch-t4';     args = @('--converter', 'core:p=insert', '--torch-threads', '4') },
         @{ tag = 'torch-t8';     args = @('--converter', 'core:p=insert', '--torch-threads', '8') },
-        @{ tag = 'llama-t4';     args = @('--converter', 'core-llama:np=5,t=4,eos=3,fl=tok,rf=eos,ka=1,p=insert', '--model', $Gguf) },
-        @{ tag = 'llama-t12';    args = @('--converter', 'core-llama:np=5,t=12,eos=3,fl=tok,rf=eos,ka=1,p=insert', '--model', $Gguf) },
-        @{ tag = 'llama-np3';    args = @('--converter', 'core-llama:np=3,t=8,eos=3,fl=tok,rf=eos,ka=1,p=insert', '--model', $Gguf) },
-        @{ tag = 'llama-np8';    args = @('--converter', 'core-llama:np=8,t=8,eos=3,fl=tok,rf=eos,ka=1,p=insert', '--model', $Gguf) }
+        @{ tag = 'llama-q8-np5'; args = @('--converter', "core-llama:np=5,t=4,$fast", '--model', $Gguf) },
+        @{ tag = 'llama-f16-np5-t8'; args = @('--converter', "core-llama:np=5,t=8,$fast", '--model', $GgufF16) },
+        @{ tag = 'ort-t8';       args = @('--converter', 'core-ort:t=8,p=insert'); with = $ort },
+        @{ tag = 'ort-nopunct';  args = @('--converter', 'core-ort:t=4,p=insert', '--set', $np); with = $ort },
+        @{ tag = 'torch-again';  args = @('--converter', 'core:p=insert') }
     )
 }
 
-Write-Host "[2/3] 測ります（$($runs.Count) 通り。1 通り 1〜2 分。測っている間は PC を触らないでください）"
+Write-Host "[2/3] 測ります（$($runs.Count) 通り。1 通り 1〜2 分。測っている間は PC を触らず、ほかのアプリも閉じてください）"
 $i = 0
 foreach ($r in $runs) {
     $i++
     Write-Host "  ($i/$($runs.Count)) $($r.tag)"
-    $a = @('run', '--no-sync', 'python', '-m', 'eval.parity_speed', '--device', 'cpu', '--repeat', '3', '--tag', "tp-$($r.tag)") + $r.args
+    $a = @('run', '--no-sync') + $(if ($r.with) { $r.with } else { @() }) +
+         @('python', '-m', 'eval.parity_speed', '--device', 'cpu', '--repeat', '3', '--tag', "tp-$($r.tag)") + $r.args
     & uv @a 2>> $Log | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "    失敗しました（$Log）" }
 }
