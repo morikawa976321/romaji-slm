@@ -91,6 +91,8 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--model", default="Miwa-Keita/zenz-v3.1-small")
+    # 候補ウィンドウの並べ方（core.window.ORDERS）。本人の OK までは置き換える前の reading のまま（docs/decisions.md D37）
+    ap.add_argument("--window", default="reading")
     ap.add_argument("--log", help="標準出力と標準エラーの行き先（pythonw では両方とも None で、進捗表示が落ちる）")
     args = ap.parse_args(argv)
     if args.log:
@@ -106,7 +108,7 @@ def main(argv=None):
 
     def convert(romaji, ctx):
         reload_user_dict()
-        return holder["p"].convert_nbest(romaji, ctx)
+        return holder["p"].convert_nbest(romaji, ctx, order=args.window)
 
     def reload_user_dict():
         """ユーザー辞書が更新されていたら読み直す（振り返りの後に再起動しなくてよいように）。変換の錠の中で呼ばれる"""
@@ -131,7 +133,7 @@ def main(argv=None):
     print(f"user dict: {default_path()} en={len(ud.en)} word={len(ud.words)} fix={len(ud.fixes)} errors={len(ud.errors)}", flush=True)
     holder["p"] = CorePipeline(model=args.model, device=device, user_dict=ud)
     holder["ud_mtime"] = default_path().stat().st_mtime if default_path().exists() else 0.0
-    holder["p"].convert_nbest("konnichiha")  # 最初の 1 件の遅さ（CUDA の初期化・辞書の索引）を起動時に済ませる
+    holder["p"].convert_nbest("konnichiha", order=args.window)  # 最初の 1 件の遅さ（CUDA の初期化・辞書の索引）を起動時に済ませる
     ready.set()
     print(f"romaji-slm ime server: 127.0.0.1:{args.port} device={device} ready in {time.perf_counter() - t0:.1f}s",
           flush=True)

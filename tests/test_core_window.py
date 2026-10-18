@@ -1,0 +1,126 @@
+"""候補ウィンドウ（core/window.py）: 並べ方の規則と、1 位の読みの別の書き方の集め方。
+
+並べ方は手で組んだ Pool で、別の書き方は極小 GPT-2 と手書きの辞書（tests/test_core_constrained.py と同じもの）で確かめる。
+"""
+
+import types
+
+import pytest
+
+from core.window import ORDERS, Entry, Pool, arrange
+
+
+def _e(text, score, kind="same", edited=None):
+    return Entry(text, score, kind, "", kind == "edit" if edited is None else edited)
+
+
+def _pool(entries, first="行く", hira="いく"):
+    return Pool(_e(first, -13.0, "first", False), _e(hira, float("-inf"), "hira", False) if hira else None, entries)
+
+
+# iku の実測に似せた候補（読みの候補は点数順、別の書き方は点数順）
+ENTRIES = [_e("以降", -23.7, "edit"), _e("行き", -24.9, "edit"), _e("奥", -25.8, "edit"), _e("肉", -26.0, "edit"),
+           _e("インク", -26.2, "edit"), _e("育", -17.3), _e("イク", -17.7), _e("幾", -18.6), _e("逝く", -19.8),
+           _e("いく", -12.6)]
+
+
+def texts(win):
+    return [e.text for e in win]
+
+
+def test_reading_ignores_alternatives():
+    # 置き換える前の並べ方: 読みの候補だけを点数順に 4 件、最後に 1 位の読みのひらがな
+    assert texts(arrange(_pool(ENTRIES), "reading")) == ["行く", "以降", "行き", "奥", "肉", "いく"]
+
+
+def test_same_first_and_merge_put_same_reading_first():
+    assert texts(arrange(_pool(ENTRIES), "same_first")) == ["行く", "育", "イク", "幾", "逝く", "いく"]
+    assert texts(arrange(_pool(ENTRIES), "merge")) == ["行く", "育", "イク", "幾", "逝く", "いく"]
+
+
+def test_quota_keeps_edit_slots():
+    assert texts(arrange(_pool(ENTRIES), "quota", edit_slots=1)) == ["行く", "育", "イク", "幾", "以降", "いく"]
+    assert texts(arrange(_pool(ENTRIES), "quota", edit_slots=2)) == ["行く", "育", "イク", "以降", "行き", "いく"]
+    # 直した読みが点数で入っているなら、枠の分だけ足さない
+    es = [_e("以降", -14.0, "edit"), _e("育", -17.3), _e("イク", -17.7), _e("幾", -18.6), _e("逝く", -19.8)]
+    assert texts(arrange(_pool(es), "quota", edit_slots=1)) == ["行く", "以降", "育", "イク", "幾", "いく"]
+
+
+@pytest.mark.parametrize("order", ORDERS)
+def test_window_shape(order):
+    for hira in ("いく", "行く", ""):
+        win = arrange(_pool(ENTRIES + [_e("行く", -15.0), _e("育", -30.0, "edit")], hira=hira), order, n=6)
+        t = texts(win)
+        assert t[0] == "行く" and len(t) == len(set(t)) and len(t) <= 6
+        if hira and hira != "行く":
+            assert t[-1] == hira
+        if order != "reading":
+            assert len(t) == 6   # ひらがなが 1 位と同じ・無いときは、その枠も候補で埋める
+
+
+def test_digit_width_follows_first():
+    from core.window import _digit_width
+    assert _digit_width("骨董品300点", "骨董品３００点が") == "骨董品３００点"
+    assert _digit_width("３月", "3月に") == "3月"
+    assert _digit_width("300と３", "300と３") == "300と３"   # 1 位が両方の幅を使っていれば触らない
+    assert _digit_width("三百", "骨董品") == "三百"
+
+
+# ---- 別の書き方（極小モデル） ----
+
+pytest.importorskip("torch")
+pytest.importorskip("transformers")
+
+from test_core_constrained import ENTRIES as DIC_ENTRIES, POS, _make_tiny  # noqa: E402
+
+from core.kanakanji import Dictionary  # noqa: E402
+from core.select import ZenzScorer  # noqa: E402
+from core.types import Reading, Seg  # noqa: E402
+from core.window import alternatives  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def scorer(tmp_path_factory):
+    return ZenzScorer(_make_tiny(tmp_path_factory.mktemp("zenz-like-window"), 256), "cpu")
+
+
+@pytest.fixture
+def dic():
+    m = [[1000] * len(POS) for _ in POS]
+    m[0][0] = 0
+    return Dictionary.from_entries(DIC_ENTRIES, m, POS)
+
+
+def _p(scorer, dic, punct="insert", en_case="typed"):
+    return types.SimpleNamespace(scorer=scorer, dic=dic, punct=punct, en_case=en_case, w_flu=1.0, w_read=4.0)
+
+
+def _best(r, text):
+    return {"reading_obj": r, "text": text, "reading": r.zenz_input(), "edits": [], "score": 0.0}
+
+
+def test_logprobs_eos_per_sequence(scorer):
+    prompts, conts = ["a", "b", "c"], ["今日", "天気", "京"]
+    mixed = scorer.logprobs(prompts, conts, eos=[True, False, True])
+    assert mixed[0] == pytest.approx(scorer.logprobs(prompts[:1], conts[:1], eos=True)[0], abs=1e-4)
+    assert mixed[1] == pytest.approx(scorer.logprobs(prompts[1:2], conts[1:2], eos=False)[0], abs=1e-4)
+
+
+def test_alternatives_same_reading(scorer, dic):
+    r = Reading((Seg("kana", 0, 5, "テンキ"),))
+    alts = alternatives(_p(scorer, dic), _best(r, "天気"))
+    got = [a.text for a in alts]
+    assert "転機" in got and "天気" not in got           # 1 位の文そのものは除く
+    assert all(a.kind == "same" and a.reading == "テンキ" for a in alts)
+    assert [a.score for a in alts] == sorted((a.score for a in alts), reverse=True)
+
+
+def test_alternatives_follow_modes(scorer, dic):
+    # 英字は打った綴りのまま（登録表記の GitHub を出さない）、記号は全角・半角の違いだけの候補を並べない
+    r = Reading((Seg("en", 0, 6, "github", ("GitHub", "github")), Seg("kana", 6, 9, "テンキ"),
+                 Seg("sym", 9, 10, ".", ("。", "."))))
+    got = [a.text for a in alternatives(_p(scorer, dic), _best(r, "github天気。"))]
+    assert got and all(t.startswith("github") for t in got)
+    assert "github天気." not in got
+    ja = [a.text for a in alternatives(_p(scorer, dic, punct="ja"), _best(r, "github天気。"))]
+    assert all(not t.endswith(".") for t in ja)

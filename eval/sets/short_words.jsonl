@@ -1,0 +1,52 @@
+{"romaji": "iku", "want": ["行く", "逝く", "往く", "イク", "幾"]}
+{"romaji": "kaku", "want": ["書く", "描く", "各", "核", "角", "格"]}
+{"romaji": "kiru", "want": ["切る", "着る", "斬る"]}
+{"romaji": "miru", "want": ["見る", "観る", "診る", "看る"]}
+{"romaji": "hashi", "want": ["橋", "箸", "端"]}
+{"romaji": "kami", "want": ["紙", "髪", "神", "上"]}
+{"romaji": "kouen", "want": ["公園", "講演", "公演", "後援"]}
+{"romaji": "kikan", "want": ["期間", "機関", "器官", "帰還"]}
+{"romaji": "seikou", "want": ["成功", "精巧", "性向", "精工"]}
+{"romaji": "hen", "want": ["変", "辺", "編", "片"]}
+{"romaji": "kaeru", "want": ["帰る", "変える", "替える", "換える", "返る", "蛙"]}
+{"romaji": "au", "want": ["会う", "合う", "遭う"]}
+{"romaji": "hayai", "want": ["早い", "速い"]}
+{"romaji": "atsui", "want": ["暑い", "熱い", "厚い"]}
+{"romaji": "kiku", "want": ["聞く", "聴く", "効く", "利く", "菊"]}
+{"romaji": "tomaru", "want": ["止まる", "泊まる", "留まる"]}
+{"romaji": "hakaru", "want": ["測る", "計る", "量る", "図る"]}
+{"romaji": "naosu", "want": ["直す", "治す"]}
+{"romaji": "kawa", "want": ["川", "皮", "革", "河"]}
+{"romaji": "hana", "want": ["花", "鼻", "華"]}
+{"romaji": "ame", "want": ["雨", "飴"]}
+{"romaji": "kumo", "want": ["雲", "蜘蛛", "クモ"]}
+{"romaji": "kaki", "want": ["柿", "牡蠣", "夏季", "下記", "火気"]}
+{"romaji": "shikou", "want": ["思考", "志向", "施行", "嗜好", "試行"]}
+{"romaji": "ishi", "want": ["意思", "意志", "石", "医師"]}
+{"romaji": "koukou", "want": ["高校", "孝行", "航行"]}
+{"romaji": "seika", "want": ["成果", "生花", "青果", "製菓", "聖火"]}
+{"romaji": "omoi", "want": ["重い", "思い", "想い"]}
+{"romaji": "sasu", "want": ["指す", "刺す", "差す", "挿す"]}
+{"romaji": "tsuku", "want": ["付く", "着く", "突く", "就く", "点く"]}
+{"romaji": "toru", "want": ["取る", "撮る", "採る", "捕る", "執る"]}
+{"romaji": "utsu", "want": ["打つ", "撃つ", "討つ"]}
+{"romaji": "hiku", "want": ["引く", "弾く", "轢く", "挽く"]}
+{"romaji": "naku", "want": ["泣く", "鳴く", "無く"]}
+{"romaji": "noru", "want": ["乗る", "載る"]}
+{"romaji": "haru", "want": ["春", "張る", "貼る"]}
+{"romaji": "aki", "want": ["秋", "空き", "飽き"]}
+{"romaji": "kai", "want": ["会", "回", "階", "貝", "買い"]}
+{"romaji": "ki", "want": ["木", "気", "機", "期", "器"]}
+{"romaji": "me", "want": ["目", "芽", "眼"]}
+{"romaji": "eki", "want": ["駅", "液", "益"]}
+{"romaji": "you", "want": ["用", "様", "要", "陽", "酔う"]}
+{"romaji": "kouka", "want": ["効果", "硬貨", "高価", "校歌", "降下"]}
+{"romaji": "jishin", "want": ["自信", "地震", "自身"]}
+{"romaji": "kikai", "want": ["機会", "機械"]}
+{"romaji": "kanji", "want": ["漢字", "感じ", "幹事"]}
+{"romaji": "ikou", "want": ["以降", "意向", "移行"]}
+{"romaji": "denki", "want": ["電気", "伝記", "電機"]}
+{"romaji": "kisha", "want": ["記者", "汽車", "貴社", "帰社"]}
+{"romaji": "tokei", "want": ["時計", "統計"]}
+{"romaji": "kagaku", "want": ["科学", "化学"]}
+{"romaji": "hoshou", "want": ["保証", "保障", "補償"]}

@@ -83,18 +83,18 @@ def fake_pipeline(cands, rendered):
 
 
 def cand(text, reading, score=0.0):
-    return {"text": text, "reading": reading, "score": score, "reading_obj": None, "bounds": ()}
+    return {"text": text, "reading": reading, "score": score, "reading_obj": None, "bounds": (), "edits": []}
 
 
 def test_convert_nbest_first_is_rendered_and_end_mark_is_shared():
     p = fake_pipeline([cand("明日は雨か", "アシタハアメカ"), cand("明日は飴か", "アシタハアメカ"),
                        cand("x", "x", float("-inf"))], "明日は雨か。")
-    assert p.convert_nbest("ashitahaameka") == ["明日は雨か。", "明日は飴か。", "あしたはあめか。"]
+    assert p.convert_nbest("ashitahaameka", order="reading") == ["明日は雨か。", "明日は飴か。", "あしたはあめか。"]
 
 
 def test_convert_nbest_keeps_first_even_if_it_equals_the_reading():
     p = fake_pipeline([cand("わたし", "ワタシ"), cand("和菓子", "ワカシ")], "わたし")
-    assert p.convert_nbest("watashi") == ["わたし", "和菓子"]
+    assert p.convert_nbest("watashi", order="reading") == ["わたし", "和菓子"]
 
 
 @pytest.mark.skipif(sys.platform != "win32" or not shutil.which("pwsh"), reason="csc は Windows の .NET Framework 同梱")

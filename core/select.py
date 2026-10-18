@@ -44,13 +44,15 @@ class ZenzScorer:
         self.model = AutoModelForCausalLM.from_pretrained(model, dtype=torch.float32).to(device).eval()
         self.pad = self.tok.pad_token_id if self.tok.pad_token_id is not None else self.tok.eos_token_id
 
-    def logprobs(self, prompts: list[str], continuations: list[str], eos: bool = True) -> list[float]:
-        """各 i について log P(continuations[i] (+ EOS) | prompts[i]) を返す（トークンの対数確率の和）。"""
+    def logprobs(self, prompts: list[str], continuations: list[str], eos: bool | list[bool] = True) -> list[float]:
+        """各 i について log P(continuations[i] (+ EOS) | prompts[i]) を返す（トークンの対数確率の和）。
+        eos は系列ごとにも渡せる（変換の確率と自然さを1つのバッチで測るとき。core.window）。"""
         torch, tok = self._torch, self.tok
+        eos = eos if isinstance(eos, list) else [eos] * len(prompts)
         seqs = []
-        for p, c in zip(prompts, continuations):
+        for p, c, e in zip(prompts, continuations, eos):
             p_ids = tok(p, add_special_tokens=False).input_ids
-            c_ids = tok(c, add_special_tokens=False).input_ids + ([tok.eos_token_id] if eos else [])
+            c_ids = tok(c, add_special_tokens=False).input_ids + ([tok.eos_token_id] if e else [])
             seqs.append((p_ids + c_ids, len(p_ids)))
         out: list[float] = []
         for k in range(0, len(seqs), self.batch):
