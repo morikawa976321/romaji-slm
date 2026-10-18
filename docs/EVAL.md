@@ -238,6 +238,10 @@ score = zenz の変換の対数確率 + f × 完成文の自然さ − w × 読�
 
 #### 実行系の比較（torch 版 `core` と llama-server 版 `core-llama`、2026-10-15）
 
+**訂正（2026-10-18、[LLAMA_PARITY.md](LLAMA_PARITY.md)）: この節の llama-server の数値は GPU のもの。** b10549 の CUDA ビルドは `-ngl` の既定が `auto` で、
+RTX 5060 Ti に全層を載せていた（「CUDA ビルドの CPU 実行」は誤り）。また約 1 ポイントの精度の差の原因は、GGUF の BOS/EOS の ID の取り違え
+（llama 版が本物の `</s>` を禁じていた）だった。直すと精度は torch 版と同じになる。CPU だけの比較と原因の切り分けは LLAMA_PARITY.md。
+
 `eval/bench_backend.py`、Core Ultra 5 245KF、CPU。llama-server は b10549（CUDA ビルドの CPU 実行）、zenz-v3.1-small を `infer.to_gguf` で Q8_0 にしたもの（99 MB）。入力は user_style の正解 20〜45 字の 14 件、空回し 2 回。
 
 | 変換器 | 中央値 | p95 | 正解率（14件） | 1位が core と一致 | 文法 規則/バイト | 生成 ms/tok | 生成1要求 | 自然さ1要求 |

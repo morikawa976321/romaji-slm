@@ -72,6 +72,12 @@ n9 ::= "ね" | "ネ"             # 終点へ入る弧は継続なし
 
 ### llama-server の癖への対処
 
+- **CUDA ビルドは黙って GPU に載せる。** b10549 の `-ngl` の既定は `auto` で、`LlamaServer` は `-ngl` を渡さないので、手元の CUDA ビルドでは全層が GPU に載る。
+  `-ngl 0` でも既定の `--op-offload` で一部の計算を GPU に回す。CPU の速さを測るときは CUDA の DLL を外した版（`tools/pack-bench.ps1` の `llama-cpu`）を使う。
+  2026-10-15 の「CPU で torch 版の約 0.55 倍」（D12）は GPU の数値だった（[LLAMA_PARITY.md](LLAMA_PARITY.md)）。
+- **GGUF の BOS/EOS の ID が誤っている。** 上の「transformers 版との差」の表。起動時の `--override-kv` で直す（`core-llama:eos=3`）。
+- **`-np 5` で 1 スロット 256 トークン**（b10549 は `-c 0` の 1280 をスロットで割る）。長い左文脈では `-c` を 1024×スロット数にする。
+- **要求ごとに接続し直すと、連続実行で Windows のポートが尽きる**（WinError 10055・10060）。1 件あたり 47 要求（取り直しを含む）のため。`ka=1` で接続を使い回す。
 - **`[PAD]` が EOG になる。** llama.cpp 62df181 の語彙の読み込み（`src/llama-vocab.cpp`）は、`[PAD]` という名前のトークンを
   FIM_PAD とみなし、EOG の集合に入れる（Kimi-K2 向けの表）。zenz の語彙も `[PAD]`（ID 1）を持つので、文法の終点で
   `</s>` より `[PAD]` の確率が高いと `[PAD]` を選んで止まり、logp が変わる（極小モデルで実際に起きた）。
