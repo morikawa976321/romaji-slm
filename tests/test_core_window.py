@@ -75,6 +75,43 @@ def test_look_alike_duplicates_share_a_slot():
     assert "了解!ありがとう。" in texts(arrange(pl, "reading"))   # reading は置き換える前と同じ（文字列の一致だけで除く）
 
 
+def test_hira_look_alike_of_first_does_not_take_a_slot():
+    es = [_e("有難う!", -15.0), _e("在り難う!", -16.0), _e("アリガトウ!", -17.0), _e("有り難う!", -18.0),
+          _e("蟻が十!", -19.0)]
+    pl = Pool(_e("ありがとう!", -13.0, "first", False), _e("ありがとう！", float("-inf"), "hira", False), es)
+    t = texts(arrange(pl, "merge"))
+    assert "ありがとう！" not in t and len(t) == 6
+    assert texts(arrange(pl, "reading")) == ["ありがとう!", "ありがとう！"]   # reading は置き換える前と同じ
+
+
+def _fake_pipeline(cands, rendered, en_case="typed"):
+    return types.SimpleNamespace(candidates=lambda romaji, ctx: cands, _render_best=lambda best, romaji, ctx: rendered,
+                                 en_case=en_case, backend=None)
+
+
+def test_pool_keeps_first_when_alternatives_fail(monkeypatch):
+    import core.window as w
+
+    def boom(*a, **k):
+        raise RuntimeError("out of memory")
+    monkeypatch.setattr(w, "alternatives", boom)
+    cands = [{"text": "行く", "score": -13.0, "reading": "イク", "reading_obj": None, "bounds": (), "edits": []},
+             {"text": "以降", "score": -23.7, "reading": "イコウ", "reading_obj": None, "bounds": (), "edits": ["+o"]}]
+    pl = w.pool(_fake_pipeline(cands, "行く"), "iku")
+    assert texts(arrange(pl, "merge")) == ["行く", "以降", "いく"]
+
+
+def test_end_mark_keeps_registered_en_at_the_end():
+    # 1 位が文末に「。」を補ったとき、末尾が英語区間の候補も登録表記に描画する（en_case=registered）
+    from core.types import Reading, Seg
+    from core.window import pool
+    r = Reading((Seg("kana", 0, 5, "テンキ"), Seg("en", 5, 11, "github", ("GitHub", "github"))))
+    cands = [{"text": "天気github", "score": -10.0, "reading": "テンキgithub", "reading_obj": r, "bounds": (2,), "edits": []},
+             {"text": "転機github", "score": -12.0, "reading": "テンキgithub", "reading_obj": r, "bounds": (2,), "edits": []}]
+    pl = pool(_fake_pipeline(cands, "天気GitHub。", "registered"), "tenkigithub", alts=False)
+    assert [e.text for e in pl.entries] == ["転機GitHub。"]
+
+
 # ---- 別の書き方（極小モデル） ----
 
 pytest.importorskip("torch")
@@ -133,3 +170,9 @@ def test_alternatives_follow_modes(scorer, dic):
     assert "github天気." not in got
     ja = [a.text for a in alternatives(_p(scorer, dic, punct="ja"), _best(r, "github天気。"))]
     assert all(not t.endswith(".") for t in ja)
+
+
+def test_alternatives_registered_en_with_end_mark(scorer, dic):
+    r = Reading((Seg("kana", 0, 5, "テンキ"), Seg("en", 5, 11, "github", ("GitHub", "github"))))
+    got = [a.text for a in alternatives(_p(scorer, dic, en_case="registered"), _best(r, "天気github"), end="。")]
+    assert "転機GitHub。" in got
