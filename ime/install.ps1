@@ -4,7 +4,7 @@
 #   pwsh -NoProfile -File ime/install.ps1 -Stage                     # 組み立てと試験だけ（動いている常駐に触れない）
 #   pwsh -NoProfile -File ime/install.ps1 -Swap                      # 組み立て済みの版に差し替えて起動する
 #
-# 入れる先: %LOCALAPPDATA%\romaji-slm\
+# 入れる先: %LOCALAPPDATA%\romaji-slm\（環境変数 ROMAJI_SLM_DATA で替えられる）
 #   RomajiSlmIme.exe   トレイアプリ（入れた版の ime/ を ime/build.ps1 でビルドしたもの）。.prev はひとつ前
 #   app\               入れた版のコード（git archive）・辞書と読みの LM の写し・専用の .venv
 #   app.next\          組み立てた版（-Stage の結果）。app.prev\ はひとつ前の版（次の組み立てで使い回し、.venv の差分だけ直す）
@@ -17,11 +17,16 @@
 # トレイアプリの自動更新は -Stage を裏で動かし、打っていない間にトレイ自身が -Swap を起動して自分から終わる
 # （外から止めると、打ちかけの文が消える）。
 
-param([switch]$NoStartup, [switch]$NoLaunch, [switch]$Stage, [switch]$Swap)
+param([switch]$NoStartup, [switch]$NoLaunch, [switch]$Stage, [switch]$Swap,
+      [switch]$NoShortcuts)   # NoShortcuts: ショートカットを一切触らない（別の場所に試しに入れるとき。今のショートカットを上書きしない）
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$dst = Join-Path $env:LOCALAPPDATA 'romaji-slm'
+# ROMAJI_SLM_DATA: 入れる先を替える（試験で、動いている常駐に触れずに試すため。トレイアプリと同じ名前）
+$dst = if ($env:ROMAJI_SLM_DATA) { $env:ROMAJI_SLM_DATA } else { Join-Path $env:LOCALAPPDATA 'romaji-slm' }
+# torch: NVIDIA の GPU が無い PC（ThinkPad）では CPU 版にする。GPU 版の uv.lock のまま入れると数 GB を取りに行く。
+# ROMAJI_SLM_TORCH=cpu|cuda で決め打ちできる（試験用）
+$torch = if ($env:ROMAJI_SLM_TORCH) { $env:ROMAJI_SLM_TORCH } elseif (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { 'cuda' } else { 'cpu' }
 $app = Join-Path $dst 'app'
 $next = Join-Path $dst 'app.next'
 $prev = Join-Path $dst 'app.prev'
@@ -80,10 +85,24 @@ function Build-Next {
             Copy-Item $f "$next/$f"
         }
     }
+    # zenz のキャッシュがリポジトリにあれば写す（ThinkPad の写し元。ime/setup-follower.ps1 が配布 zip から置く）。
+    # 変換サーバは app\models\hf があればそこを使う（ime/server.py）
+    if (Test-Path 'models/hf/hub') {
+        robocopy models\hf "$next\models\hf" /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "robocopy に失敗した ($LASTEXITCODE)" }
+    }
 
-    Write-Host 'Python の環境: uv sync（torch は uv のキャッシュから。GPU 版の uv.lock をそのまま使う）'
     Push-Location $next
     try {
+        if ($torch -eq 'cpu') {
+            Write-Host 'Python の環境: torch を CPU 版の index に差し替えて uv lock → uv sync（GPU の無い PC）'
+            $py = Get-Content -Raw -Encoding utf8 pyproject.toml
+            Set-Content -NoNewline -Encoding utf8NoBOM pyproject.toml ($py -replace 'https://download\.pytorch\.org/whl/[A-Za-z0-9_.]+', 'https://download.pytorch.org/whl/cpu')
+            uv lock 2>&1 | ForEach-Object { Write-Host "  $_" }
+            if ($LASTEXITCODE) { throw 'uv lock に失敗した（download.pytorch.org に届かない等）' }
+        } else {
+            Write-Host 'Python の環境: uv sync（torch は uv のキャッシュから。GPU 版の uv.lock をそのまま使う）'
+        }
         uv sync --frozen --no-dev 2>&1 | ForEach-Object { Write-Host "  $_" }
         if ($LASTEXITCODE) { throw 'uv sync に失敗した' }
     } finally { Pop-Location }
@@ -186,7 +205,7 @@ try {
     }
     Swap-In
 
-    if (-not $fromTray) {
+    if (-not $fromTray -and -not $NoShortcuts) {
         $shell = New-Object -ComObject WScript.Shell
         function New-Shortcut([string]$path) {
             $s = $shell.CreateShortcut($path)

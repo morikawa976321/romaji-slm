@@ -31,17 +31,21 @@ namespace RomajiSlm
         [STAThread]
         static int Main(string[] args)
         {
-            string root = null, selftest = null, selfOut = null;
+            string root = null, selftest = null, selfOut = null, checkOut = null;
             int port = 0;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--root" && i + 1 < args.Length) root = args[++i];
                 else if (args[i] == "--selftest" && i + 2 < args.Length) { selftest = args[++i]; selfOut = args[++i]; }
                 else if (args[i] == "--port" && i + 1 < args.Length) int.TryParse(args[++i], out port);   // 自己試験だけ
+                else if (args[i] == "--check-update" && i + 1 < args.Length) checkOut = args[++i];
             }
             string exeDir = Path.GetDirectoryName(Application.ExecutablePath);
             if (root == null) root = Path.Combine(exeDir, "app");
-            string data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "romaji-slm");
+            // ROMAJI_SLM_DATA: 置き場所を替える（試験で、動いている常駐に触れずに試すため。tools/review_history.py と同じ名前）
+            string data = Environment.GetEnvironmentVariable("ROMAJI_SLM_DATA");
+            if (string.IsNullOrEmpty(data))
+                data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "romaji-slm");
             Directory.CreateDirectory(data);
 
             Native.SetProcessDPIAware();
@@ -50,6 +54,16 @@ namespace RomajiSlm
 
             if (selftest != null)
                 return SelfTest.Run(root, data, selftest, selfOut, port);
+            if (checkOut != null)
+            {
+                // 新しい版の確かめを 1 回だけ行い、結果をファイルに書く（追従モードの試験用。常駐はしない）
+                var cfg = new Config(Path.Combine(data, "ime.ini"));
+                var up = new Updater(root, data, cfg.Pull);
+                up.Check();
+                File.WriteAllText(checkOut, "enabled=" + up.Enabled + "\npull=" + up.PullResult + "\ninstalled=" + up.Installed +
+                                  "\nlatest=" + (up.Latest ?? "") + "\n", new UTF8Encoding(false));
+                return 0;
+            }
 
             // UI スレッドの例外で常駐ごと落とさない（既定はダイアログを出す）。記録して続ける
             string errLog = Path.Combine(data, "ime-error.log");
@@ -78,6 +92,9 @@ namespace RomajiSlm
         public bool History = true;
         public bool AcceptInjected = true;
         public int AutoUpdate = 3;   // 新しい版があるとき、この分数だけ打鍵が無ければ自動で入れ替える（0 で自動ではしない）
+        // 追従モード: 写し元のリポジトリを GitHub のこのブランチに 30 分ごとに追いつかせる（ThinkPad 用。docs/IME.md）。
+        // 空なら取りに行かない（このデスクトップのリポジトリは開発用で、複数のセッションが書いているので既定は空）
+        public string Pull = "";
         // 記録しないアプリの既定: パスワード管理（打った文字は変換に回らないはずだが、念のため記録からも外す）
         public string NoHistoryApps = "1password,keepass,keepassxc,bitwarden,dashlane,lastpass,enpass,roboform";
 
@@ -97,6 +114,7 @@ namespace RomajiSlm
                 else if (k == "accept_injected") AcceptInjected = v != "0";
                 else if (k == "no_history_apps") NoHistoryApps = v;
                 else if (k == "auto_update") int.TryParse(v, out AutoUpdate);
+                else if (k == "pull") Pull = v;
             }
         }
 
@@ -115,7 +133,9 @@ namespace RomajiSlm
                 "# no_history_apps: 記録（history.jsonl）に残さないアプリの exe 名（拡張子なし、カンマ区切り）。例: slack,line\r\n" +
                 "no_history_apps=" + NoHistoryApps + "\r\n" +
                 "# auto_update: リポジトリから入れたとき、新しい版があり、この分数だけ打鍵が無ければ自動で入れ替える。0 で自動ではしない\r\n" +
-                "auto_update=" + AutoUpdate + "\r\n", new UTF8Encoding(false));
+                "auto_update=" + AutoUpdate + "\r\n" +
+                "# pull: 写し元のリポジトリを GitHub のこのブランチ（例 main）に 30 分ごとに追いつかせる。空なら取りに行かない\r\n" +
+                "pull=" + Pull + "\r\n", new UTF8Encoding(false));
         }
     }
 
@@ -527,9 +547,15 @@ namespace RomajiSlm
         public volatile bool Running;
         public event Action<bool, string> StageFinished;   // (通ったか, 失敗の説明。別の更新が動いていたときは null)
 
-        public Updater(string root, string data)
+        readonly string pull;            // 追いつかせるブランチ（空なら取りに行かない）
+        DateTime lastFetch = DateTime.MinValue;
+        public static readonly TimeSpan FetchInterval = TimeSpan.FromMinutes(30);
+        public volatile string PullResult = "";   // 最後に取りに行った結果（診断の記録用）
+
+        public Updater(string root, string data, string pull = "")
         {
             this.data = data;
+            this.pull = (pull ?? "").Trim();
             try { repo = File.ReadAllText(Path.Combine(data, "source.txt"), Encoding.UTF8).Trim(); } catch { }
             try { installed = File.ReadAllText(Path.Combine(root, "VERSION"), Encoding.UTF8).Split(' ')[0].Trim(); } catch { }
             if (repo == "" || !Directory.Exists(repo ?? "")) repo = null;
@@ -558,6 +584,11 @@ namespace RomajiSlm
         public void Check()
         {
             if (!Enabled) return;
+            if (pull != "" && DateTime.Now - lastFetch >= FetchInterval)
+            {
+                lastFetch = DateTime.Now;
+                PullResult = FastForward();
+            }
             string head = Git("rev-parse --short HEAD").Trim();
             if (head == "" || head == installed) { Latest = null; return; }
             // 入れた版がリポジトリに無い（履歴を書き換えた）ときも入れ直す
@@ -643,6 +674,21 @@ namespace RomajiSlm
             catch { return null; }
         }
 
+        /// GitHub から pull のブランチを取ってきて、早送りで追いつけるときだけ追いつく（ThinkPad の写し元は取り込むだけで、
+        /// 書き込まない）。作業ツリーに変更があれば取り込まない（手で触ったものを消さない）。結果の説明を返す
+        string FastForward()
+        {
+            int code;
+            Git("fetch --quiet origin " + pull, out code, 120000);
+            if (code != 0) return "fetch に失敗（終了コード " + code + "。ネットワークか GitHub のログインを確かめる）";
+            if (Git("status --porcelain").Trim() != "") return "作業ツリーに変更があるので取り込まない";
+            string before = Git("rev-parse --short HEAD").Trim();
+            Git("merge --ff-only --quiet origin/" + pull, out code);
+            if (code != 0) return "早送りで追いつけない（手元に別のコミットがある）";
+            string after = Git("rev-parse --short HEAD").Trim();
+            return before == after ? "最新" : before + " → " + after;
+        }
+
         ProcessStartInfo Pwsh(string mode)
         {
             return new ProcessStartInfo("pwsh.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" +
@@ -652,17 +698,22 @@ namespace RomajiSlm
 
         string Git(string args) { int c; return Git(args, out c); }
 
-        string Git(string args, out int code)
+        string Git(string args, out int code, int timeoutMs = 10000)
         {
             code = -1;
             try
             {
-                using (var p = Process.Start(new ProcessStartInfo("git", "-C \"" + repo + "\" " + args)
-                       { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true }))
+                var si = new ProcessStartInfo("git", "-C \"" + repo + "\" " + args)
+                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                // 無人で動くので、ログインを求める画面を出さない（出すと誰も応えずに止まる）
+                si.EnvironmentVariables["GIT_TERMINAL_PROMPT"] = "0";
+                si.EnvironmentVariables["GCM_INTERACTIVE"] = "never";
+                using (var p = Process.Start(si))
                 {
+                    var err = p.StandardError.ReadToEndAsync();
                     string o = p.StandardOutput.ReadToEnd();
-                    p.StandardError.ReadToEnd();
-                    if (!p.WaitForExit(10000)) { try { p.Kill(); } catch { } return ""; }
+                    err.Wait(timeoutMs);
+                    if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } return ""; }
                     code = p.ExitCode;
                     return o;
                 }
@@ -734,7 +785,7 @@ namespace RomajiSlm
             var menu = new ContextMenuStrip();
             menu.Items.Add(enabledItem);
             menu.Items.Add(serverItem);
-            updater = new Updater(root, data);
+            updater = new Updater(root, data, cfg.Pull);
             updateItem = new ToolStripMenuItem("", null, (s, e) =>
             {
                 manualUpdate = true;
@@ -1123,7 +1174,17 @@ namespace RomajiSlm
             if (!updater.Running && Now - lastUpdateCheckAt > 60000)
             {
                 lastUpdateCheckAt = Now;
-                ThreadPool.QueueUserWorkItem(_ => { updater.Check(); popup.BeginInvoke((Action)RefreshUpdateItem); });
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    string before = updater.PullResult;
+                    updater.Check();
+                    string pr = updater.PullResult;
+                    popup.BeginInvoke((Action)(() =>
+                    {
+                        if (pr != before && pr != "") dbg.Write("pull: " + pr);   // 追従モードで取りに行った結果
+                        RefreshUpdateItem();
+                    }));
+                });
             }
             if (swapProc != null) { WatchSwap(); return; }
             if (updater.Running) return;
