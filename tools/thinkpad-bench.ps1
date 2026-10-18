@@ -1,0 +1,94 @@
+﻿# ThinkPad で変換の速さを測る（docs/LLAMA_PARITY.md「ThinkPad での測定手順」）。
+#
+#   配布 zip（tools/pack-bench.ps1 が作る）を展開して bench.cmd をダブルクリックする。
+#   リポジトリの clone で動かすときは: pwsh -NoProfile -File tools/thinkpad-bench.ps1 -Gguf <GGUF> -LlamaBin <llama-server のフォルダ>
+#
+# torch 版（今の常駐入力と同じ設定）と llama-server 版（EOS を直して取り直しを無くした版）を、句読点を打った入力と
+# 打たない入力で測り、結果を bench-out\results.md にまとめてクリップボードに入れる。所要は 10 分前後。
+# Windows PowerShell 5.1 から呼ばれるので UTF-8 BOM を付けておく（BOM 無しだと日本語を ANSI として読む）。
+
+param(
+    [string]$Gguf = '',
+    [string]$LlamaBin = '',
+    [switch]$Quick
+)
+
+$ErrorActionPreference = 'Continue'
+$Root = Split-Path -Parent $PSScriptRoot
+Set-Location $Root
+if (-not $Gguf) { $Gguf = Join-Path $Root 'models\zenz-v3.1-small-Q8_0.gguf' }
+if (-not $LlamaBin) { $LlamaBin = Join-Path $Root 'llama-cpu' }
+$Out = Join-Path $Root 'bench-out'
+New-Item -ItemType Directory -Force -Path $Out | Out-Null
+$Log = Join-Path $Out 'bench.log'
+
+$env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Host 'uv が無いので公式のインストーラで入れます。'
+    try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression } catch { Write-Host $_ }
+    $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Write-Host 'uv を入れられませんでした'; exit 1 }
+}
+$env:UV_PYTHON_DOWNLOADS = 'automatic'
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
+$Hf = Join-Path $Root 'models\hf'
+if (Test-Path (Join-Path $Hf 'hub\models--Miwa-Keita--zenz-v3.1-small')) { $env:HF_HOME = $Hf; $env:HF_HUB_OFFLINE = '1' }
+$env:LLAMA_CPP_BIN = $LlamaBin
+
+Write-Host '[1/3] Python と部品を用意しています（初回は数分）...'
+cmd /c "uv sync --no-default-groups --group core >> ""$Log"" 2>&1"
+if ($LASTEXITCODE -ne 0) { Write-Host "用意に失敗しました。$Log を見てください"; exit 1 }
+
+# 測った機械と条件（速度の数値に必ず添える。CLAUDE.md）
+$cpu = (Get-CimInstance Win32_Processor | Select-Object -First 1)
+$bat = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1
+$power = if ($bat) { if ($bat.BatteryStatus -eq 2) { 'AC 電源' } else { "バッテリー（状態 $($bat.BatteryStatus)、残り $($bat.EstimatedChargeRemaining)%）" } } else { 'バッテリー無し' }
+$scheme = (powercfg /getactivescheme) -join ' '
+$load = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+$head = @(
+    "# ThinkPad の速度（$(Get-Date -Format 'yyyy-MM-dd HH:mm')）", '',
+    "- CPU: $($cpu.Name)（コア $($cpu.NumberOfCores)、論理 $($cpu.NumberOfLogicalProcessors)）",
+    "- 電源: $power / $scheme",
+    "- 測る前の CPU 使用率: $load%",
+    "- 版: $(if (Test-Path (Join-Path $Root 'VERSION')) { Get-Content (Join-Path $Root 'VERSION') } else { (git rev-parse --short HEAD) })", ''
+)
+
+$np = 'file:eval/sets/user_style_nopunct.jsonl'
+$llamaFast = 'np=5,t=8,eos=3,fl=tok,rf=eos,ka=1,p=insert'
+$runs = @(
+    @{ tag = 'torch';           args = @('--converter', 'core:p=insert') },
+    @{ tag = 'torch-nopunct';   args = @('--converter', 'core:p=insert', '--set', $np) },
+    @{ tag = 'llama';           args = @('--converter', "core-llama:$llamaFast", '--model', $Gguf) },
+    @{ tag = 'llama-nopunct';   args = @('--converter', "core-llama:$llamaFast", '--model', $Gguf, '--set', $np) }
+)
+if (-not $Quick) {
+    $runs += @(
+        @{ tag = 'torch-t4';     args = @('--converter', 'core:p=insert', '--torch-threads', '4') },
+        @{ tag = 'torch-t8';     args = @('--converter', 'core:p=insert', '--torch-threads', '8') },
+        @{ tag = 'llama-t4';     args = @('--converter', 'core-llama:np=5,t=4,eos=3,fl=tok,rf=eos,ka=1,p=insert', '--model', $Gguf) },
+        @{ tag = 'llama-t12';    args = @('--converter', 'core-llama:np=5,t=12,eos=3,fl=tok,rf=eos,ka=1,p=insert', '--model', $Gguf) },
+        @{ tag = 'llama-np3';    args = @('--converter', 'core-llama:np=3,t=8,eos=3,fl=tok,rf=eos,ka=1,p=insert', '--model', $Gguf) },
+        @{ tag = 'llama-np8';    args = @('--converter', 'core-llama:np=8,t=8,eos=3,fl=tok,rf=eos,ka=1,p=insert', '--model', $Gguf) }
+    )
+}
+
+Write-Host "[2/3] 測ります（$($runs.Count) 通り。1 通り 1〜2 分。測っている間は PC を触らないでください）"
+$i = 0
+foreach ($r in $runs) {
+    $i++
+    Write-Host "  ($i/$($runs.Count)) $($r.tag)"
+    $a = @('run', '--no-sync', 'python', '-m', 'eval.parity_speed', '--device', 'cpu', '--repeat', '3', '--tag', "tp-$($r.tag)") + $r.args
+    & uv @a 2>> $Log | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "    失敗しました（$Log）" }
+}
+
+Write-Host '[3/3] まとめています'
+$md = Get-ChildItem (Join-Path $Root 'eval\out\parity') -Filter 'speed-tp-*.md' | Sort-Object LastWriteTime |
+      Where-Object { $_.LastWriteTime -gt (Get-Date).AddHours(-3) } | ForEach-Object { Get-Content -Raw -Encoding UTF8 $_.FullName }
+$res = Join-Path $Out 'results.md'
+[IO.File]::WriteAllText($res, (($head -join "`r`n") + "`r`n" + ($md -join "`r`n")), [Text.UTF8Encoding]::new($false))
+try { Get-Content -Raw -Encoding UTF8 $res | Set-Clipboard; $clip = '（クリップボードにも入れました）' } catch { $clip = '' }
+Write-Host ''
+Write-Host "結果: $res $clip"
+Write-Host 'この内容を開発機のセッションに貼ってください。'
