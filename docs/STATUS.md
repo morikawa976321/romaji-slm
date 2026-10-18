@@ -71,9 +71,9 @@ pwsh -NoProfile -File tools/pack-trial.ps1                                      
 
 本人は 2026-10-15 にデスクトップで体験版を試し、句読点 B・英字 打ったまま・「使ってみたい」と答えた（decisions.md「本人の回答」、D14）。未解決 4 点への本人の方針（原文は decisions.md「本人の方針」）に沿って、D16〜D18 で進めた: 読み段の PR #10・#11 と候補の絞り込みを取り込み、user_style 82.2% → 86.3%、打鍵ミスの文 63.6% → 90.9%、正常入力で新たに壊れた文 0。CPU の中央値は 379 → 507 ms。
 
-1. **ThinkPad での実測はまだ**。速度要件（20〜30 字 1 秒以内）の判定には ThinkPad で体験版を 1 回動かす必要がある（`dist/romaji-slm-trial-*.zip`）。
+1. **ThinkPad での実測はまだ**。速度要件（20〜30 字 1 秒以内）の判定には ThinkPad で測る必要がある。torch・ONNX・llama の 3 方式を測る zip は `tools/pack-bench.ps1`（手順は LLAMA_PARITY.md「ThinkPad での測定手順」）。
 2. **1 語に打鍵ミスが 3 つ以上**（本人の実入力 kangkaraereu）は読み段の候補に入らないまま（PR #11 の未解決の論点 1）。`max_edits=3` や 3 編集の語の弧は副作用が大きかった（docs/READING.md）。本人の方針（副作用が出るなら慎重に）に従い、入れていない。
-3. **速度**: 出力を変えない高速化は効かなかった（D17）。llama-server 版は正常入力を 6 件壊すので切り替えない。ThinkPad で 1 秒を超えたら、llama 版の振る舞いを torch 版に揃える作業から始める。
+3. **速度**（2026-10-18 の調査、[LLAMA_PARITY.md](LLAMA_PARITY.md)・D41）: llama-server 版が正常入力を 6 件壊していた原因は GGUF の BOS/EOS の ID の取り違え（直せる。`core-llama:eos=3`）。これまでの llama 版の「CPU で 0.55 倍」は GPU の値で、本当の CPU では torch 版とほぼ同じ時間。forward だけ ONNX Runtime に替えた版（`core-ort`）は出力が torch 版と全件同じで、CPU で 0.72 倍。torch の既定スレッドはほかの負荷に弱い（スレッド 4 の 6 倍の時間の例）。既定は torch 版のまま。ThinkPad で 1 秒を超えたら、スレッド数の固定 → ONNX 版の順に試す。ThinkPad の測定は `dist/romaji-slm-bench-*.zip` の `bench.cmd`。
 4. 文中の句点（2 文の間）は本人の方針で着手しない（1 文ずつ変換する）。
 5. IME 化は 2026-10-16 の本人の依頼で常駐入力として着手した（§0）。
 6. `uv run pytest` が 1 回だけ 1 件落ち、続く 3 回は全件通った（2026-10-16）。どのテストかは特定していない。
