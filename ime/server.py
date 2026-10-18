@@ -91,8 +91,8 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--model", default="Miwa-Keita/zenz-v3.1-small")
-    # 候補ウィンドウの並べ方（core.window.ORDERS）。本人の OK までは置き換える前の reading のまま（docs/decisions.md D37）
-    ap.add_argument("--window", default="reading")
+    # 候補ウィンドウの並べ方（core.window.ORDERS）。merge は本人の決定（docs/decisions.md D37）。reading で置き換える前に戻る
+    ap.add_argument("--window", default="merge")
     ap.add_argument("--log", help="標準出力と標準エラーの行き先（pythonw では両方とも None で、進捗表示が落ちる）")
     args = ap.parse_args(argv)
     if args.log:

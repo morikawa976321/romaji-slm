@@ -30,7 +30,7 @@ from .pipeline import render_en_case
 from .select import scoring_text, zenz_prompt
 
 ORDERS = ("reading", "same_first", "merge", "quota")
-DEFAULT_ORDER = "merge"   # 比べた結果は docs/decisions.md D37。常駐（ime/server.py）は本人の OK まで reading
+DEFAULT_ORDER = "merge"   # 比べた結果と本人の決定は docs/decisions.md D37
 EDIT_SLOTS = 1  # quota で窓に残す直した読みの件数
 N_ALT = 10      # 1 位の読みの N-best を何件まで採点するか
 _PUNCT = frozenset("、。？！?!,.")
