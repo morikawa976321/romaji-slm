@@ -73,6 +73,27 @@ namespace RomajiSlm
         public string PrevText, PrevRomaji; public int Backspaces;
     }
 
+    /// 欄の確認で、フォーカスの要素が文字を打つ欄かを決める（D30・D40）。controlType は UI Automation の ControlType の名前（"Edit" など）
+    public static class FieldKind
+    {
+        /// 入力欄とみなすのは、Win32 のキャレットがある・種類が Edit・値が書き換えられる・文書で TextPattern があり読み取り専用でない、のどれか。
+        /// ただし打っても要素に文字が入らない種類（ボタン・一覧の項目・スライダーなど）は、キャレットや書き換えられる値があっても入力欄でない。
+        /// 書き換えられる値は、explorer の一覧の項目（名前の変更）・Web のシークバー・Qt のボタンにもある。
+        /// Qt のアプリは、ボタンにフォーカスがあってもキャレットを残していることがある（Fusion360）。分からない種類は入力欄とみなす
+        public static bool Editable(string controlType, bool caret, bool hasValue, bool readOnly, bool hasText)
+        {
+            switch (controlType)
+            {
+                case "Button": case "SplitButton": case "CheckBox": case "RadioButton": case "Hyperlink":
+                case "ListItem": case "TreeItem": case "TabItem": case "MenuItem": case "Menu": case "MenuBar":
+                case "Slider": case "ScrollBar": case "Spinner":
+                    return false;
+            }
+            return caret || controlType == "Edit" || (hasValue && !readOnly)
+                   || (controlType == "Document" && hasText && !(hasValue && readOnly));
+        }
+    }
+
     public sealed class Composer
     {
         public const int VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0D, VK_ESCAPE = 0x1B, VK_SPACE = 0x20,

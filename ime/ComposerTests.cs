@@ -687,6 +687,34 @@ namespace RomajiSlm
                 Check(Type(c, "a", 5).All(x => x) && Last<CheckFieldEffect>(Drain(c, 5).Effects) != null, "checked again in the new field");
             });
 
+            Run("入力欄かの判定: 一覧の項目・スライダー・ボタンは、値が書き換えられてもキャレットがあっても入力欄でない（D40）", () =>
+            {
+                // 種類, キャレット, ValuePattern, 読み取り専用, TextPattern, 入力欄か。ime-debug.log の field check で見た組と、分からない種類
+                var cases = new[]
+                {
+                    Tuple.Create("ListItem", false, true, false, false, false),    // explorer のファイルの一覧（DirectUI）・デスクトップ（Win32）
+                    Tuple.Create("Slider", false, true, false, false, false),      // msedge（YouTube のシークバーなど）
+                    Tuple.Create("Button", false, true, false, false, false),      // obs64（Qt）
+                    Tuple.Create("Button", true, true, false, false, false),       // Fusion360（Qt、キャレットが残っている）
+                    Tuple.Create("Button", false, false, false, false, false),     // msedge
+                    Tuple.Create("Spinner", false, true, false, false, false),
+                    Tuple.Create("Hyperlink", false, true, true, false, false),    // msedge
+                    Tuple.Create("Document", false, true, true, true, false),      // msedge・ChatGPT の Web ページそのもの
+                    Tuple.Create("Group", false, false, false, false, false),      // msedge の動画のプレーヤーなど
+                    Tuple.Create("Edit", false, true, false, true, true),          // claude・ChatGPT（ProseMirror）・msedge・SearchHost・Code
+                    Tuple.Create("Edit", true, true, false, true, true),           // msedge（Win32）
+                    Tuple.Create("ComboBox", false, true, false, true, true),      // msedge の検索欄
+                    Tuple.Create("Document", true, true, false, true, true),       // native-next（Win32）
+                    Tuple.Create("Document", false, false, false, true, true),
+                    Tuple.Create("Pane", true, false, false, false, true),         // UI Automation を出さない Win32 の欄
+                    Tuple.Create("DataItem", false, true, false, false, true),     // 分からない種類で値が書き換えられる（表計算のセルなど）
+                    Tuple.Create("?", false, true, false, false, true),
+                };
+                foreach (var t in cases)
+                    Check(FieldKind.Editable(t.Item1, t.Item2, t.Item3, t.Item4, t.Item5) == t.Item6,
+                          t.Item1 + " caret=" + t.Item2 + " value=" + t.Item3 + " ro=" + t.Item4 + " text=" + t.Item5 + " -> " + t.Item6);
+            });
+
             Run("記録: 確定の直後に Backspace で消して打ち直したら、直前の確定と消した字数を添える", () =>
             {
                 var c = Ready();

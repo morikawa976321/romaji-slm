@@ -1532,9 +1532,7 @@ namespace RomajiSlm
         }
 
         /// フォーカスの要素がパスワード欄か、と浮き窓を置く位置（要素の左下）。取れなければ false
-        /// editable: 文字を打つ欄か（本人の報告 2026-10-16: 入力欄でないところで打鍵を取ると、YouTube の k・f などが効かない）。
-        /// 入力欄とみなすのは、Win32 のキャレットがある・種類が Edit・値が書き換えられる・文書で TextPattern があり読み取り専用でない、のどれか。
-        /// Web ページそのもの（Document で値は読み取り専用）、動画のプレーヤー、一覧などは入力欄でない。分からなければ入力欄とみなす
+        /// editable: 文字を打つ欄か（本人の報告 2026-10-16: 入力欄でないところで打鍵を取ると、YouTube の k・f などが効かない）。決まりは FieldKind.Editable
         public static bool FocusedElement(out bool password, out Point below, out bool editable, out string kind)
         {
             password = false;
@@ -1558,9 +1556,9 @@ namespace RomajiSlm
                         readOnly = ((System.Windows.Automation.ValuePattern)vp).Current.IsReadOnly;
                 }
                 bool caret = HasWin32Caret();
-                editable = caret || ct == System.Windows.Automation.ControlType.Edit || (hasValue && !readOnly)
-                           || (ct == System.Windows.Automation.ControlType.Document && hasText && !(hasValue && readOnly));
-                kind = (ct == null ? "?" : ct.ProgrammaticName.Replace("ControlType.", "")) + " value=" + hasValue + " ro=" + readOnly +
+                string type = ct == null ? "?" : ct.ProgrammaticName.Replace("ControlType.", "");
+                editable = FieldKind.Editable(type, caret, hasValue, readOnly, hasText);
+                kind = type + " value=" + hasValue + " ro=" + readOnly +
                        " text=" + hasText + " caret=" + caret + " fw=" + cur.FrameworkId;
                 var r = cur.BoundingRectangle;
                 if (!r.IsEmpty && r.Width > 0 && !double.IsInfinity(r.Left))
