@@ -687,7 +687,7 @@ namespace RomajiSlm
                 Check(Type(c, "a", 5).All(x => x) && Last<CheckFieldEffect>(Drain(c, 5).Effects) != null, "checked again in the new field");
             });
 
-            Run("入力欄かの判定: 一覧の項目・スライダー・ボタンは、値が書き換えられてもキャレットがあっても入力欄でない（D40）", () =>
+            Run("入力欄かの判定: 一覧の項目・スライダー・ボタンは、TextPattern が無ければ値が書き換えられてもキャレットがあっても入力欄でない（D40）", () =>
             {
                 // 種類, キャレット, ValuePattern, 読み取り専用, TextPattern, 入力欄か。ime-debug.log の field check で見た組と、分からない種類
                 var cases = new[]
@@ -697,7 +697,9 @@ namespace RomajiSlm
                     Tuple.Create("Button", false, true, false, false, false),      // obs64（Qt）
                     Tuple.Create("Button", true, true, false, false, false),       // Fusion360（Qt、キャレットが残っている）
                     Tuple.Create("Button", false, false, false, false, false),     // msedge
-                    Tuple.Create("Spinner", false, true, false, false, false),
+                    Tuple.Create("ListItem", false, true, false, true, true),      // 要素そのものが文字を編集する（TextPattern がある）
+                    Tuple.Create("Spinner", false, true, false, false, true),      // Qt の QSpinBox は Spinner にフォーカスを残したまま文字を打てる
+                    Tuple.Create("Hyperlink", false, true, false, true, true),     // <a contenteditable>
                     Tuple.Create("Hyperlink", false, true, true, false, false),    // msedge
                     Tuple.Create("Document", false, true, true, true, false),      // msedge・ChatGPT の Web ページそのもの
                     Tuple.Create("Group", false, false, false, false, false),      // msedge の動画のプレーヤーなど

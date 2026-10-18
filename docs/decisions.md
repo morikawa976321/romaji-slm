@@ -389,7 +389,7 @@ STATUS.md §2 の 2〜4 と最終メッセージで AI が挙げた 4 点（1. 1
 ### D30. 入力欄でないところでは打鍵を取らない（2026-10-16、AIの判断）
 
 - 欄の確認（パスワード欄の確認と同じ UI Automation の問い合わせ）で、文字を打つ欄かも確かめる。入力欄でなければ、パスワード欄と同じ道で打鍵をそのまま送り、欄を移すまで素通しにする。
-- 判定の決まり: Win32 のキャレットがある・ControlType が Edit・ValuePattern があって読み取り専用でない・Document で TextPattern があり読み取り専用でない、のどれかなら入力欄。ただし Button・ListItem・Slider など打っても文字が入らない種類は、どれに当たっても入力欄でない（D40）。このチャット（Claude アプリの ProseMirror の入力欄）は Edit・ValuePattern 書き換え可で、入力欄と判定される（2026-10-16 に確かめた）。
+- 判定の決まり: Win32 のキャレットがある・ControlType が Edit・ValuePattern があって読み取り専用でない・Document で TextPattern があり読み取り専用でない、のどれかなら入力欄。ただし Button・ListItem・Slider など打っても文字が入らないはずの種類は、TextPattern が無ければ、どれに当たっても入力欄でない（D40）。このチャット（Claude アプリの ProseMirror の入力欄）は Edit・ValuePattern 書き換え可で、入力欄と判定される（2026-10-16 に確かめた）。
 - UI Automation に応答しないアプリでは、今までどおり入力欄とみなす（日本語が打てなくなるほうを避ける）。
 - 確かめていないこと: YouTube のプレーヤーにフォーカスがあるときの実際の値は、本人の操作で確かめる。ime-debug.log の field check の行に ControlType などを残すようにした。
 
@@ -587,7 +587,7 @@ AI の意見: Git で追従させるのに賛成。必要なのは 4 つ。
   - 手元で 1 にしておく害は、他のアプリが仮想キーで送り込む文字が、日本語モードで浮き窓に入ることだけ。この期間の送り込みは音量キーとショートカットだけで、どちらも浮き窓に入らず素通しになる。
   - ime.ini の説明とコードのコメントを、リモートデスクトップの話に直した。
 
-### D40. 打っても文字が入らない種類の要素は、値が書き換えられてもキャレットがあっても入力欄としない（2026-10-18、AIの判断）
+### D40. 打っても文字が入らないはずの種類の要素は、TextPattern が無ければ、値が書き換えられてもキャレットがあっても入力欄としない（2026-10-18、AIの判断）
 
 - 事実（ime-debug.log.old と ime-debug.log の field check の行。種類などを残すようにした 2026-10-16 23:27 から 2026-10-18 22:01 までの 959 件）:
   - 入力欄でないのに入力欄と判定されていたのは 4 組。explorer の ListItem（ファイルの一覧 22 回・デスクトップ 1 回）、msedge の Slider（8 回）、obs64 の Button（2 回、Qt）は ValuePattern が書き換え可。Fusion360 の Button（1 回、Qt）は ValuePattern が書き換え可で、Win32 のキャレットもある。
@@ -596,9 +596,10 @@ AI の意見: Git で追従させるのに賛成。必要なのは 4 つ。
   - Edit・Document 以外で、書き換え可の値かキャレットが判定を決めていたのは、ComboBox と上の 4 組だけ。ほかの種類（Group・Pane・Window・msedge の ListItem など）は値もキャレットも無く、もともと入力欄でないと判定されていた。
   - Web の contenteditable: Claude アプリと ChatGPT の入力欄（ProseMirror）は Edit で出る。ほかの作りの contenteditable は確かめていない（内蔵ブラウザに試験ページを開いたが、ペインが隠れていて UI Automation の木に出なかった）。
 - 決めたこと: 入力欄としない種類を並べる（入力欄とする種類を並べるほうにしない）。
-  - Button・SplitButton・CheckBox・RadioButton・Hyperlink・ListItem・TreeItem・TabItem・MenuItem・Menu・MenuBar・Slider・ScrollBar・Spinner は、キャレットや書き換えられる値があっても入力欄でない。
+  - Button・SplitButton・CheckBox・RadioButton・ListItem・TreeItem・TabItem・MenuItem・Menu・MenuBar・Slider・ScrollBar は、TextPattern が無ければ、キャレットや書き換えられる値があっても入力欄でない。TextPattern があれば D30 のまま判定する。
   - ほかの種類の判定（キャレット・Edit・書き換えられる値・TextPattern のある Document）は D30 のまま。
-  - 理由: 入力欄を取りこぼすと日本語が打てなくなり、取りすぎより重い。入力欄とする種類（Edit・ComboBox・Document など）を並べると、ログに出ていない種類の欄（表計算のセルの DataItem、Win32 の独自の欄の Pane など）を取りこぼす。並べたのは、要素そのものに文字が入らない種類だけ。名前の変更などで文字を打つときは、別の欄が開いてフォーカスが移るとみている（explorer の名前の変更の欄はログに出ておらず、確かめていない）。
-  - Spinner（数の欄）も入力欄としない。日本語モードの間は MS-IME を閉じているので、素通しの数字はそのまま欄に入る。
-  - 判定は `FieldKind.Editable`（ime/Composer.cs）に切り出し、ログで見た組と分からない種類、あわせて 17 組を試験で確かめる（試験は 55 件、足したのは 1 件）。直す前の決まりでは、変えた 5 組が落ちる。
+  - 理由: 入力欄を取りこぼすと日本語が打てなくなり、取りすぎより重い。入力欄とする種類（Edit・ComboBox・Document など）を並べると、ログに出ていない種類の欄（表計算のセルの DataItem、Win32 の独自の欄の Pane など）を取りこぼす。並べたのは、打っても要素に文字が入らないはずの種類だけ。名前の変更などで文字を打つときは、別の欄が開いてフォーカスが移るとみている（explorer の名前の変更の欄はログに出ておらず、確かめていない）。
+  - TextPattern の条件: 要素そのものが文字を編集するなら TextPattern を出すとみている（ログの Edit・ComboBox はすべて TextPattern あり、誤判定の 4 組はすべて無し）。種類だけで決めると、要素そのものが文字を編集する例外（`<button contenteditable>` など）を取りこぼす。
+  - 判定は `FieldKind.Editable`（ime/Composer.cs）に切り出し、ログで見た組と分からない種類、あわせて 19 組を試験で確かめる（試験は 55 件、足したのは 1 件）。直す前の決まりでは、誤判定の 4 組が落ちる。
+- sol のレビュー（QA 役）: 1 回目は fail。初めは Spinner・Hyperlink も並べ、TextPattern の条件も無かった。指摘は、Qt の QSpinBox は Spinner にフォーカスを残したまま文字を打てる、`<a contenteditable>` はリンクそのものが書き換えられる、の 2 例。どちらもログの誤判定の組ではない（msedge の Hyperlink は値が読み取り専用で、もともと入力欄でない）。そこで 2 つを外し、TextPattern の条件を足した。
 - 確かめていないこと: explorer・YouTube での実際の振る舞い（本人の操作が要る）。

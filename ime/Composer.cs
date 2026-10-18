@@ -77,20 +77,21 @@ namespace RomajiSlm
     public static class FieldKind
     {
         /// 入力欄とみなすのは、Win32 のキャレットがある・種類が Edit・値が書き換えられる・文書で TextPattern があり読み取り専用でない、のどれか。
-        /// ただし打っても要素に文字が入らない種類（ボタン・一覧の項目・スライダーなど）は、キャレットや書き換えられる値があっても入力欄でない。
+        /// ただし打っても文字が入らないはずの種類（ボタン・一覧の項目・スライダーなど）は、TextPattern も無ければ入力欄でない。
         /// 書き換えられる値は、explorer の一覧の項目（名前の変更）・Web のシークバー・Qt のボタンにもある。
         /// Qt のアプリは、ボタンにフォーカスがあってもキャレットを残していることがある（Fusion360）。分からない種類は入力欄とみなす
         public static bool Editable(string controlType, bool caret, bool hasValue, bool readOnly, bool hasText)
         {
+            bool any = caret || controlType == "Edit" || (hasValue && !readOnly)
+                       || (controlType == "Document" && hasText && !(hasValue && readOnly));
             switch (controlType)
             {
-                case "Button": case "SplitButton": case "CheckBox": case "RadioButton": case "Hyperlink":
+                case "Button": case "SplitButton": case "CheckBox": case "RadioButton":
                 case "ListItem": case "TreeItem": case "TabItem": case "MenuItem": case "Menu": case "MenuBar":
-                case "Slider": case "ScrollBar": case "Spinner":
-                    return false;
+                case "Slider": case "ScrollBar":
+                    return any && hasText;
             }
-            return caret || controlType == "Edit" || (hasValue && !readOnly)
-                   || (controlType == "Document" && hasText && !(hasValue && readOnly));
+            return any;
         }
     }
 
