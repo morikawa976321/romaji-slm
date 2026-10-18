@@ -194,7 +194,7 @@ def main(argv: list[str] | None = None):
                 t0 = time.perf_counter()
                 conv.convert(it.romaji, it.left_context)
                 total = (time.perf_counter() - t0) * 1000
-                row = {"total": total, **cur.c.t, "n": cur.c.n}
+                row = {"total": total, **cur.c.t, "n": cur.c.n, "chars": len(it.refs[0])}
                 if be is not None:
                     row["http"] = http_summary(be.http)
                     if args.grammar_ablation:
@@ -235,6 +235,13 @@ def render(rows: list[dict], env: dict, args, be) -> str:
             lines.append(f"| {k} | {_med(xs):.1f} | {statistics.mean(xs):.1f} |")
     other = [r["total"] - r.get("read", 0) - r.get("decode", 0) - r.get("fluency", 0) - r.get("punct", 0) for r in rows]
     lines.append(f"| other | {_med(other):.1f} | {statistics.mean(other):.1f} |")
+    tot = sorted(r["total"] for r in rows)
+    req = sorted(r["total"] for r in rows if 20 <= r.get("chars", 0) <= 30)
+    lines += ["", f"- 全件: 中央値 {_med(tot):.0f} ms、p95 {tot[min(len(tot) - 1, round(0.95 * (len(tot) - 1)))]:.0f} ms、"
+              f"最大 {tot[-1]:.0f} ms"]
+    if req:
+        lines.append(f"- **20〜30 字（速度要件の範囲）: {len(req)} 回、中央値 {_med(req):.0f} ms、最大 {req[-1]:.0f} ms、"
+                     f"1 秒を超えた回 {sum(x > 1000 for x in req)}**")
     if be is not None:
         kinds = sorted({k for r in rows for k in r.get("http", {})})
         lines += ["", "llama-server の要求（1件あたりの平均。壁時計の和は並列のぶん段階の時間より大きい）", "",

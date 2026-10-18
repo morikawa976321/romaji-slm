@@ -142,6 +142,89 @@ def compare(pa: Path | str, pb: Path | str) -> dict:
             "b_fixes": [r for r in rows if r["ok_b"] and not r["ok_a"]]}
 
 
+def _set_files(tag: str) -> dict[str, Path]:
+    return {p.name[len(tag) + 2:-len(".jsonl")]: p for p in sorted(OUT.glob(f"{tag}__*.jsonl"))}
+
+
+def _reading_refs(set_file: str) -> dict[str, str]:
+    """読み段のセット（typo_hard）の正解の読み。id は行番号（datasets.load_jsonl と同じ）。"""
+    path = Path(set_file.replace("file_", "", 1).replace("_", "/", 2)) if set_file.startswith("file_") else None
+    if path is None or not path.exists():
+        return {}
+    lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    return {str(i): json.loads(l).get("reading", "") for i, l in enumerate(lines)}
+
+
+def table(tags: list[str], ref: str | None = None) -> str:
+    """変種ごと・セットごとの精度。ref を渡すと、ref と出力が食い違った件数と、ref に対して正常入力で新たに壊れた件数も出す。"""
+    sets = sorted({s for t in tags for s in _set_files(t)})
+    lines = ["| セット | 変種 | 件数 | 完全一致 | 正常入力の完全一致 | 誤補正 | 1位の読みが正解 | 食い違い（対 ref） "
+             "| 正常入力で ref だけ正解 / 変種だけ正解 |", "|---|---|---|---|---|---|---|---|---|"]
+    for s in sets:
+        R = load(_set_files(ref)[s]) if ref and s in _set_files(ref) else None
+        rrefs = _reading_refs(s)
+        for t in tags:
+            f = _set_files(t).get(s)
+            if f is None:
+                continue
+            rows = load(f)
+            rs = list(rows.values())
+            n = len(rs)
+            has_ref = any(r["refs"] for r in rs)
+            clean = [r for r in rs if r["category"] not in _TYPO_CATS]
+            ex = f"{sum(bool(r['exact']) for r in rs) / n:.1%}" if has_ref else "—"
+            cex = f"{sum(bool(r['exact']) for r in clean) / max(1, len(clean)):.1%}" if has_ref and clean else "—"
+            mis = f"{sum(bool(r['edited']) for r in clean) / max(1, len(clean)):.1%}" if clean else "—"
+            rd = "—"
+            if rrefs:
+                rd = f"{sum(r['cands'][0]['reading'] == rrefs.get(i) for i, r in rows.items() if r['cands']) / n:.1%}"
+            dv = br = "—"
+            if R is not None and t != ref:
+                ids = [i for i in rows if i in R]
+                dv = str(sum(rows[i]["output"] != R[i]["output"] for i in ids))
+                if has_ref:
+                    cl = [i for i in ids if rows[i]["category"] not in _TYPO_CATS]
+                    br = (f"{sum(bool(R[i]['exact']) and not rows[i]['exact'] for i in cl)} / "
+                          f"{sum(bool(rows[i]['exact']) and not R[i]['exact'] for i in cl)}")
+            lines.append(f"| {s} | {t} | {n} | {ex} | {cex} | {mis} | {rd} | {dv} | {br} |")
+    return "\n".join(lines) + "\n"
+
+
+def trace(pairs: list[tuple[str, str]], sets: list[str] | None = None) -> str:
+    """最初の組（例: T0 と L0）で出力が食い違った件が、後の組（片方だけを変えた変種の組）でも食い違うかの表。
+    = は出力が一致、≠ は食い違い。○× は各組の B 側の正誤。"""
+    a0, b0 = pairs[0]
+    sets = sets or sorted(set(_set_files(a0)) & set(_set_files(b0)))
+    head = " | ".join(f"{a}↔{b}" for a, b in pairs)
+    lines = [f"| セット | id | カテゴリ | 正解 | {a0} | {b0} | {head} |",
+             "|---|---|---|---|---|---|" + "---|" * len(pairs)]
+    cache: dict[tuple[str, str], dict] = {}
+
+    def get(tag, s):
+        if (tag, s) not in cache:
+            f = _set_files(tag).get(s)
+            cache[(tag, s)] = load(f) if f else {}
+        return cache[(tag, s)]
+
+    for s in sets:
+        A, B = get(a0, s), get(b0, s)
+        for i in A:
+            if i not in B or A[i]["output"] == B[i]["output"]:
+                continue
+            cells = []
+            for a, b in pairs:
+                x, y = get(a, s).get(i), get(b, s).get(i)
+                if x is None or y is None:
+                    cells.append("—")
+                    continue
+                ok = "" if y.get("exact") is None else ("○" if y["exact"] else "×")
+                cells.append(("=" if x["output"] == y["output"] else "≠") + ok)
+            mark = lambda r: "" if r.get("exact") is None else ("○" if r["exact"] else "×")  # noqa: E731
+            lines.append(f"| {s} | {i} | {A[i]['category']} | {_c(A[i]['refs'][0] if A[i]['refs'] else '')} "
+                         f"| {_c(A[i]['output'])}{mark(A[i])} | {_c(B[i]['output'])}{mark(B[i])} | " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
 def _c(s) -> str:
     return str(s).replace("|", "\\|").replace("\n", " ")
 
@@ -182,9 +265,19 @@ def main(argv: list[str] | None = None):
     c.add_argument("b")
     c.add_argument("--md", help="Markdown の保存先")
     c.add_argument("--json", help="仕分けの結果（JSON）の保存先")
+    t = sub.add_parser("table")
+    t.add_argument("tags", nargs="+")
+    t.add_argument("--ref", help="食い違いを数える基準の変種")
+    tr = sub.add_parser("trace")
+    tr.add_argument("pairs", nargs="+", help="A:B の組。最初の組で食い違った件を後の組で追う")
+    tr.add_argument("--set", action="append", dest="sets")
     args = ap.parse_args(argv)
     if args.cmd == "run":
         cmd_run(args)
+    elif args.cmd == "table":
+        print(table(args.tags, args.ref))
+    elif args.cmd == "trace":
+        print(trace([tuple(p.split(":")) for p in args.pairs], args.sets))
     else:
         res = compare(args.a, args.b)
         md = render(res, Path(args.a).stem, Path(args.b).stem)
