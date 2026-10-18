@@ -48,6 +48,8 @@
   CPU のつもりで **GPU で動いていた**（`-ngl` の既定が `auto`。下の「速度の内訳」）。CPU だけの llama 版の精度は、CUDA を外した llama-server で `Lz` として取り直した。
   torch 版の GPU と CPU の出力・点数は 6 文 47 候補で一致（差 ≤ 1e-4）。CPU・スレッド 4 の torch 版も、E セット 896 文で GPU の torch 版と出力が全件同じ（`Tc4`）。
 - GGUF は `models/zenz-v3.1-small-gguf/` の Q8_0 と F16（docs/STATUS.md §4 の `infer.to_gguf`）。
+- ONNX 版は依存に入れていないので `uv run --with onnxruntime --with onnx python -m eval.parity run --converter core-ort:t=4 ...` で動かす。
+  初回に `models/onnx/zenz-v3.1-small.onnx`（380 MB、コミットしない）を torch で書き出す。
 
 ### 変種
 
