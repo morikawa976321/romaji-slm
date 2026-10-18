@@ -80,7 +80,26 @@ pwsh -NoProfile -File ime/uninstall.ps1
 - フックの見張り: キーボードの Raw Input（`RIDEV_INPUTSINK`）にはキーが届いているのに、フックが 1.5 秒呼ばれていなければ、Windows がフックを外したとみなして付け直す（10 秒に 1 回まで）。管理者権限の窓が前面の間も付け直しが起きうるが、害はない。トレイの「使用状況をコピー」で、確定の回数・別候補を選んだ回数・待ち時間の中央値・アプリ別の回数を、貼れる文にして出す。数だけで、文字列は持たない。
 - 初めて起動したときは「使っていない」状態で始まる。Ctrl+Alt+Space で使い始める。
 
-## 別の PC（ThinkPad）に入れる
+## 別の PC（ThinkPad）に入れる（Git で追従。推奨）
+
+本人の決定（2026-10-18）で、ThinkPad はリポジトリを clone して「追従モード」で使う。
+常駐アプリが 30 分ごとに GitHub の main から取ってきて（`git fetch` → 早送りの `merge --ff-only`）、今の自動更新（組み立て → 自己試験 → 打っていない間に差し替え）に乗せる。ZIP を作り直して写す手間は要らない。
+
+初回だけ（ThinkPad で、GitHub へのログインは済ませておく）:
+
+1. `git clone https://github.com/morikawa976321/romaji-slm.git`（置き場所は任意）。
+2. 開発機で作った配布 zip（`tools/pack-ime.ps1`）を ThinkPad に写す。Git に入れていないモデル（辞書・読みの LM・zenz）を、ここから一度だけ取る。
+3. clone したフォルダで `powershell -NoProfile -ExecutionPolicy Bypass -File ime\setup-follower.ps1 -Models <zip のパス>` を実行する。
+   - PowerShell 7 と uv が無ければ入れる（PowerShell 7 は winget。管理者の確認が出ることがある）。
+   - モデルを写し、`ime.ini` に `pull=main` を書き、組み立て・自己試験・起動まで行う。
+   - GPU が無いので torch は CPU 版になる（組み立てのたびに CPU 版の lock を作り直す）。
+
+- 取り込むのは早送りできるときだけで、ThinkPad の clone に手を入れていれば取り込まない（手で触ったものを消さない）。ThinkPad からはコミットしない。
+- 取りに行った結果は `ime-debug.log` の `pull:` の行。
+- `pull=` を空にすれば取りに行かない（このデスクトップは空。ここのリポジトリは開発用で、複数のセッションが書いているため）。
+- 作業途中の版も main に入れば取り込む。入れ替える前の自己試験が関門になる。挙動の変わった版が予告なく入るのが困るなら、評価を通した版だけを指すブランチ（例 `stable`）を作り、`pull=stable` にする。
+
+## 別の PC（ThinkPad）に入れる（ZIP。追従しない）
 
 開発機で配布 zip を作り、その PC で展開して入れる。リポジトリ・git・GPU は要らない。
 
