@@ -338,3 +338,84 @@ def test_pipeline_matches_hf(backend, tiny_model, dic, monkeypatch):
             assert b["score"] == pytest.approx(a["score"], abs=3 * TOL)
             assert b["bounds"] == a["bounds"]
         assert ll.convert(romaji) == hf.convert(romaji)
+
+
+# ---- 自然さの refill="eos"（llama.cpp 不要。応答を差し替えて確かめる） ----
+
+def _stub_backend(responses):
+    from core.llama_backend import LlamaBackend
+    b = LlamaBackend.__new__(LlamaBackend)
+    b.eos, b.input_ids, b.partial = 3, [172, 120, 202], set()
+    b.tok_bytes = None
+    b.n_resplit = b.n_refill_wide = 0
+    b.calls = []
+    b._complete = lambda prompt, grammar, n, kind, ban, n_probs: responses.pop(0)
+    b.tokenize = lambda text: [9]
+    b._token_grammar = lambda canon: "root ::= x\n"
+
+    def logprob_at(ids, tok):
+        b.calls.append((tuple(ids), tok))
+        return -1.0
+    b._logprob_at = logprob_at
+    return b
+
+
+def test_fluency_eos_uses_only_the_eos_entry():
+    # EOS の項目が載らない版: 末尾の項目は文の最後のトークンのもの。その上位に印の 1 バイト目があっても使わず、取り直す
+    r = {"tokens": [5, 6, 3], "completion_probabilities": [
+        {"id": 5, "top_logprobs": []}, {"id": 6, "top_logprobs": [{"id": 172, "logprob": -7.0}]}]}
+    b = _stub_backend([(r, [-0.5, -0.25, None])])
+    assert b._fluency_eos("p", [5, 6]) == pytest.approx(-0.75 - 1.0)
+    assert b.calls == [((9, 5, 6), 172)]
+    # EOS の項目があれば、その上位から取る
+    r2 = {"tokens": [5, 6, 3], "completion_probabilities": [
+        {"id": 5}, {"id": 6}, {"id": 3, "top_logprobs": [{"id": 172, "logprob": -2.0}]}]}
+    b2 = _stub_backend([(r2, [-0.5, -0.25, 0.0])])
+    assert b2._fluency_eos("p", [5, 6]) == pytest.approx(-2.75) and b2.calls == []
+
+
+def test_fluency_eos_resplit_uses_full_prefix():
+    # 強制生成の分割が正規と違えば、文と印の 3 トークンを、それぞれ正しい接頭辞で取り直す
+    r = {"tokens": [7, 3], "completion_probabilities": []}
+    b = _stub_backend([(r, [-0.1, 0.0])])
+    assert b._fluency_eos("p", [5, 6]) == pytest.approx(-5.0)
+    assert b.calls == [((9,), 5), ((9, 5), 6), ((9, 5, 6), 172), ((9, 5, 6, 172), 120), ((9, 5, 6, 172, 120), 202)]
+
+
+def test_keep_alive_keeps_url_path_prefix():
+    # 起動済みサーバーの URL にパスの頭がある（リバースプロキシの下など）ときも、接続を使い回す側で同じ所へ送る
+    import threading
+    import types
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from core.llama_backend import LlamaBackend
+
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            seen.append(self.path)
+            body = json.dumps({"tokens": [1]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    th = threading.Thread(target=srv.serve_forever, daemon=True)
+    th.start()
+    try:
+        b = LlamaBackend.__new__(LlamaBackend)
+        b.keep_alive, b._local, b.http = True, threading.local(), []
+        b.server = types.SimpleNamespace(url=f"http://127.0.0.1:{srv.server_address[1]}/llama/")
+        assert b._post("/tokenize", {"content": "a"}, "tokenize") == {"tokens": [1]}
+        assert b._post("/tokenize", {"content": "b"}, "tokenize") == {"tokens": [1]}
+        assert seen == ["/llama/tokenize", "/llama/tokenize"]
+    finally:
+        srv.shutdown()

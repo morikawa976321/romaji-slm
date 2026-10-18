@@ -82,6 +82,7 @@ if (-not $Quick) {
     )
 }
 
+$started = Get-Date
 Write-Host "[2/3] 測ります（$($runs.Count) 通り。1 通り 1〜2 分。測っている間は PC を触らず、ほかのアプリも閉じてください）"
 $i = 0
 foreach ($r in $runs) {
@@ -95,8 +96,13 @@ foreach ($r in $runs) {
 }
 
 Write-Host '[3/3] まとめています'
-$md = Get-ChildItem (Join-Path $Root 'eval\out\parity') -Filter 'speed-tp-*.md' | Sort-Object LastWriteTime |
-      Where-Object { $_.LastWriteTime -gt (Get-Date).AddHours(-3) } | ForEach-Object { Get-Content -Raw -Encoding UTF8 $_.FullName }
+# 今回の実行で書かれた表だけを、設定の順に集める（同じフォルダで前に測った結果を混ぜない）。表が無い設定は失敗と書く
+$parity = Join-Path $Root 'eval\out\parity'
+$md = foreach ($r in $runs) {
+    $f = Get-ChildItem $parity -Filter "speed-tp-$($r.tag)-2*.md" -ErrorAction SilentlyContinue |
+         Where-Object { $_.LastWriteTime -ge $started } | Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($f) { Get-Content -Raw -Encoding UTF8 $f.FullName } else { "# $($r.tag): 失敗（$Log を見る）`r`n" }
+}
 $res = Join-Path $Out 'results.md'
 [IO.File]::WriteAllText($res, (($head -join "`r`n") + "`r`n" + ($md -join "`r`n")), [Text.UTF8Encoding]::new($false))
 try { Get-Content -Raw -Encoding UTF8 $res | Set-Clipboard; $clip = '（クリップボードにも入れました）' } catch { $clip = '' }

@@ -174,15 +174,22 @@ class LlamaBackend:
 
     def _start(self, model, url, bin_dir, threads, n_gpu_layers, extra_args, n_slots, eos_token, bos_token):
         kw = dict(url=url, bin_dir=bin_dir, threads=threads, n_gpu_layers=n_gpu_layers, n_slots=n_slots)
-        server = LlamaServer(model, extra_args=extra_args, **kw)
-        fixes = self._launch_fixes(server, n_slots, eos_token, bos_token)
+
+        def checked(args):
+            server = LlamaServer(model, extra_args=args, **kw)
+            try:
+                return server, self._launch_fixes(server, n_slots, eos_token, bos_token)
+            except BaseException:
+                server.close()  # 検査が失敗しても、立てたサーバーを残さない
+                raise
+
+        server, fixes = checked(extra_args)
         if not fixes:
             return server
         server.close()
         if url:
             raise RuntimeError(f"起動済みの llama-server に足りない設定がある。起動の引数に足す: {' '.join(fixes)}")
-        server = LlamaServer(model, extra_args=(extra_args or []) + fixes, **kw)
-        left = self._launch_fixes(server, n_slots, eos_token, bos_token)
+        server, left = checked((extra_args or []) + fixes)
         if left:
             server.close()
             raise RuntimeError(f"llama-server を {' '.join(fixes)} で立て直しても直らない: {' '.join(left)}")
@@ -212,11 +219,13 @@ class LlamaBackend:
             # サーバーが使い回しの接続を閉じていることがある（WinError 10053）。1 回だけ繋ぎ直して送り直す
             for attempt in (0, 1):
                 conn = getattr(self._local, "conn", None)
+                u = urllib.parse.urlsplit(self.server.url)
                 if conn is None:
-                    u = urllib.parse.urlsplit(self.server.url)
-                    conn = self._local.conn = http.client.HTTPConnection(u.hostname, u.port, timeout=60)
+                    cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+                    conn = self._local.conn = cls(u.hostname, u.port, timeout=60)
                 try:
-                    conn.request("POST", path, body=data, headers={"Content-Type": "application/json"})
+                    conn.request("POST", u.path.rstrip("/") + path, body=data,
+                                 headers={"Content-Type": "application/json"})
                     resp = conn.getresponse()
                     raw = resp.read()
                     break
@@ -418,9 +427,15 @@ class LlamaBackend:
         if toks[:len(canon)] != canon:
             self.n_resplit += 1
             ids = self.tokenize(prompt)
-            return sum(self._logprob_at(ids + canon[:i], t) for i, t in enumerate(canon + self.input_ids))
-        last = (r.get("completion_probabilities") or [{}])[-1].get("top_logprobs") or []
-        hit = [e for e in last if e["id"] == self.input_ids[0]] if len(toks) == len(canon) + 1 else []
+            full = canon + self.input_ids
+            return sum(self._logprob_at(ids + full[:i], t) for i, t in enumerate(full))
+        # 末尾の項目が文の直後の EOS のものであるときだけ、その上位から印の 1 バイト目を取る（EOS の項目が載らない版では
+        # 末尾は文の最後のトークンの項目で、別の位置の分布になる）
+        entries = r.get("completion_probabilities") or []
+        last_ok = (len(toks) == len(canon) + 1 and toks[-1] == self.eos and entries
+                   and entries[-1].get("id") == self.eos)
+        last = (entries[-1].get("top_logprobs") or []) if last_ok else []
+        hit = [e for e in last if e["id"] == self.input_ids[0]]
         if hit:
             lp1 = entry_logprob(hit[0])
         else:
