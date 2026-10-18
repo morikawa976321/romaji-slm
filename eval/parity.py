@@ -62,7 +62,7 @@ def cmd_run(args) -> None:
                     f.write(json.dumps(row, ensure_ascii=False) + "\n")
             backend = getattr(conv, "backend", None)
             extra = ""
-            if backend is not None:
+            if backend is not None and hasattr(backend, "n_refill"):
                 extra = (f" refill={backend.n_refill} resplit={backend.n_resplit} "
                          f"dead={getattr(backend, 'n_dead', '-')}")
             print(f"{args.tag} {set_name}: {len(items)} 件 {time.perf_counter() - t0:.0f} s{extra} -> {path}",
@@ -80,7 +80,8 @@ def load(path: Path | str) -> dict[str, dict]:
 
 
 def _key(c: dict) -> tuple:
-    return c["reading"], tuple(c["edits"])
+    # 同じ読みの文字列でも区間の分け方（英語の区間か、かなか）が違う候補がありうるので、読みのコストも鍵に入れる
+    return c["reading"], tuple(c["edits"]), c["read_cost"]
 
 
 def classify(a: dict, b: dict) -> dict:
@@ -170,6 +171,8 @@ def table(tags: list[str], ref: str | None = None) -> str:
             rows = load(f)
             rs = list(rows.values())
             n = len(rs)
+            if not n:
+                continue
             has_ref = any(r["refs"] for r in rs)
             clean = [r for r in rs if r["category"] not in _TYPO_CATS]
             ex = f"{sum(bool(r['exact']) for r in rs) / n:.1%}" if has_ref else "—"

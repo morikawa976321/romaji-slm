@@ -103,6 +103,23 @@ def instrument(conv, clock: "_Cur") -> None:
             return orig_punct(*a, **k)
 
     conv.insert_punct = insert_punct
+    if be is not None and hasattr(be, "_run"):
+        # ONNX Runtime 版（core.ort_backend）: forward と照合を分ける
+        orig_run, orig_bpick = be._run, be._pick
+
+        def _run(*a, **k):
+            t0 = time.perf_counter()
+            r = orig_run(*a, **k)
+            clock.add(f"{clock.phase()}.forward", (time.perf_counter() - t0) * 1000)
+            return r
+
+        def _bpick(*a, **k):
+            t0 = time.perf_counter()
+            r = orig_bpick(*a, **k)
+            clock.add("decode.pick", (time.perf_counter() - t0) * 1000)
+            return r
+
+        be._run, be._pick = _run, _bpick
     if be is None:
         model = conv.scorer.model
         orig_fwd = model.forward
@@ -188,14 +205,14 @@ def main(argv: list[str] | None = None):
         for _ in range(args.repeat):
             for it in items:
                 cur.c = Clock()
-                if be is not None:
+                if be is not None and hasattr(be, "http"):
                     be.http.clear()
                     be.log.clear()
                 t0 = time.perf_counter()
                 conv.convert(it.romaji, it.left_context)
                 total = (time.perf_counter() - t0) * 1000
                 row = {"total": total, **cur.c.t, "n": cur.c.n, "chars": len(it.refs[0])}
-                if be is not None:
+                if be is not None and hasattr(be, "http"):
                     row["http"] = http_summary(be.http)
                     if args.grammar_ablation:
                         dec = [(e["prompt"], e["timings"].get("predicted_n", 0)) for e in be.log if e["kind"] == "decode"]
@@ -242,7 +259,7 @@ def render(rows: list[dict], env: dict, args, be) -> str:
     if req:
         lines.append(f"- **20〜30 字（速度要件の範囲）: {len(req)} 回、中央値 {_med(req):.0f} ms、最大 {req[-1]:.0f} ms、"
                      f"1 秒を超えた回 {sum(x > 1000 for x in req)}**")
-    if be is not None:
+    if be is not None and hasattr(be, "http"):
         kinds = sorted({k for r in rows for k in r.get("http", {})})
         lines += ["", "llama-server の要求（1件あたりの平均。壁時計の和は並列のぶん段階の時間より大きい）", "",
                   "| 種類 | 要求数 | 壁時計の和 ms | サーバー内 ms（prompt / 生成） | 生成トークン | 往復・JSON・Python ms "

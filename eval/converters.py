@@ -160,7 +160,7 @@ def make_converter(name: str, device: str = "cpu", model: str | None = None,
         if not (model and template):
             raise ValueError("hf には --model と --template が要る")
         return HFCausalLM(model, template, device, name=f"hf:{Path(model).name}+{template}")
-    if name == "core" or name.startswith(("core:", "core-llama")):
+    if name == "core" or name.startswith(("core:", "core-llama", "core-ort")):
         # core / core:k=3 / core:k=3,w=1.0,f=1,b=0（b=0 は k 件を1件ずつ生成。速度の比較用）
         opts = dict(kv.split("=") for kv in name.partition(":")[2].split(",") if kv)
         # p=auto|ja|ascii|insert（句読点）、e=zenz|typed|registered|auto（英字の表記）、tc/te/tq=句読点 B の閾値（読点・句点・疑問符）
@@ -188,6 +188,11 @@ def make_converter(name: str, device: str = "cpu", model: str | None = None,
                                      n_gpu_layers=int(opts["ngl"]) if "ngl" in opts else None,
                                      dead_ends=opts.get("de", "prune"), fluency_mode=opts.get("fl", "gen"),
                                      refill=opts.get("rf", "full"), keep_alive=opts.get("ka", "0") == "1", **kw)
+        if name.startswith("core-ort"):
+            # core-ort:t=8,...（実験。forward だけ ONNX Runtime に替えた torch 版。docs/LLAMA_PARITY.md）
+            from core.ort_backend import OrtCorePipeline
+            return OrtCorePipeline(model or "Miwa-Keita/zenz-v3.1-small",
+                                   threads=int(opts["t"]) if "t" in opts else None, **kw)
         from core.pipeline import CorePipeline
         # mt=<数>（制約を満たすトークンを探す上位の数。0 は語彙全体）、dp=1（行き止まりを刈る。llama 版の文法と同じ制約）
         return CorePipeline(model or "Miwa-Keita/zenz-v3.1-small", device, batched=opts.get("b", "1") != "0",
