@@ -133,8 +133,10 @@ def alternatives(p, best: dict, left_context: str = "", end: str = "", n_alt: in
     return sorted(out, key=lambda e: -e.score)
 
 
-def pool(p, romaji: str, left_context: str = "", alts: bool = True, n_alt: int = N_ALT) -> Pool | None:
+def pool(p, romaji: str, left_context: str = "", alts: bool = True, n_alt: int = N_ALT,
+         strict: bool = False) -> Pool | None:
     """窓に並べうる候補を集める。alts=False なら読みの候補だけ（2026-10-18 までと同じ計算）。
+    strict=True なら別の書き方の失敗をそのまま投げる（評価で、失敗を候補が無かったことと取り違えないため）。
 
     llama-server 版（p.backend あり）は別の書き方を採点する手段を持たないので、読みの候補だけにする。"""
     t0 = time.perf_counter()
@@ -156,6 +158,8 @@ def pool(p, romaji: str, left_context: str = "", alts: bool = True, n_alt: int =
         try:
             entries += alternatives(p, best, left_context, end, n_alt)
         except Exception as e:  # 別の書き方を諦めても、1 位と読みの候補は返す（常駐の変換を失敗にしない）
+            if strict:
+                raise
             print(f"window: alternatives failed: {type(e).__name__}", file=sys.stderr, flush=True)  # 入力の文字列は出さない
     t2 = time.perf_counter()
     return Pool(first, hira, entries, {"candidates": (t1 - t0) * 1000, "alt": (t2 - t1) * 1000})

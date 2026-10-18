@@ -90,12 +90,12 @@ def collect(names, device: str) -> None:
     from core.pipeline import CorePipeline
     p = CorePipeline(device=device)   # 常駐入力と同じ既定（句読点 B・英字は打ったまま）。ユーザー辞書は読まない
     OUT.mkdir(parents=True, exist_ok=True)
-    pool(p, "konnichiha")
+    pool(p, "konnichiha", strict=True)
     for name in names:
         items = load_items(name)
         rows = []
         for it in items:
-            rows.append(to_json(it, pool(p, it.romaji, it.left_context)))
+            rows.append(to_json(it, pool(p, it.romaji, it.left_context, strict=True)))
         (OUT / f"{name}.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
                                            encoding="utf-8")
         print(f"collected {name}: {len(rows)}", flush=True)
@@ -189,13 +189,13 @@ def timing(names, device: str, repeat: int, limit: int | None = None) -> None:
     from core.pipeline import CorePipeline
     p = CorePipeline(device=device)
     for _ in range(3):
-        pool(p, "konnichiha")
+        pool(p, "konnichiha", strict=True)
     for name in names:
         before, after, alt = [], [], []
         for k, it in enumerate(load_items(name)[:limit]):
             for rep in range(repeat):
                 for with_alt in ((False, True) if (k + rep) % 2 == 0 else (True, False)):
-                    pl = pool(p, it.romaji, it.left_context, alts=with_alt)
+                    pl = pool(p, it.romaji, it.left_context, alts=with_alt, strict=True)
                     if pl is None:
                         continue
                     tot = pl.ms["candidates"] + pl.ms["alt"]

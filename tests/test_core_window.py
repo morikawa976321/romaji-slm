@@ -99,6 +99,8 @@ def test_pool_keeps_first_when_alternatives_fail(monkeypatch):
              {"text": "以降", "score": -23.7, "reading": "イコウ", "reading_obj": None, "bounds": (), "edits": ["+o"]}]
     pl = w.pool(_fake_pipeline(cands, "行く"), "iku")
     assert texts(arrange(pl, "merge")) == ["行く", "以降", "いく"]
+    with pytest.raises(RuntimeError):   # 評価（eval/window_eval.py）は strict で失敗を見えるようにする
+        w.pool(_fake_pipeline(cands, "行く"), "iku", strict=True)
 
 
 def test_end_mark_keeps_registered_en_at_the_end():
