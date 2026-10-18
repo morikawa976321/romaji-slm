@@ -182,7 +182,7 @@ def evaluate(names, show: int = 0) -> None:
                 print(f"  {plan:<10} " + " / ".join(e.text + ("*" if e.kind == "edit" else "") for e in win))
 
 
-def timing(names, device: str, repeat: int) -> None:
+def timing(names, device: str, repeat: int, limit: int | None = None) -> None:
     """1 回の変換の所要: 読みの候補だけ（置き換える前と同じ計算）と、別の書き方を足したもの。
 
     同じ入力で両方を交互に（先に回す側を入れ替えて）測る。他の処理と CPU を取り合っても、差は比べられるようにするため。"""
@@ -192,7 +192,7 @@ def timing(names, device: str, repeat: int) -> None:
         pool(p, "konnichiha")
     for name in names:
         before, after, alt = [], [], []
-        for k, it in enumerate(load_items(name)):
+        for k, it in enumerate(load_items(name)[:limit]):
             for rep in range(repeat):
                 for with_alt in ((False, True) if (k + rep) % 2 == 0 else (True, False)):
                     pl = pool(p, it.romaji, it.left_context, alts=with_alt)
@@ -217,11 +217,12 @@ def main(argv=None):
     ap.add_argument("--sets", nargs="*", default=list(SET_NAMES))
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--time", type=int, default=0, help="所要だけを、入力ごとにこの回数ずつ測る")
+    ap.add_argument("--limit", type=int, default=None, help="--time で各セットの先頭何件を測るか")
     ap.add_argument("--from-saved", action="store_true")
     ap.add_argument("--show", type=int, default=0)
     args = ap.parse_args(argv)
     if args.time:
-        return timing(args.sets, args.device, args.time)
+        return timing(args.sets, args.device, args.time, args.limit)
     if not args.from_saved:
         collect(args.sets, args.device)
     evaluate(args.sets, args.show)

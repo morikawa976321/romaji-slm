@@ -14,7 +14,7 @@
 
 - reading: 読みの候補だけを点数順に（2026-10-18 までの並べ方）。
 - same_first: 1 位の読みの別の書き方を先に、読みの候補をその後ろに、それぞれ点数順。
-- merge: 両方を点数順に混ぜる。
+- merge: 両方を点数順に混ぜる（既定）。打鍵ミスの入力では打ったままの読みの点数が下がるので、直した読みも点数で入る。
 - quota: merge のうえで、直した読みを edit_slots 件まで窓に残す（入りきらないときは点数の低い別の書き方と入れ替える）。
 """
 
@@ -30,7 +30,7 @@ from .pipeline import render_en_case
 from .select import scoring_text, zenz_prompt
 
 ORDERS = ("reading", "same_first", "merge", "quota")
-DEFAULT_ORDER = "quota"
+DEFAULT_ORDER = "merge"   # 比べた結果は docs/decisions.md D37。常駐（ime/server.py）は本人の OK まで reading
 EDIT_SLOTS = 1  # quota で窓に残す直した読みの件数
 N_ALT = 10      # 1 位の読みの N-best を何件まで採点するか
 _PUNCT = frozenset("、。？！?!,.")
