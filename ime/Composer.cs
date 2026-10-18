@@ -227,12 +227,16 @@ namespace RomajiSlm
             }
         }
 
-        /// 日本語モードで、今の欄をまだ確かめていなければ、パスワード欄かを先に確かめる（文字に限らず Space・記号・Enter も。
-        /// どのキーもこの欄では解釈し始める前に確かめる）。ショートカット（Ctrl・Alt・Win つき）と修飾キーそのものは対象外
+        /// 日本語モードで、今の欄をまだ確かめていなければ、パスワード欄かを先に確かめる。未確定の文があれば Space・Enter なども
+        /// （候補を出す・確定する）、無ければ浮き窓に文字を足すキーだけ。ショートカット（Ctrl・Alt・Win つき）と修飾キーそのものは対象外
         bool NeedsFieldCheck(int vk, Mods m)
         {
             if (!RequireFieldCheck || Mode != Mode.Japanese || passthrough || verified) return false;
             if (m.Ctrl || m.Alt || m.Win || IsModifier(vk)) return false;
+            // 未確定の文が無いときの Space・Enter・Tab・矢印・Backspace は、どの欄でもアプリに渡るキーなので預からない。
+            // 預かって SendInput で送り直すと、こちらより後に入った他のアプリの低レベルフックが元の打鍵と送り直しの 2 回を受ける
+            // （PowerToys Peek が Space 1 回で開いてすぐ閉じた。2026-10-18）
+            if (!Composing && CharFor(vk, m) == '\0') return false;
             return true;
         }
 

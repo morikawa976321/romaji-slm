@@ -465,13 +465,66 @@ namespace RomajiSlm
                 var c = Ready();
                 c.RequireFieldCheck = true;
                 c.OnFocus("100:-4:1", 0);
-                Check(Press(c, Composer.VK_TAB, Mods.None, 1), "tab held");
+                Check(Type(c, "a", 1).All(x => x), "a held");
                 var chk = Last<CheckFieldEffect>(Drain(c, 1).Effects);
-                Type(c, "se", 2);
-                c.OnFieldChecked(chk.Seq, false, 3);
-                var o = Drain(c, 3);
+                Press(c, Composer.VK_ESCAPE, Mods.None, 2);   // a を捨てるので、Tab は欄を移す
+                Check(Press(c, Composer.VK_TAB, Mods.None, 3), "tab held");
+                Type(c, "se", 4);
+                c.OnFieldChecked(chk.Seq, false, 5);
+                var o = Drain(c, 5);
                 Check(string.Join(",", o.Sent) == "K:+9,K:-9", "only tab delivered: " + string.Join(",", o.Sent));
                 Check(c.Buffer == "" && Req(o) == null && c.Status.Contains("捨て"), "secret dropped");
+            });
+
+            Run("未確定の文が無ければ、確かめていない欄でも Space・矢印・Backspace・Enter・Tab・Esc は預からずに渡す（送り直さない）", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                foreach (var vk in new[] { Composer.VK_SPACE, Composer.VK_DOWN, Composer.VK_BACK, Composer.VK_RETURN, Composer.VK_TAB, Composer.VK_ESCAPE })
+                    Check(!Press(c, vk, Mods.None, 1), "passes: " + vk);
+                var o = Drain(c, 1);
+                Check(!o.Effects.OfType<CheckFieldEffect>().Any() && o.Sent.Count == 0, "not held, not resent: " + string.Join(",", o.Sent));
+                Check(!c.FieldPending && !c.Verified, "field still unverified");
+            });
+
+            Run("確かめていない欄で先に渡した Space は送り直さない。確認中に押した Space は預かって順に送る", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Check(!Press(c, Composer.VK_SPACE, Mods.None, 0), "space passes");
+                Check(Type(c, "p", 1).All(x => x), "p held");
+                var chk = Last<CheckFieldEffect>(Drain(c, 1).Effects);
+                Check(Press(c, Composer.VK_SPACE, Mods.None, 2), "space held while checking");
+                Type(c, "q", 3);
+                c.OnFieldChecked(chk.Seq, true, 4);
+                var o = Drain(c, 4);
+                Check(string.Join(",", o.Sent) == "K:+80,K:-80,K:+32,K:-32,K:+81,K:-81", "in order, first space not resent: " + string.Join(",", o.Sent));
+            });
+
+            Run("未確定の文が無ければ、確かめていない欄でも Shift+Space はすぐ切り替える（アプリへ送らない）", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("300:-4:1", 0);
+                Check(Press(c, Composer.VK_SPACE, Mods.ShiftOnly, 0), "swallowed");
+                var o = Drain(c, 0);
+                Check(c.Mode == Mode.English && !o.Effects.OfType<CheckFieldEffect>().Any() && o.Sent.Count == 0, "toggled without a check");
+            });
+
+            Run("確かめていない欄で渡した Tab の後の文字は、アプリが移し終えるのを待って移った先で確かめる", () =>
+            {
+                var c = Ready();
+                c.RequireFieldCheck = true;
+                c.OnFocus("100:-4:1", 0);
+                Check(!Press(c, Composer.VK_TAB, Mods.None, 1), "tab passes");
+                Check(Type(c, "se", 2).All(x => x), "held");
+                var chk = Last<CheckFieldEffect>(Drain(c, 2).Effects);
+                Check(chk != null && chk.DelayMs == Composer.MoveSettleMs - 1, "delayed: " + (chk == null ? -1 : chk.DelayMs));
+                c.OnFieldChecked(chk.Seq, true, 120);
+                var o = Drain(c, 120);
+                Check(string.Join(",", o.Sent) == "K:+83,K:-83,K:+69,K:-69" && c.Buffer == "" && Req(o) == null, "password: raw " + string.Join(",", o.Sent));
             });
 
             Run("英字モードで Tab を押して日本語に戻ったら、確かめ直す", () =>
@@ -500,16 +553,17 @@ namespace RomajiSlm
                 Check(Type(c, "s", 3).All(x => x) && Last<CheckFieldEffect>(Drain(c, 3).Effects) != null && c.Buffer == "a", "checked before appending");
             });
 
-            Run("パスワード欄で預かった最初の Tab を送ったら素通しをやめ、後ろは捨てて次の欄で確かめ直す", () =>
+            Run("パスワード欄で預かった Tab を送ったら素通しをやめ、後ろは捨てて次の欄で確かめ直す", () =>
             {
                 var c = Ready();
                 c.RequireFieldCheck = true;
-                Check(Press(c, Composer.VK_TAB, Mods.None, 0), "tab held");
+                Check(Type(c, "p", 0).All(x => x), "p held");
                 var chk = Last<CheckFieldEffect>(Drain(c, 0).Effects);
+                Check(Press(c, Composer.VK_TAB, Mods.None, 1), "tab held");
                 Type(c, "x", 1);
                 c.OnFieldChecked(chk.Seq, true, 2);
                 var o = Drain(c, 2);
-                Check(string.Join(",", o.Sent) == "K:+9,K:-9", "tab only: " + string.Join(",", o.Sent));
+                Check(string.Join(",", o.Sent) == "K:+80,K:-80,K:+9,K:-9", "up to tab: " + string.Join(",", o.Sent));
                 Check(Type(c, "a", 3).All(x => x) && Last<CheckFieldEffect>(Drain(c, 3).Effects) != null, "next field checked, not passed through");
             });
 

@@ -5,7 +5,8 @@
 // - 変換は ime/server.py（Python、127.0.0.1）に HTTP で頼む。サーバはこのアプリが起動し、ジョブオブジェクトで
 //   このアプリと一緒に終わらせる。
 // - 確定した文は SendInput（KEYEVENTF_UNICODE）で 1 回で送り込む。アプリ側の文字を消すことはしない。
-// - 他のアプリが送り込んだ打鍵（LLKHF_INJECTED）は扱わない（音声入力などの貼り付けを打鍵列として拾わない）。
+// - 他のアプリが送り込んだ打鍵（LLKHF_INJECTED）も本人の打鍵として扱う（ime.ini の accept_injected）。自分が送ったものと、
+//   文字そのものの送り込み（VK_PACKET。音声入力などの貼り付け）は扱わない。
 //
 // 起動: RomajiSlmIme.exe [--root <app のフォルダ>] [--selftest <打鍵列> <結果ファイル> [--port <番号>]]
 
@@ -128,7 +129,7 @@ namespace RomajiSlm
                 "port=" + Port + "\r\n" +
                 "# history: 1 なら確定・取り消しのたびに打鍵列・候補・確定文を history.jsonl に残す（次の改良の材料）。0 で止める\r\n" +
                 "history=" + (History ? "1" : "0") + "\r\n" +
-                "# accept_injected: 1 なら他のアプリが送り込んだキーも本人の打鍵として扱う（打鍵を送り直す常駐アプリがあるとき要る）\r\n" +
+                "# accept_injected: 1 なら他のアプリが送り込んだキーも本人の打鍵として扱う（リモートデスクトップ越しなど、本人の打鍵が送り込みで届くとき要る）\r\n" +
                 "accept_injected=" + (AcceptInjected ? "1" : "0") + "\r\n" +
                 "# no_history_apps: 記録（history.jsonl）に残さないアプリの exe 名（拡張子なし、カンマ区切り）。例: slack,line\r\n" +
                 "no_history_apps=" + NoHistoryApps + "\r\n" +
@@ -961,8 +962,8 @@ namespace RomajiSlm
                 // 修飾キーの状態は自分で追う。確定待ちの間は修飾キーも積んで OS に渡さないので、GetAsyncKeyState は使えない。
                 // 他のアプリが送り込んだ修飾キー（貼り付けの Ctrl+V など）も OS の状態を変えるので追う。自分の送り直しは除く
                 if (k.dwExtraInfo != Native.Magic && k.vkCode < 256) keyDown[k.vkCode] = down;
-                // この機械では、本人の打鍵がすべて送り込まれたキー（LLKHF_INJECTED、extra=0）として届く（2026-10-16 の実測で
-                // 実際のキー 0・送り込み 239。常駐の Handy などが全打鍵を横取りして送り直しているとみられる）。
+                // 2026-10-16 の 17 時台は、本人の打鍵がすべて送り込まれたキー（LLKHF_INJECTED、extra=0）として届いた（実際のキー 0・
+                // 送り込み 239）。リモートデスクトップ越しに使っていた間とみられ、手元のキーボードでは実際のキーで届く（decisions.md D39）。
                 // そのため、自分が送ったもの（Magic）以外の送り込みも本人の打鍵として扱う。ime.ini の accept_injected=0 で元に戻す
                 // VK_PACKET（0xE7）は文字そのものの送り込みで、本人の打鍵ではない（自分が送った確定文が他の常駐アプリを
                 // 通って印なしで戻ってくることもある）。解釈も送り直しもせずに通す
