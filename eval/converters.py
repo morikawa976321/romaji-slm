@@ -177,17 +177,18 @@ def make_converter(name: str, device: str = "cpu", model: str | None = None,
             from core.llama_backend import LlamaCorePipeline
             if not (model or "url" in opts):
                 raise ValueError("core-llama には --model（GGUF）か url= が要る")
-            # 変種（docs/LLAMA_PARITY.md）: de=stop（行き止まりで未完にする）、fl=tok（自然さを正規の分割で強制）、
-            # rf=fast（取り直しをまとめる）、ka=1（HTTP の接続を使い回す）、ngl=<層数>（GPU に載せる層）、
-            # eos=3（GGUF の BOS/EOS の ID を起動時に上書きする。zenz の config.json は bos=1・eos=2 と書いていて、
-            # GGUF にはそれがそのまま入る。トークナイザの本当の値は <s>=2・</s>=3）
+            # 変種（docs/LLAMA_PARITY.md）: de=stop（行き止まりで未完にする）、fl=gen（従来の自然さの強制生成。既定 tok）、
+            # rf=full|fast|eos（取り直しの仕方。既定 auto）、ka=0（要求ごとに接続し直す。既定 1）、
+            # ngl=<層数>|auto（GPU に載せる層。既定 0 = CPU だけ、auto はサーバーの既定）、
+            # eos=3（GGUF の BOS/EOS の ID を起動時に上書きする。既定でも起動時に確かめて直す）
             extra = (["--override-kv", "tokenizer.ggml.bos_token_id=int:2,tokenizer.ggml.eos_token_id=int:3"]
                      if opts.get("eos") == "3" else None)
+            ngl = opts.get("ngl", "0")
             return LlamaCorePipeline(model, url=opts.get("url"), n_slots=int(opts.get("np", 5)), extra_args=extra,
                                      threads=int(opts["t"]) if "t" in opts else None,
-                                     n_gpu_layers=int(opts["ngl"]) if "ngl" in opts else None,
-                                     dead_ends=opts.get("de", "prune"), fluency_mode=opts.get("fl", "gen"),
-                                     refill=opts.get("rf", "full"), keep_alive=opts.get("ka", "0") == "1", **kw)
+                                     n_gpu_layers=None if ngl == "auto" else int(ngl),
+                                     dead_ends=opts.get("de", "prune"), fluency_mode=opts.get("fl", "tok"),
+                                     refill=opts.get("rf", "auto"), keep_alive=opts.get("ka", "1") == "1", **kw)
         if name.startswith("core-ort"):
             # core-ort:t=8,...（実験。forward だけ ONNX Runtime に替えた torch 版。docs/LLAMA_PARITY.md）
             from core.ort_backend import OrtCorePipeline

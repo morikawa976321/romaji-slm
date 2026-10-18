@@ -207,12 +207,30 @@ needs_llama = pytest.mark.skipif(
 
 
 @pytest.fixture(scope="module")
-def backend(tiny_model, tmp_path_factory):
-    from core.llama_backend import LlamaBackend
+def tiny_gguf(tiny_model, tmp_path_factory) -> Path:
     from infer import to_gguf
     gguf = tmp_path_factory.mktemp("gguf") / "tiny-F32.gguf"
     to_gguf.convert(Path(tiny_model), gguf, "f32", Path(LLAMA_CPP_DIR))
-    b = LlamaBackend(gguf, n_slots=5, bin_dir=Path(LLAMA_CPP_DIR) / "build" / "bin")
+    return gguf
+
+
+BIN = Path(LLAMA_CPP_DIR) / "build" / "bin" if LLAMA_CPP_DIR else None
+
+
+@pytest.fixture(scope="module")
+def backend(tiny_gguf):
+    """今の既定（CPU だけ、自然さは正規の分割を ID で強制、取り直しは auto、接続の使い回し）。"""
+    from core.llama_backend import LlamaBackend
+    b = LlamaBackend(tiny_gguf, n_slots=5, bin_dir=BIN)
+    yield b
+    b.close()
+
+
+@pytest.fixture(scope="module")
+def backend_gen(tiny_gguf):
+    """2026-10-18 より前の既定（自然さは文字列の文法で強制生成、取り直しは 1 位置 1 要求、要求ごとに接続）。"""
+    from core.llama_backend import LlamaBackend
+    b = LlamaBackend(tiny_gguf, n_slots=5, bin_dir=BIN, fluency_mode="gen", refill="full", keep_alive=False)
     yield b
     b.close()
 
@@ -255,16 +273,55 @@ FLUENCY_TEXTS = ["今日は良い天気ですね", "京は良い転機ですね"
 
 
 @needs_llama
+@pytest.mark.parametrize("which", ["backend", "backend_gen"])
 @pytest.mark.parametrize("left_context", LEFT_CONTEXTS)
-def test_fluency_matches_hf(backend, scorer, left_context):
-    # 強制生成のトークン分割が HF のトークナイザと同じになる文だけ比べられる（1文字1トークンの字と、
-    # 語彙に無い字のバイト列。後者は途中までのバイトのトークンもありうるので、その場合は分割が変わりうる）
+def test_fluency_matches_hf(which, request, scorer, left_context):
+    b = request.getfixturevalue(which)
     hf = fluency(scorer, FLUENCY_TEXTS, left_context)
-    ll = backend.fluency(FLUENCY_TEXTS, left_context)
+    ll = b.fluency(FLUENCY_TEXTS, left_context)
     for t, h, g in zip(FLUENCY_TEXTS, hf, ll):
         assert g == pytest.approx(h, abs=TOL), t
-    # 語彙に無い字（転・機）を含む文は、強制生成の分割が正規の分割と変わり、位置ごとの取り直しを通る
-    assert backend.n_resplit > 0
+    if which == "backend_gen":
+        # 語彙に無い字（転・機）を含む文は、強制生成の分割が正規の分割と変わり、位置ごとの取り直しを通る
+        assert b.n_resplit > 0
+
+
+@needs_llama
+def test_defaults_are_cpu_and_full_slot_context(backend):
+    args = backend.server.proc.args
+    assert "--device" in args and args[args.index("--device") + 1] == "none"
+    meta = backend.server._request("GET", "/v1/models")["data"][0]["meta"]
+    # b10549 は -c 0 -np 5 で 1 スロットを学習時の長さの 1/5 にする。起動時に -c を足して立て直す
+    assert {s["n_ctx"] for s in backend.server._request("GET", "/slots")} == {meta["n_ctx_train"]}
+    # 乱数の重みでは入力開始の印の 2・3 バイト目の確率が 1 に近くないので、近似（eos）を使わない
+    assert backend.refill == "fast"
+
+
+@needs_llama
+def test_wrong_special_ids_are_fixed(tiny_model, tiny_gguf, tmp_path):
+    """zenz の config.json のように BOS/EOS の ID が誤った GGUF でも、起動時に直す。to_gguf はファイルを直す。"""
+    import shutil
+    from gguf import GGUFReader
+    from core.llama_backend import LlamaBackend
+    from infer import to_gguf
+    bad = tmp_path / "bad.gguf"
+    shutil.copy(tiny_gguf, bad)
+    reader = GGUFReader(bad, "r+")
+    for key, v in (("tokenizer.ggml.bos_token_id", 1), ("tokenizer.ggml.eos_token_id", 2)):
+        f = reader.get_field(key)
+        f.parts[f.data[0]][0] = v
+    reader.data.flush()
+    del reader
+    b = LlamaBackend(bad, n_slots=1, bin_dir=BIN)
+    try:
+        props = b.server._request("GET", "/props")
+        assert (props["bos_token"], props["eos_token"], b.eos) == ("<s>", "</s>", 3)
+        assert "--override-kv" in b.server.proc.args
+    finally:
+        b.close()
+    changed = to_gguf.fix_special_tokens(bad, Path(tiny_model))
+    assert changed == {"tokenizer.ggml.bos_token_id": (1, 2), "tokenizer.ggml.eos_token_id": (2, 3)}
+    assert to_gguf.fix_special_tokens(bad, Path(tiny_model)) == {}
 
 
 @needs_llama

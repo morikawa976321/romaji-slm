@@ -75,6 +75,9 @@ class LlamaServer:
                 cmd += ["-t", str(threads)]
             if n_gpu_layers is not None:
                 cmd += ["-ngl", str(n_gpu_layers)]
+            if n_gpu_layers == 0:
+                # CUDA ビルドは -ngl 0 でも既定の --op-offload で一部の演算を GPU に回す。CPU だけにするには機器を外す
+                cmd += ["--device", "none"]
             cmd += extra_args or []
             self._log = tempfile.TemporaryFile()
             self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT)

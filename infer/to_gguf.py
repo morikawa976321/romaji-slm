@@ -48,6 +48,36 @@ c.main()
 
 QUANT_TYPES = {"f16": "F16", "q8_0": "Q8_0", "q5_k_m": "Q5_K_M"}
 
+# GGUF の特殊トークンの欄 → transformers のトークナイザの属性
+_SPECIAL_KEYS = {"tokenizer.ggml.bos_token_id": "bos_token_id", "tokenizer.ggml.eos_token_id": "eos_token_id",
+                 "tokenizer.ggml.padding_token_id": "pad_token_id", "tokenizer.ggml.unknown_token_id": "unk_token_id"}
+
+
+def fix_special_tokens(gguf_path: Path, hf_model_dir: Path) -> dict[str, tuple[int, int]]:
+    """GGUF の BOS/EOS/PAD/UNK の ID を、HF のトークナイザの値に書き換える（その場で。欄の大きさは変わらない）。
+
+    convert_hf_to_gguf.py はこの ID を config.json から取る。zenz-v3.1 の config.json は bos=1・eos=2 だが、
+    トークナイザの実際は [PAD]=1・<s>=2・</s>=3 で、そのままだと llama-server が <s> を EOS とみなす
+    （docs/LLAMA_PARITY.md）。戻り値は書き換えた欄 → (前, 後)。
+    """
+    from gguf import GGUFReader
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(hf_model_dir)
+    reader = GGUFReader(gguf_path, "r+")
+    changed = {}
+    for key, attr in _SPECIAL_KEYS.items():
+        want = getattr(tok, attr, None)
+        field = reader.get_field(key)
+        if want is None or field is None:
+            continue
+        cur = int(field.parts[field.data[0]][0])
+        if cur != want:
+            field.parts[field.data[0]][0] = want
+            changed[key] = (cur, want)
+    reader.data.flush()
+    return changed
+
 
 def check_tokenizer(model_dir: Path) -> str:
     """pre-tokenizer を gpt-2 にしてよいトークナイザかを確かめ、判定の根拠を返す。だめなら ValueError。"""
@@ -133,7 +163,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--outdir", type=Path, help="出力先（既定はモデルと同じ親ディレクトリ）")
     p.add_argument("--types", default="f16,q8_0,q5_k_m", help=f"作る形式（カンマ区切り。{', '.join(QUANT_TYPES)}）")
     p.add_argument("--check", action="store_true", help="作った GGUF で HF とトークン列が一致するか確かめる")
+    p.add_argument("--fix-special", type=Path, nargs="+", metavar="GGUF",
+                   help="変換はせず、作り済みの GGUF の BOS/EOS/PAD/UNK の ID を model のトークナイザの値に直すだけ")
     args = p.parse_args(argv)
+
+    if args.fix_special:
+        for path in args.fix_special:
+            changed = fix_special_tokens(path, args.model)
+            print(f"{path.name}: " + (", ".join(f"{k} {a}→{b}" for k, (a, b) in changed.items()) or "変更なし"),
+                  file=sys.stderr)
+        return 0
 
     if not args.llama_cpp or not (args.llama_cpp / "convert_hf_to_gguf.py").is_file():
         p.error(f"--llama-cpp に convert_hf_to_gguf.py のある llama.cpp のチェックアウトを指す（または ${ENV_DIR}）")
@@ -158,6 +197,10 @@ def main(argv: list[str] | None = None) -> int:
     if "f16" not in types and f16.exists():
         f16.unlink()
     for path in out.values():
+        changed = fix_special_tokens(path, args.model)
+        if changed:
+            print(f"特殊トークンの ID を直した {path.name}: "
+                  + ", ".join(f"{k} {a}→{b}" for k, (a, b) in changed.items()), file=sys.stderr)
         print(f"作成: {path}（{path.stat().st_size / 1e6:.1f} MB）", file=sys.stderr)
 
     if args.check:

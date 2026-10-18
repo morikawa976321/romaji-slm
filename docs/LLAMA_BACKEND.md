@@ -16,16 +16,25 @@ llama.cpp の `llama-server` で計算する実行系。点数の式・句読点
 
 ```
 # GGUF は infer.to_gguf で作る（docs/INFER.md）。llama-server は $LLAMA_CPP_BIN か $LLAMA_CPP_DIR/build/bin か PATH から探す
-uv run python -m eval.run --converter "core-llama:np=5,t=8" --model models/zenz-v3.1-small-Q8_0.gguf --set user_style
-# 起動済みの llama-server に繋ぐ（-np はサーバー側で指定したもの）
-llama-server -m models/zenz-v3.1-small-Q8_0.gguf -c 0 -np 5 --no-webui -t 8 --port 8080
+uv run python -m eval.run --converter "core-llama:np=5,t=4" --model models/zenz-v3.1-small-gguf/zenz-v3.1-small-F16.gguf --set user_style
+# 起動済みの llama-server に繋ぐ（-np はサーバー側で指定したもの。-c は 1024×スロット数、CPU だけなら -ngl 0 --device none）
+llama-server -m models/zenz-v3.1-small-gguf/zenz-v3.1-small-F16.gguf -c 5120 -np 5 --no-webui -t 4 -ngl 0 --device none --port 8080
 uv run python -m eval.run --converter "core-llama:url=http://127.0.0.1:8080" --set user_style
 # 速度の比較（親が実モデルで走らせる。変換器は ; で区切る）
 uv run python -m eval.bench_backend --gguf models/zenz-v3.1-small-Q8_0.gguf --converters "core;core-llama:np=5,t=8;core-llama:np=1,t=8"
 ```
 
 `core-llama` のオプションは `core` と同じ `k,w,f,p,e,tc,te` に加えて、`np`（スロット数、既定 5）、`t`（`-t`、既定は llama.cpp の既定）、
-`url`（起動済みのサーバー）。Python からは `LlamaCorePipeline(gguf, n_slots=5, threads=8, k=5, punct="insert")`。
+`url`（起動済みのサーバー）、`ngl`（GPU に載せる層。既定 0 = CPU だけ、`auto` はサーバーの既定）、比べるための変種 `de`・`fl`・`rf`・`ka`・`eos`
+（[LLAMA_PARITY.md](LLAMA_PARITY.md)「変種」）。Python からは `LlamaCorePipeline(gguf, n_slots=5, threads=4, k=5, punct="insert")`。
+
+起動時に `LlamaBackend` が確かめて、足りなければ立て直すもの（自前で立てたとき。`url` の起動済みサーバーなら例外にする）:
+
+- GGUF の EOS/BOS が `</s>`/`<s>` でなければ `--override-kv` で直す（zenz の `config.json` の誤った ID が GGUF に入りうる。`infer.to_gguf` は作るときに直す）。
+- `-np` が 2 以上で 1 スロットの文脈長が学習時の長さより短ければ、`-c` を 学習時の長さ × スロット数 にする。
+- 既定は CPU だけ（`-ngl 0 --device none`。CUDA ビルドは `-ngl` を渡さないと GPU に載せ、`-ngl 0` だけでも一部の演算を GPU に回す）。
+- 自然さの強制生成は正規のトークン列を ID の文法で強制し（`fl=tok`）、取り直しは起動時に近似が使えるモデルか確かめて決める（`rf=auto`）。
+  HTTP の接続は使い回す（`ka=1`）。どれも出力は 2026-10-18 より前の既定と同じ（LLAMA_PARITY.md の L7・Lz3）。
 
 ## 仕組み
 
@@ -72,12 +81,14 @@ n9 ::= "ね" | "ネ"             # 終点へ入る弧は継続なし
 
 ### llama-server の癖への対処
 
-- **CUDA ビルドは黙って GPU に載せる。** b10549 の `-ngl` の既定は `auto` で、`LlamaServer` は `-ngl` を渡さないので、手元の CUDA ビルドでは全層が GPU に載る。
-  `-ngl 0` でも既定の `--op-offload` で一部の計算を GPU に回す。CPU の速さを測るときは CUDA の DLL を外した版（`tools/pack-bench.ps1` の `llama-cpu`）を使う。
+- **CUDA ビルドは黙って GPU に載せる。** b10549 の `-ngl` の既定は `auto` で、`LlamaServer` が `-ngl` を渡さないと、手元の CUDA ビルドでは全層が GPU に載る。
+  `-ngl 0` でも既定の `--op-offload` で一部の計算を GPU に回す。`LlamaBackend` の既定は `-ngl 0 --device none`（CPU だけ。CUDA 抜きの版と点数まで同じに
+  なることを user_style で確かめた）。`infer`（制約なしの生成）の `LlamaServer` の既定は今も `-ngl` を渡さない。
   2026-10-15 の「CPU で torch 版の約 0.55 倍」（D12）は GPU の数値だった（[LLAMA_PARITY.md](LLAMA_PARITY.md)）。
-- **GGUF の BOS/EOS の ID が誤っている。** 上の「transformers 版との差」の表。起動時の `--override-kv` で直す（`core-llama:eos=3`）。
-- **`-np 5` で 1 スロット 256 トークン**（b10549 は `-c 0` の 1280 をスロットで割る）。長い左文脈では `-c` を 1024×スロット数にする。
-- **要求ごとに接続し直すと、連続実行で Windows のポートが尽きる**（WinError 10055・10060）。1 件あたり 47 要求（取り直しを含む）のため。`ka=1` で接続を使い回す。
+- **GGUF の BOS/EOS の ID が誤っている。** 上の「transformers 版との差」の表。起動時に確かめて直す（上の「使い方」）。
+- **`-np 5` で 1 スロット 256 トークン**（b10549 は `-c 0` の 1280 をスロットで割る）。起動時に `-c` を 1024×スロット数にする。
+- **要求ごとに接続し直すと、連続実行で Windows のポートが尽きる**（WinError 10055・10060）。1 件あたり 47 要求（取り直しを含む）のため。既定で接続を使い回し
+  （`ka=1`）、サーバーが閉じた接続に送ったら 1 回だけ繋ぎ直す。
 - **`[PAD]` が EOG になる。** llama.cpp 62df181 の語彙の読み込み（`src/llama-vocab.cpp`）は、`[PAD]` という名前のトークンを
   FIM_PAD とみなし、EOG の集合に入れる（Kimi-K2 向けの表）。zenz の語彙も `[PAD]`（ID 1）を持つので、文法の終点で
   `</s>` より `[PAD]` の確率が高いと `[PAD]` を選んで止まり、logp が変わる（極小モデルで実際に起きた）。
@@ -96,7 +107,7 @@ n9 ::= "ね" | "ネ"             # 終点へ入る弧は継続なし
 
 | 差 | 中身 | 影響 |
 |---|---|---|
-| **BOS/EOS の ID** | zenz の `config.json` は `bos_token_id=1`・`eos_token_id=2` だが、トークナイザの実際は `[PAD]`=1・`<s>`=2・`</s>`=3。`infer.to_gguf` の GGUF にはこの誤った値が入り、llama-server は `<s>` を EOS とみなす。LlamaBackend は EOS 以外の空のトークンを禁じるので、本物の `</s>` を禁じてしまう | **正常入力を壊していた 6 件の原因**。lm に log P(`<s>`)（約 −27、候補ごとに数 nats ぶれる）が乗り、また終わりを避けて余計な字を足す（「一新ン」）。起動時の `--override-kv tokenizer.ggml.bos_token_id=int:2,tokenizer.ggml.eos_token_id=int:3`（変換器 `core-llama:eos=3`）で直る。既定は直していない |
+| **BOS/EOS の ID** | zenz の `config.json` は `bos_token_id=1`・`eos_token_id=2` だが、トークナイザの実際は `[PAD]`=1・`<s>`=2・`</s>`=3。`infer.to_gguf` の GGUF にはこの誤った値が入り、llama-server は `<s>` を EOS とみなす。LlamaBackend は EOS 以外の空のトークンを禁じるので、本物の `</s>` を禁じてしまう | **正常入力を壊していた 6 件の原因**。lm に log P(`<s>`)（約 −27、候補ごとに数 nats ぶれる）が乗り、また終わりを避けて余計な字を足す（「一新ン」）。起動時の `--override-kv tokenizer.ggml.bos_token_id=int:2,tokenizer.ggml.eos_token_id=int:3` で直る。2026-10-18 から、`infer.to_gguf` が作るときに直し、`LlamaBackend` も起動時に確かめて直す |
 | 行き止まり | ConstrainedZenz の照合は行き止まりの節点を刈らないので、貪欲法がそこに入ると候補が尽きて未完（score −∞）で止まる。文法は行き止まりを刈るので、llama 版は終点まで行ける | torch 版に刈り込みを入れた変種（`core:dp=1`）は、7 セット 2400 文で出力が 1 件だけ変わる（両方不正解）。ほぼ効かない |
 | 量子化 | Q8_0・Q5_K_M では logit が変わる | Q8_0 は同じ候補の自然さの差が中央値 0.14・p99 0.74 nats。点差の小さい文が入れ替わる。F16 は中央値 0.006 |
 | 並列（`-np`）のぶれ | `-np 2` 以上ではスロットをまとめたバッチで計算し、組み合わせで計算の経路が変わる | 同じ設定・同じ入力でも実行ごとに点数が変わる。`-np 1` は完全に同じ |

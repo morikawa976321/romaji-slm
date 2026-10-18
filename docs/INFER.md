@@ -55,7 +55,7 @@ uv run python -m infer.to_gguf models/zenz-romaji-v1 --llama-cpp <dir> --check
 | `zenz-romaji-v1-Q8_0.gguf` | `convert_hf_to_gguf.py --outtype q8_0`（元の精度から直接） |
 | `zenz-romaji-v1-Q5_K_M.gguf` | `llama-quantize` で F16 から |
 
-`--types q8_0,q5_k_m` で作る形式を絞れる。`--check` は、作った GGUF ごとに llama-server を立て、
+`--types q8_0,q5_k_m` で作る形式を絞れる。作った GGUF の BOS/EOS/PAD の ID は、HF のトークナイザの値に書き直す（`config.json` の値が入るため。zenz-v3.1 は config が bos=1・eos=2、実際は `<s>`=2・`</s>`=3。docs/LLAMA_PARITY.md）。作り済みの GGUF は `uv run python -m infer.to_gguf <HF のモデル> --fix-special <GGUF>...` で直せる。`--check` は、作った GGUF ごとに llama-server を立て、
 HF のトークナイザ（`add_special_tokens=False`。評価ハーネスと同じ）と llama-server の `/tokenize`（`/completion` と同じ条件）で、
 次のトークン列が一致するかを確かめる。食い違いがあれば終了コード 1。
 

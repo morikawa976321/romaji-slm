@@ -86,25 +86,38 @@ class LlamaBackend:
     """
 
     def __init__(self, model: str | Path | None = None, *, url: str | None = None, n_slots: int = 5,
-                 threads: int | None = None, bin_dir: str | Path | None = None, n_gpu_layers: int | None = None,
-                 extra_args: list[str] | None = None, dead_ends: str = "prune", fluency_mode: str = "gen",
-                 refill: str = "full", keep_alive: bool = False):
-        """変種（docs/LLAMA_PARITY.md。既定はどれも従来の振る舞い）:
+                 threads: int | None = None, bin_dir: str | Path | None = None, n_gpu_layers: int | None = 0,
+                 extra_args: list[str] | None = None, dead_ends: str = "prune", fluency_mode: str = "tok",
+                 refill: str = "auto", keep_alive: bool = True, eos_token: str = "</s>", bos_token: str = "<s>"):
+        """起動（自前で立てるとき。`url` の起動済みサーバーは確かめるだけで、足りなければ例外）:
 
-        dead_ends: "prune" = 文法で行き止まりを刈る（従来）。"stop" = 刈らずに、行き止まりに入ったら未完にする
+        n_gpu_layers: 既定 0 = CPU だけ（`-ngl 0 --device none`）。None ならサーバーの既定（CUDA ビルドは全層を GPU に載せる）。
+        eos_token / bos_token: GGUF の EOS/BOS がこの表層のトークンでなければ、`--override-kv` で直して立て直す
+          （zenz の GGUF は config.json の誤った ID が入りうる。docs/LLAMA_PARITY.md）。
+        `-np` が 2 以上で 1 スロットの文脈長が学習時の長さより短ければ（b10549 は `-c 0` の全体をスロットで割る）、
+        `-c` を 学習時の長さ × スロット数 にして立て直す。
+
+        変種（docs/LLAMA_PARITY.md）:
+
+        dead_ends: "prune"（既定）= 文法で行き止まりを刈る。"stop" = 刈らずに、行き止まりに入ったら未完にする
           （torch 版 ConstrainedZenz と同じ探索）。
-        fluency_mode: "gen" = 文字列の文法で強制生成し、分割が正規と違えば位置ごとに取り直す（従来）。
-          "tok" = 正規のトークン列をトークン ID の文法（`<[id]>`）で強制する（分割の取り直しが起きない）。
-        refill: "full" = 載らなかった logprob を1位置1要求・語彙全体で取り直す（従来）。"fast" = 1候補の全位置を
+        fluency_mode: "tok"（既定）= 正規のトークン列をトークン ID の文法（`<[id]>`）で強制する（分割の取り直しが起きない）。
+          "gen" = 文字列の文法で強制生成し、分割が正規と違えば位置ごとに取り直す（2026-10-18 より前の既定）。
+        refill: "full" = 載らなかった logprob を1位置1要求・語彙全体で取り直す（2026-10-18 より前の既定）。"fast" = 1候補の全位置を
           1要求（プロンプトの配列）にまとめ、まず上位 64 で探し、無ければ語彙全体で取り直す。トークン化も覚えておく。
           "eos" = "fast" に加えて、自然さ（fluency_mode="tok" のとき）は文の後ろの EOS の項目の上位から入力開始の印の
-          1 バイト目の確率を取り、2・3 バイト目は 0 とみなす（torch 版の実測で |logprob| < 1e-4。取り直しの要求が要らない）。
-        keep_alive: HTTP の接続をスレッドごとに使い回す（urllib は要求ごとに接続し直す）。
+          1 バイト目の確率を取り、2・3 バイト目は 0 とみなす（zenz では torch 版で 25784 文を測って和が最大 −1.1e-3。
+          取り直しの要求が要らない）。
+          "auto"（既定）= 起動時にいくつかの文で 2・3 バイト目の実際の値を取り、0 とみなせるモデルなら "eos"、
+          そうでなければ "fast"（どちらも出力は torch 版と同じ。L7・Lz3）。
+        keep_alive: HTTP の接続をスレッドごとに使い回す（既定。urllib は要求ごとに接続し直し、連続実行で Windows の
+          ポートが尽きた）。
         """
-        if dead_ends not in ("prune", "stop") or fluency_mode not in ("gen", "tok") or refill not in ("full", "fast", "eos"):
+        if (dead_ends not in ("prune", "stop") or fluency_mode not in ("gen", "tok")
+                or refill not in ("full", "fast", "eos", "auto")):
             raise ValueError(f"変種の指定が想定外: {dead_ends=} {fluency_mode=} {refill=}")
-        self.server = LlamaServer(model, url=url, bin_dir=bin_dir, threads=threads, n_gpu_layers=n_gpu_layers,
-                                  extra_args=extra_args, n_slots=n_slots)
+        self.server = self._start(model, url, bin_dir, threads, n_gpu_layers, extra_args, n_slots, eos_token,
+                                  bos_token)
         self.n_slots = n_slots
         self.dead_ends, self.fluency_mode, self.refill, self.keep_alive = dead_ends, fluency_mode, refill, keep_alive
         self._local = threading.local()
@@ -134,7 +147,62 @@ class LlamaBackend:
         self.n_refill = 0  # 載らなかった logprob を取り直した回数
         self.n_resplit = 0  # 自然さの強制生成が正規の分割にならず、位置ごとに取り直した回数
         self.n_refill_wide = 0  # refill="fast" で上位に無く、語彙全体で取り直した回数
+        if refill == "auto":
+            self.refill = "eos" if self._eos_refill_ok() else "fast"
+            self.n_refill = self.n_refill_wide = 0
         self.log: list[dict] = []  # 1要求ごとの記録（文法の大きさ・timings）。eval/bench_backend.py が読む
+
+    @staticmethod
+    def _launch_fixes(server: LlamaServer, n_slots: int, eos_token: str, bos_token: str) -> list[str]:
+        """立てたサーバーに足りない起動の引数（BOS/EOS の上書き、スロットの文脈長）。足りていれば空。"""
+        props = server._request("GET", "/props")
+        kv = []
+        for key, want, got in (("eos", eos_token, props.get("eos_token")), ("bos", bos_token, props.get("bos_token"))):
+            if want and got != want:
+                ids = server.tokenize(want)
+                if len(ids) != 1:
+                    raise RuntimeError(f"{key.upper()} の {want!r} が 1 トークンにならない: {ids}")
+                kv.append(f"tokenizer.ggml.{key}_token_id=int:{ids[0]}")
+        fixes = ["--override-kv", ",".join(kv)] if kv else []
+        if n_slots > 1:
+            meta = (server._request("GET", "/v1/models").get("data") or [{}])[0].get("meta") or {}
+            train = int(meta.get("n_ctx_train") or 0)
+            slot = int((props.get("default_generation_settings") or {}).get("n_ctx") or 0)
+            if train and slot and slot < train:
+                fixes += ["-c", str(train * n_slots)]
+        return fixes
+
+    def _start(self, model, url, bin_dir, threads, n_gpu_layers, extra_args, n_slots, eos_token, bos_token):
+        kw = dict(url=url, bin_dir=bin_dir, threads=threads, n_gpu_layers=n_gpu_layers, n_slots=n_slots)
+        server = LlamaServer(model, extra_args=extra_args, **kw)
+        fixes = self._launch_fixes(server, n_slots, eos_token, bos_token)
+        if not fixes:
+            return server
+        server.close()
+        if url:
+            raise RuntimeError(f"起動済みの llama-server に足りない設定がある。起動の引数に足す: {' '.join(fixes)}")
+        server = LlamaServer(model, extra_args=(extra_args or []) + fixes, **kw)
+        left = self._launch_fixes(server, n_slots, eos_token, bos_token)
+        if left:
+            server.close()
+            raise RuntimeError(f"llama-server を {' '.join(fixes)} で立て直しても直らない: {' '.join(left)}")
+        return server
+
+    _PROBE = ("今日は良い天気ですね", "東京に行く。", "ok、それでdeployして。")
+
+    def _eos_refill_ok(self) -> bool:
+        """refill="eos" のように、入力開始の印の 2・3 バイト目の logprob を 0 とみなしてよいモデルか。
+        いくつかの文で実際の値を取って確かめる（zenz は 25784 文で和が最大 −1.1e-3。乱数の重みでは成り立たない）。"""
+        if self.tok_bytes is None or len(self.input_ids) != 3:
+            return False
+        ids = self.tokenize(CONTEXT)
+        b1, b2, b3 = self.input_ids
+        for t in self._PROBE:
+            canon = self.tokenize(scoring_text(t))
+            lps = self._logprobs_at([ids + canon + [b1], ids + canon + [b1, b2]], [b2, b3])
+            if abs(sum(lps)) > 1e-3:
+                return False
+        return True
 
     def _post(self, path: str, body: dict, kind: str) -> dict | list:
         """POST して JSON を返す。所要時間と大きさを self.http に記録する。"""
@@ -387,9 +455,9 @@ class LlamaCorePipeline(CorePipeline):
     """CorePipeline の生成と採点を llama-server に替えたもの（点数の式・句読点の挿入は同じ）。"""
 
     def __init__(self, model: str | Path | None = None, *, url: str | None = None, n_slots: int = 5,
-                 threads: int | None = None, bin_dir: str | Path | None = None, n_gpu_layers: int | None = None,
-                 name: str | None = None, dead_ends: str = "prune", fluency_mode: str = "gen", refill: str = "full",
-                 keep_alive: bool = False, extra_args: list[str] | None = None, **kwargs):
+                 threads: int | None = None, bin_dir: str | Path | None = None, n_gpu_layers: int | None = 0,
+                 name: str | None = None, dead_ends: str = "prune", fluency_mode: str = "tok", refill: str = "auto",
+                 keep_alive: bool = True, extra_args: list[str] | None = None, **kwargs):
         backend = LlamaBackend(model, url=url, n_slots=n_slots, threads=threads, bin_dir=bin_dir,
                                n_gpu_layers=n_gpu_layers, extra_args=extra_args, dead_ends=dead_ends,
                                fluency_mode=fluency_mode, refill=refill, keep_alive=keep_alive)
