@@ -602,4 +602,6 @@ AI の意見: Git で追従させるのに賛成。必要なのは 4 つ。
   - TextPattern の条件: 要素そのものが文字を編集するなら TextPattern を出すとみている（ログの Edit・ComboBox はすべて TextPattern あり、誤判定の 4 組はすべて無し）。種類だけで決めると、要素そのものが文字を編集する例外（`<button contenteditable>` など）を取りこぼす。
   - 判定は `FieldKind.Editable`（ime/Composer.cs）に切り出し、ログで見た組と分からない種類、あわせて 19 組を試験で確かめる（試験は 55 件、足したのは 1 件）。直す前の決まりでは、誤判定の 4 組が落ちる。
 - sol のレビュー（QA 役）: 1 回目は fail。初めは Spinner・Hyperlink も並べ、TextPattern の条件も無かった。指摘は、Qt の QSpinBox は Spinner にフォーカスを残したまま文字を打てる、`<a contenteditable>` はリンクそのものが書き換えられる、の 2 例。どちらもログの誤判定の組ではない（msedge の Hyperlink は値が読み取り専用で、もともと入力欄でない）。そこで 2 つを外し、TextPattern の条件を足した。
+- sol のレビュー 2 回目も fail。1 回目の指摘は解消し、ログの 959 件を判定し直して変わるのは誤判定 4 組の 34 件だけ、と確かめてもらった。残る指摘は、Qt Quick で TextInput の役割を ListItem にした編集欄（ValuePattern 書き換え可・TextPattern 無し）を取りこぼす、という公開ソースからの反例（実機では再現していない）。
+- 受け入れた限界（AIの判断）: 種類をボタン・一覧の項目などと名乗り、TextPattern を出さない編集欄は、入力欄と分からない。取る値が explorer の一覧の項目と同じ組になり、見分けられない。ログで実際に起きている誤判定を直すほうを取った。起きたときは、ime-debug.log の field check の行にその組とアプリ名（fg）が残る。
 - 確かめていないこと: explorer・YouTube での実際の振る舞い（本人の操作が要る）。
