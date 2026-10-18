@@ -58,12 +58,21 @@ def test_window_shape(order):
             assert len(t) == 6   # ひらがなが 1 位と同じ・無いときは、その枠も候補で埋める
 
 
-def test_digit_width_follows_first():
-    from core.window import _digit_width
-    assert _digit_width("骨董品300点", "骨董品３００点が") == "骨董品３００点"
-    assert _digit_width("３月", "3月に") == "3月"
-    assert _digit_width("300と３", "300と３") == "300と３"   # 1 位が両方の幅を使っていれば触らない
-    assert _digit_width("三百", "骨董品") == "三百"
+def test_width_follows_first():
+    from core.window import _align_width
+    assert _align_width("骨董品300点", "骨董品３００点が") == "骨董品３００点"
+    assert _align_width("３月", "3月に") == "3月"
+    assert _align_width("300と３", "300と３") == "300と３"   # 1 位が両方の幅を使っていれば触らない
+    assert _align_width("三百", "骨董品") == "三百"
+    assert _align_width("了解!有難う。", "了解！ありがとう。") == "了解！有難う。"
+    assert _align_width("v1.2で。", "v1.2で。") == "v1.2で。"
+
+
+def test_look_alike_duplicates_share_a_slot():
+    es = [_e("了解!ありがとう。", -15.0, "typed"), _e("了解！有難う。", -16.0), _e("超会！ありがとう。", -20.0, "edit")]
+    pl = Pool(_e("了解！ありがとう。", -13.0, "first", False), _e("りょうかい！ありがとう。", float("-inf"), "hira", False), es)
+    assert texts(arrange(pl, "merge")) == ["了解！ありがとう。", "了解！有難う。", "超会！ありがとう。", "りょうかい！ありがとう。"]
+    assert "了解!ありがとう。" in texts(arrange(pl, "reading"))   # reading は置き換える前と同じ（文字列の一致だけで除く）
 
 
 # ---- 別の書き方（極小モデル） ----

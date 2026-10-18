@@ -55,21 +55,27 @@ class Pool:
     ms: dict = field(default_factory=dict)   # 段ごとの所要（candidates / alt）
 
 
-_TO_WIDE = str.maketrans("0123456789", "０１２３４５６７８９")
-_TO_NARROW = str.maketrans("０１２３４５６７８９", "0123456789")
+# 幅の対（全角, 半角）。別の書き方の幅を 1 位に揃える
+_WIDTH_PAIRS = tuple(zip("０１２３４５６７８９、。！？", "0123456789,.!?"))
 
 
 def _key(t: str) -> str:
     return unicodedata.normalize("NFKC", t.translate(_SYM_KEY))
 
 
-def _digit_width(t: str, first: str) -> str:
-    """数字の幅を 1 位に揃える（ラティスは数の読みに 300・３００・三百 を持ち、辞書の N-best は 1 位と違う幅を選びうる）。"""
-    wide = any("０" <= ch <= "９" for ch in first)
-    narrow = any("0" <= ch <= "9" for ch in first)
-    if wide == narrow:
-        return t
-    return t.translate(_TO_WIDE if wide else _TO_NARROW)
+def _align_width(t: str, first: str) -> str:
+    """数字と句読点の幅を 1 位に揃える。ラティスは数の読みに 300・３００、記号に ！・! の両方を持ち、辞書の N-best は
+    1 位（zenz が選んだ幅）と違う幅を選びうる。1 位が両方の幅を使っている字は触らない。"""
+    digits_w = any("０" <= ch <= "９" for ch in first)
+    digits_n = any("0" <= ch <= "9" for ch in first)
+    table = {}
+    for w, n in _WIDTH_PAIRS:
+        has_w, has_n = (digits_w, digits_n) if w.isdigit() else (w in first, n in first)
+        if has_w and not has_n:
+            table[ord(n)] = w
+        elif has_n and not has_w:
+            table[ord(w)] = n
+    return t.translate(table)
 
 
 def _with_end(t: str, end: str) -> str:
@@ -93,7 +99,7 @@ def alternatives(p, best: dict, left_context: str = "", end: str = "", n_alt: in
         if not t or k in seen:
             continue
         ok = lambda s: m.accepting(m.advance(m.start(), scoring_text(s).encode()))  # noqa: E731
-        aligned = _digit_width(t, best["text"])
+        aligned = _align_width(t, best["text"])
         if aligned != t and ok(aligned):
             t = aligned
         elif not ok(t):
@@ -156,15 +162,17 @@ def arrange(pl: Pool, order: str = DEFAULT_ORDER, n: int = 6, edit_slots: int = 
     else:
         body = by_score(same + reads)
     hira = pl.hira.text if pl.hira else ""
-    seen = {pl.first.text, hira}
+    # reading 以外は、記号の幅・NFKC だけが違う候補も同じとみなす（了解！ と 了解! で枠を使わない）
+    key = (lambda t: t) if order == "reading" else _key  # noqa: E731
+    seen = {key(pl.first.text), key(hira)}
     # reading は置き換える前と同じ列にするため、ひらがなが 1 位と同じでも枠を 1 つ空けたままにする
     room = n - 2 if order == "reading" or (hira and hira != pl.first.text) else n - 1
     picked: list[Entry] = []
     rest: list[Entry] = []
     for e in body:
-        if not e.text or e.text in seen:
+        if not e.text or key(e.text) in seen:
             continue
-        seen.add(e.text)
+        seen.add(key(e.text))
         (picked if len(picked) < room else rest).append(e)
     if order == "quota":
         edits_in = sum(e.kind == "edit" for e in picked)

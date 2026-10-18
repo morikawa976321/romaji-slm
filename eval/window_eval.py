@@ -53,13 +53,19 @@ def load_items(name: str) -> list[Item]:
         return load_set("user_style")
     if name == "gen_noisy":
         return [it for it in load_set("gen_test") if it.category == "noisy"]
-    if name == "short":
+    if name in ("short", "short_typo"):
         rows = [json.loads(l) for l in SHORT_PATH.read_text(encoding="utf-8").splitlines() if l.strip()]
-        return [Item(f"short{i}", d["romaji"], [], "", "short", {"want": d["want"]}) for i, d in enumerate(rows)]
+        items = [Item(f"short{i}", d["romaji"], [], "", "short", {"want": d["want"]}) for i, d in enumerate(rows)]
+        if name == "short":
+            return items
+        # 短い単語に打鍵ミスを 1〜2 個。正解はその読みの書き方のどれか（want）
+        rng = random.Random(0)
+        return [Item(it.id, noisy(it.romaji, rng)[0], it.meta["want"], "", "typo", {"clean": it.romaji})
+                for it in items]
     raise ValueError(name)
 
 
-SET_NAMES = ("short", "ajimee", "ajimee_typo", "wac_typo", "typo_hard", "user_style", "gen_noisy")
+SET_NAMES = ("short", "short_typo", "ajimee", "ajimee_typo", "wac_typo", "typo_hard", "user_style", "gen_noisy")
 
 
 def _e(d) -> Entry:
@@ -116,6 +122,9 @@ def evaluate(names, show: int = 0) -> None:
         print(f"\n## {name}（{len(rows)} 件。候補を集める時間 中央値 {statistics.median(ms_c):.0f} ms、"
               f"うち別の書き方 {statistics.median(ms_a):.0f} ms）")
         head = "| 並べ方 | top1 | in_win | typed |" + (" want | 最初の want の順位 | want が窓に無い語 |" if name == "short" else "")
+        mixed = name == "user_style"   # 正常入力（typo 以外）の1位・誤補正と、typo の行の in_win を分けて出す
+        if mixed:
+            head += " 正常入力の top1 | 誤補正 | typo の in_win |"
         print(head)
         print("|" + "---|" * (head.count("|") - 1))
         tops = None
@@ -126,6 +135,7 @@ def evaluate(names, show: int = 0) -> None:
             ranks = []
             none = 0
             t1 = []
+            sub = {"clean": 0, "clean_top1": 0, "misfix": 0, "typo": 0, "typo_hit": 0}
             for r, pl in zip(rows, pools):
                 if pl is None:
                     t1.append(None)
@@ -133,9 +143,16 @@ def evaluate(names, show: int = 0) -> None:
                 win = arrange(pl, order, 6, slots(r["romaji"]))
                 n += 1
                 t1.append(win[0].text)
-                top1 += win[0].text in r["refs"]
+                top1 += _hit(r, win[:1], name)
                 hit += _hit(r, win, name)
                 typed.append(sum(not e.edited for e in win) / len(win))
+                if mixed and r["category"] == "typo":
+                    sub["typo"] += 1
+                    sub["typo_hit"] += _hit(r, win, name)
+                elif mixed:
+                    sub["clean"] += 1
+                    sub["clean_top1"] += _hit(r, win[:1], name)
+                    sub["misfix"] += win[0].edited
                 if name == "short":
                     texts = [e.text for e in win]
                     want = [w for w in r["meta"]["want"] if w != win[0].text]
@@ -152,6 +169,9 @@ def evaluate(names, show: int = 0) -> None:
             if name == "short":
                 line += (f" {want_in}/{want_all} ({want_in / want_all:.0%}) | "
                          f"{statistics.mean(ranks):.2f} | {none} |")
+            if mixed:
+                line += (f" {sub['clean_top1']}/{sub['clean']} | {sub['misfix']}/{sub['clean']} | "
+                         f"{sub['typo_hit']}/{sub['typo']} |")
             print(line)
         for r, pl in list(zip(rows, pools))[:show]:
             if pl is None:
