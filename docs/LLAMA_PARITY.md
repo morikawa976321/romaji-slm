@@ -301,7 +301,7 @@ GGUF の BOS/EOS の ID（`infer.to_gguf` が作るときに直し、`LlamaBacke
 
 開発機で作った zip を写して、ダブルクリックするだけ。リポジトリ・git・GPU は要らない（追従モードの clone とは別のフォルダに展開してよい）。
 
-1. 開発機で zip を作る（済み: `dist/romaji-slm-bench-20261018-00b4e35.zip`、410 MB。作り直すときは `pwsh -NoProfile -File tools/pack-bench.ps1`）。
+1. 開発機で zip を作る（済み: `dist/romaji-slm-bench-20261019-8437dc5.zip`、410 MB。作り直すときは `pwsh -NoProfile -File tools/pack-bench.ps1`）。
    中身は HEAD のコード、辞書と読みの LM、zenz-v3.1-small（HF 形式）、GGUF（Q8_0・F16）、llama-server の CPU の部品だけ（CUDA の DLL は外した）、CPU 版 torch の uv.lock。
 2. ThinkPad に写して展開する。**AC 電源につなぎ、ほかのアプリを閉じる。**
 3. 展開したフォルダの `bench.cmd` をダブルクリックする。初回は uv・Python・CPU 版 torch・onnxruntime の取得で数分、測定は 13 通り × 1〜2 分。測っている間は触らない。
@@ -312,7 +312,7 @@ GGUF の BOS/EOS の ID（`infer.to_gguf` が作るときに直し、`LlamaBacke
 句読点を打たない入力での torch・llama・ONNX、最後にもう一度 torch。各 14 文 × 3 周。結果の先頭に CPU 名・電源・電源プラン・測る前の CPU 使用率・版が入る。
 各表の「20〜30 字（速度要件の範囲）」の行が判定に使う値。
 
-このデスクトップで zip（00b4e35）を空のフォルダに展開し、`-Quick -Smoke`（2 文・1 周・空回しなし）で 7 通りとも最後まで通ることを確かめた
+このデスクトップで zip（8437dc5。GGUF の BOS/EOS を直し、llama 版の新しい既定が入った版）を空のフォルダに展開し、`-Quick -Smoke`（2 文・1 周・空回しなし）で 7 通りとも最後まで通ることを確かめた
 （uv sync、ONNX の書き出しは zip の torch 2.14.1+cpu で通る、results.md の作成とクリップボード）。その前の版では、CPU が埋まっていたときに llama 版の要求が
 60 秒の制限で切れたことがある。ThinkPad で同じことが起きたら、ほかのアプリを閉じてやり直す。
 
