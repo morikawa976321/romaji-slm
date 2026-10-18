@@ -141,13 +141,22 @@ class LlamaBackend:
         t0 = time.perf_counter()
         data = json.dumps(body).encode()
         if self.keep_alive:
-            conn = getattr(self._local, "conn", None)
-            if conn is None:
-                u = urllib.parse.urlsplit(self.server.url)
-                conn = self._local.conn = http.client.HTTPConnection(u.hostname, u.port, timeout=60)
-            conn.request("POST", path, body=data, headers={"Content-Type": "application/json"})
-            resp = conn.getresponse()
-            raw = resp.read()
+            # サーバーが使い回しの接続を閉じていることがある（WinError 10053）。1 回だけ繋ぎ直して送り直す
+            for attempt in (0, 1):
+                conn = getattr(self._local, "conn", None)
+                if conn is None:
+                    u = urllib.parse.urlsplit(self.server.url)
+                    conn = self._local.conn = http.client.HTTPConnection(u.hostname, u.port, timeout=60)
+                try:
+                    conn.request("POST", path, body=data, headers={"Content-Type": "application/json"})
+                    resp = conn.getresponse()
+                    raw = resp.read()
+                    break
+                except (http.client.HTTPException, ConnectionError) as e:
+                    conn.close()
+                    self._local.conn = None
+                    if attempt:
+                        raise RuntimeError(f"llama-server に繋ぎ直しても送れなかった: {path}") from e
             if resp.status != 200:
                 raise RuntimeError(f"HTTP {resp.status}: {path} {raw[:500]!r}")
         else:
