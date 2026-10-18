@@ -11,7 +11,8 @@ param(
     [string]$Gguf = '',
     [string]$GgufF16 = '',
     [string]$LlamaBin = '',
-    [switch]$Quick
+    [switch]$Quick,
+    [switch]$Smoke  # 流れだけ確かめる（2 文・1 周・空回しなし。数値は使わない）
 )
 
 $ErrorActionPreference = 'Continue'
@@ -87,7 +88,8 @@ foreach ($r in $runs) {
     $i++
     Write-Host "  ($i/$($runs.Count)) $($r.tag)"
     $a = @('run', '--no-sync') + $(if ($r.with) { $r.with } else { @() }) +
-         @('python', '-m', 'eval.parity_speed', '--device', 'cpu', '--repeat', '3', '--tag', "tp-$($r.tag)") + $r.args
+         @('python', '-m', 'eval.parity_speed', '--device', 'cpu', '--tag', "tp-$($r.tag)") + $r.args +
+         $(if ($Smoke) { @('--repeat', '1', '--warmup', '0', '--min-chars', '27', '--max-chars', '27') } else { @('--repeat', '3') })
     & uv @a 2>> $Log | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "    失敗しました（$Log）" }
 }
