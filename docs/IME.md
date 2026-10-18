@@ -87,6 +87,8 @@ pwsh -NoProfile -File ime/uninstall.ps1
 
 ## 別の PC（ThinkPad）に入れる（Git で追従。推奨）
 
+ThinkPad で上から順になぞる手順書は [THINKPAD.md](THINKPAD.md)。
+
 本人の決定（2026-10-18）で、ThinkPad はリポジトリを clone して「追従モード」で使う。
 常駐アプリが 30 分ごとに GitHub の main から取ってきて（`git fetch` → 早送りの `merge --ff-only`）、今の自動更新（組み立て → 自己試験 → 打っていない間に差し替え）に乗せる。ZIP を作り直して写す手間は要らない。
 
