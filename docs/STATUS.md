@@ -16,7 +16,7 @@
   - `pwsh -NoProfile -File ime/build.ps1 -Test`
   - `RomajiSlmIme.exe --selftest <打鍵列> <結果ファイル> [--root <repo>]`
 2026-10-13 に本人が休止を決め、2026-10-14〜15 に親セッション（Claude）が本人不在で進めた（規則は [parent-session-prompt.md](parent-session-prompt.md)、判断の記録 D1〜D13 と本人待ちのカードは [decisions.md](decisions.md)）。
-要件は [DESIGN.md](DESIGN.md)、方式の決定と経緯は [REDESIGN.md](REDESIGN.md)、全実測は [EVAL.md](EVAL.md)、体験版は [TRIAL.md](TRIAL.md)、llama-server 実行系は [LLAMA_BACKEND.md](LLAMA_BACKEND.md)。
+要件は [DESIGN.md](DESIGN.md)、方式の決定と経緯は [REDESIGN.md](REDESIGN.md)、全実測は [EVAL.md](EVAL.md)、体験版は [TRIAL.md](TRIAL.md)、速さは [SPEEDUP.md](SPEEDUP.md)。
 
 ## 1. どこまで来たか
 
@@ -26,7 +26,7 @@
 打鍵列 ─ core/reading.py ─→ 読みの上位 k 件（打鍵ミスの編集弧・英単語の弧・n/nn・数字・記号）
        ─ core/constrained.py ─→ k 件をまとめて1バッチで、辞書ラティス（core/kanakanji.py、数の弧 core/numbers.py）で
                                   出力を制約した zenz-v3.1-small の貪欲生成（Decoded: 文・対数確率・完走・語の切れ目）
-                                  ※ llama-server 版は core/gbnf.py（ラティス→GBNF）＋ core/llama_backend.py
+                                  ※ GPU は torch、CPU は forward を ONNX Runtime で回す core/ort_backend.py（照合は同じ）
        ─ core/pipeline.py ─→ score = zenz の変換の対数確率 + f×完成文の自然さ（core/select.py の fluency）− w×読みのコスト
                               の最大を返す（既定 k=5, w=4, f=1）。句読点 B（punct=insert）はここで句読点を補い、
                               英字の表記（en_case）はここで登録表記に描画する
@@ -34,7 +34,7 @@
 
 ### 数値（詳細は EVAL.md「工程6」）
 
-| | small（既定） | xsmall（速度優先） | small を llama-server（Q8_0）で |
+| | small（既定） | xsmall（速度優先） | small を llama-server（Q8_0）で（2026-10-15。その後削除、D44） |
 |---|---|---|---|
 | user_style 73文 完全一致（GPU） | 82.2%（`e=registered` 86.3%） | 76.7% | 80.8% |
 | うち tech / typo | 75.0% / 63.6% | 60.0% / 54.5% | 75.0% / 63.6% |
@@ -48,7 +48,7 @@
 ### 2026-10-14〜15 にできたもの
 
 - **k 件のバッチ生成**（D4）、**表記モード** `punct` = auto / ja / ascii / insert、`en_case` = typed / registered / auto / zenz（D7）、**句読点 B**（D8）、Codex（QA 役）のレビュー 5 件の修正（D11）。
-- **llama-server 実行系**（PR #8、D6・D12・D13）: grammar 付きでも制約前の対数確率を返すことを確認。CPU で torch 版の約 0.7 倍の時間、精度は約 1 ポイント低い（量子化ではなく実行系の差）。本番実行系の第一候補だが、配布物はまだ torch 版。
+- **llama-server 実行系**（PR #8、D6・D12・D13。2026-10-20 に削除、D44）: grammar 付きでも制約前の対数確率を返すことを確認。CPU で torch 版の約 0.7 倍の時間、精度は約 1 ポイント低い（量子化ではなく実行系の差）。本番実行系の第一候補だが、配布物はまだ torch 版。
 - **体験版 V0.2**（PR #6 → #9、D2・D9・D10）: 一本道のステップ式（準備 → 句読点 3 例 → 英字 3 例 → 体感 2 例 → 自動計測 → 結果をコピー、19 クリック）。本物のエンジンで通し操作を確認。結果ブロックの冒頭に本人の明示回答（句読点・英字・使用感）が出る。
 - **配布 zip**: `tools/pack-trial.ps1` → `dist/romaji-slm-trial-<日付>-<hash>.zip`（202 MB、torch は CPU 版の `uv.lock`、モデル同梱）。別フォルダへの展開、**空の環境**（uv のキャッシュと Python が無い。`UV_CACHE_DIR`・`UV_PYTHON_INSTALL_DIR` を空にして `UV_PYTHON_PREFERENCE=only-managed`）での起動を確認した。cmd.exe の UTF-8 の罠で run.cmd は ASCII の起動役にし、手順は `trial/run.ps1`（UTF-8 BOM）に置いた。
 - **評価の道具**（PR #7）: `eval/diff.py`、`clean_exact`・`pair_consistent`、`eval/punct_eval.py`、gen_test の dev/val 分割。
@@ -79,7 +79,12 @@ pwsh -NoProfile -File tools/pack-trial.ps1                                      
 5. IME 化は 2026-10-16 の本人の依頼で常駐入力として着手した（§0）。
 6. `uv run pytest` が 1 回だけ 1 件落ち、続く 3 回は全件通った（2026-10-16）。どのテストかは特定していない。
 7. **候補ウィンドウ（merge、D37）の所要**: 別の書き方を足す分は、このデスクトップの GPU で中央値 20〜75 ms、CPU（別の作業で負荷 100% のとき）で短い単語 153 ms・文 445 ms（D37）。ThinkPad では測っていない。1 位も同じ読みの別の書き方と同じ式で選び直すと AJIMEE きれい 153 → 155・user_style 63 → 64（誤補正 3 のまま）になる（保存した候補での机上の値。1 位が変わるので今回は入れていない）。
-8. **さらに速くする余地**（2026-10-20 の軽い検討、[SPEEDUP.md](SPEEDUP.md)。本人の依頼で報告まで、コードは変えていない）: ONNX 版の常駐入力の 1 要求（左文脈 60 字）は、このデスクトップ（負荷あり）で 1.8 秒、94% が forward。行どうしで共通の前置きの KV を使い回す試作で、出力を変えずに 0.55 倍。次は 1 手ごとの KV の写し（1 手の 2〜4 割）。別の書き方を最初の応答から外す・古い先読みを打ち切るは、振る舞いが変わるので本人の判断。int8 の動的量子化は精度が落ちて使えない。torch＋GPU は 0.3 秒、llama 版には投資しない。
+8. **速くした（2026-10-20、[SPEEDUP.md](SPEEDUP.md) §0、D44・D45）**: ONNX 版に A（共通の前置きの使い回し）・D（KV の写し）・E（融合）を入れた。
+   常駐入力の 1 要求は左文脈 60 字で 2224 → 932 ms（このデスクトップ、負荷あり）、出力は変わらない。llama-server の経路と torch の CPU の経路は削除した。
+   B（別の書き方を後に回す）・C（古い先読みの打ち切り）は測っただけで入れていない（本人の判断）。模擬の打鍵で、打ち終えてから 1 位が出るまでの待ちが
+   B＋C で約 0.55 倍（1342 → 738 ms）。ThinkPad の測定は bench の zip を作り直してから（`tools/pack-bench.ps1`）。
+   全セットの出力が 2026-10-18 の記録と 79 文で違う（句読点 B の読点。A・D・E とは無関係、原因は未特定）。
+   以下は入れる前の検討（2026-10-20）: ONNX 版の常駐入力の 1 要求（左文脈 60 字）は、このデスクトップ（負荷あり）で 1.8 秒、94% が forward。行どうしで共通の前置きの KV を使い回す試作で、出力を変えずに 0.55 倍。次は 1 手ごとの KV の写し（1 手の 2〜4 割）。別の書き方を最初の応答から外す・古い先読みを打ち切るは、振る舞いが変わるので本人の判断。int8 の動的量子化は精度が落ちて使えない。torch＋GPU は 0.3 秒、llama 版には投資しない。
 
 ## 3. 止めた路線（再開時に繰り返さない）
 

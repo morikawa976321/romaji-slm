@@ -666,3 +666,64 @@ AI の意見: Git で追従させるのに賛成。必要なのは 4 つ。
   ほかのテストと別のセッションが CPU を使っていたときの参考値）。
 - 残る失うもの: 保守する経路が 1 本増える（ONNX の書き出しのために GPT-2 の計算を手で書き直している。torch の旧式の書き出しは非推奨）。1 台あたり約 400 MB 増える。
   ThinkPad での速さ・メモリ・起動時間は未測定（本人の決定で、ほかの高速化のあとに最後に測る）。
+
+## 本人の依頼（2026-10-20、SPEEDUP.md の報告を受けて）
+
+> ADEを入れ、改善したことを確認する。
+> その状態でBCがどれくらい効くかを測定し報告する。
+> llama経路とtorchのCPU経路を完全に削除する。
+
+（A・B・C・D・E は docs/SPEEDUP.md の手の名前。A＝共通の前置きの KV の使い回し、D＝1 手ごとの KV の写しを無くす、E＝演算の融合、
+B＝別の書き方を最初の応答から外す、C＝古い先読みの打ち切り。報告の前の依頼は「修正は入れず報告までがタスクです」）
+
+### D44. llama-server の経路と torch の CPU の経路を削除する（2026-10-20、本人の決定の実施）
+
+- 本人の決定: 上の「llama経路とtorchのCPU経路を完全に削除する。」
+- 消したもの: `core/llama_backend.py`・`core/gbnf.py`・`infer/`（llama-server・GGUF 変換・推論 CLI。CLI の hf の経路は止めた路線の
+  微調整モデルを torch の CPU で動かすもの）・`eval/bench_backend.py`・`eval/bench_cpu.ps1`・`eval/parity_cause.py`・
+  `tests/test_llama_backend.py`・`tests/test_infer.py`・`tools/tasks/llama-backend.md`・`docs/LLAMA_BACKEND.md`・`docs/INFER.md`・
+  依存の gguf、変換器 `core-llama`、行き止まりの刈り込み（`LatticeMatcher(prune)`・変換器の `dp`。llama 版の文法に揃える変種）、
+  `--torch-threads`（eval.parity・eval.parity_speed）。削除する前の版は cf88664 にある。
+- torch は GPU（cuda）だけで動く: `core.select.torch_device` が cuda 以外を拒む（ZenzScorer・CorePipeline・eval の HF の変換器）。
+  CPU の変換は ONNX Runtime 版（`core-ort`）。既定の装置は cuda に変えた。
+- 常駐入力（ime/server.py）: `engine=auto` と `engine=torch` は GPU があれば torch、無ければ onnx（torch を指定して GPU が無ければ記録に残す）。
+  ONNX 版が使えないときは、GPU があれば torch に戻り、無ければ変換サーバの起動の失敗として記録に残す（前は torch の CPU 版に戻っていた）。
+  torch のスレッド数の設定は torch を使うときだけにした。
+- AI の判断:
+  - torch は ONNX の書き出し（初回、CPU）とその照合のためにだけ残す。GPU の無い機械も torch の CPU 版を入れる（書き出しに要る）。
+    書き出しは変換の経路ではないので残した。
+  - `docs/LLAMA_PARITY.md` は調べた結果の記録として残し、冒頭に削除したことと動かないコマンドを書いた。ThinkPad の測り方は
+    THINKPAD.md「速さを測る」に移した。EVAL.md・decisions.md の過去の記録は書き換えない。
+  - 体験版（trial/）と tools/memprof.py は、cuda でない設定を ONNX 版で動かす。
+  - torch の試験は GPU で回し、GPU の無い機械では飛ばす（tests/conftest.py の `torch_device`）。ONNX 版の試験の極小モデルは
+    tests/test_ort_backend.py に移した。
+  - ThinkPad の bench（tools/thinkpad-bench.ps1・pack-bench.ps1）は ONNX 版だけを測り、常駐入力の要求の形での待ち（eval/ime_sim.py）を足した。
+- 確かめたこと: `uv run pytest` 314 件通過（torch の試験は RTX 5060 Ti）。`ime/build.ps1 -Test` 通過。本物の変換サーバで 3 通り
+  （`device=cpu` → engine=onnx、`device=auto` → このデスクトップでは engine=torch・cuda、`device=cpu engine=torch` → 記録を残して onnx。
+  どれも kyouhaiitenkidesune → 今日はいい天気ですね）。
+
+### D45. ONNX 版に A・D・E を入れる（2026-10-20、本人の依頼の実施）
+
+- 実施（core/ort_backend.py）:
+  - A: 前置きの KV を B=1 で計算して取っておき（最近の 8 個）、各行に写す。同じプロンプトの行が 2 つ以上あればその行どうしの共通部、
+    1 つずつなら全行の共通部。プロンプトの最後の 1 トークンは行ごとに流す。要求をまたいでも、取ってある最長の前置きから伸ばす。
+  - D: KV を層ごとの入出力（pk0〜pk11・pv0〜pv11）にした。全層を束ねると 1 手ごとに KV を 3 回写していた（層への切り出し・連結・束ね直し）。
+    1 回（層ごとの連結）になる。
+  - E: 書き出した後に onnxruntime.transformers の optimize_model（gpt2、opt_level 1）で FastGelu 12・SkipLayerNorm 25 に融合。
+    融合できなければ融合しない書き出しで動く。どちらも HF と照らしてから使う。
+  - 書き出しの形の版を v2 にした（`models/onnx/zenz-v3.1-small-v2.onnx`）。常駐入力は次の起動で書き出し直し、旧い形のファイルを消す。
+- AI の判断:
+  - D は「確保済みの領域へその場で書く」形（ORT の contrib の MultiHeadAttention / GroupQueryAttention）にしなかった。CPU で使っている
+    ORT の版が過去と現在の共有に対応するか確かめておらず、GQA は行の途中の詰め物（A で使う）を mask で表せない。層ごとの入出力で写しは 1 回になる。
+  - 生成で終わった行を束から外す手は入れなかった（試作で 0.97〜1.02 倍）。
+- 確かめたこと（このデスクトップ Core Ultra 5 245KF、スレッド 4、ほかのセッションが CPU を使っていた）:
+  - 1 手の forward（B=9）: KV 30/70/130 で 14.6/18.0/26.2 → 12.3/13.7/16.8 ms（同じプロセスで交互に 15 回の中央値）。
+  - 常駐入力の 1 要求（convert_nbest、user_style の 20〜30 字 14 文 × 2 周を交互に）: 左文脈なし 1042 → 779 ms（D・E だけ 984）、
+    左文脈 60 字 2224 → 932 ms（D・E だけ 2024）。打鍵の途中を順に変換したときの最後の要求 2270 → 885 ms。候補の列はどれも 56/56 同じ。
+  - 常駐と同じ設定の候補の列（user_style 73・short_words 52・user_style_nopunct 68・synth_user の先頭 300 の 493 件 × 左文脈 2 通り）:
+    986 要求で旧版と 1 件も違わない。
+  - 全セット 2400 文（eval.parity、`core-ort:t=4,p=insert`）: 候補（読み・文・完走）は 2400 件とも 2026-10-18 の O0 と同じ、点数の差は最大 0.00095。
+    出力は 2321 件が O0 と同じで、79 件は句読点 B の読点が違った。この 79 件は、今のコードに旧い ONNX 版（A・D・E の前）を差しても同じ出力に
+    なったので、A・D・E とは関係ない（O0 を取った 2026-10-18 20:10 の作業ツリーの状態の差とみられる。コミット済みのコードはその後この経路で
+    変わっていない。原因は特定していない）。読点を補った出力は O0 172 件、今 251 件で、AJIMEE の完全一致は 169 → 153。
+  - eval.parity の 1 件の中央値（convert、別の回）: 986 → 645 ms。

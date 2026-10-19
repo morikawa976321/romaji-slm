@@ -4,7 +4,7 @@
 > 中のコマンド（`core-llama`・`eval.bench_backend`・`eval.parity_cause`・`--device cpu` の torch 版など）はもう動かない。
 > 削除する前の実装は git の cf88664 にある。今の速さの話は [SPEEDUP.md](SPEEDUP.md)、ThinkPad の測り方は [THINKPAD.md](THINKPAD.md)「速さを測る」。
 
-変換コアの 2 つの実行方式（torch 版 `core`、llama-server 版 `core-llama`。仕組みは [LLAMA_BACKEND.md](LLAMA_BACKEND.md)）で、
+変換コアの 2 つの実行方式（torch 版 `core`、llama-server 版 `core-llama`。仕組みは 当時の LLAMA_BACKEND.md（削除済み））で、
 変換結果と速度がなぜ違うのかを、片方だけを変えた変種を作って突き止めた。どちらに寄せるか・どう揃えるかの材料。
 **既定の実行方式（torch 版）と常駐入力（ime/）は変えていない。** 変種はすべてオプションで足した。
 
@@ -277,7 +277,7 @@ torch 版の速くする余地（D17 の続き）: スレッド数の固定の�
 - 本人が配布物の大きさ（torch の約 250 MB）を重く見る → B か C1 で torch を実行時から外す方向を先にする。
 - スレッドを固定すると、どこかの機械で出力が変わる → A' は使えず、B を先にする（ONNX Runtime もスレッド数を決めて同じ確認が要る）。
 
-llama 版を候補に残すので、方式の選択と無関係な次の 4 点は、この調査のあと llama 版の既定に入れた（2026-10-18。[LLAMA_BACKEND.md](LLAMA_BACKEND.md)「使い方」）:
+llama 版を候補に残すので、方式の選択と無関係な次の 4 点は、この調査のあと llama 版の既定に入れた（2026-10-18。当時の LLAMA_BACKEND.md（削除済み）「使い方」）:
 GGUF の BOS/EOS の ID（`infer.to_gguf` が作るときに直し、`LlamaBackend` も起動時に確かめて直す。手元の Q8_0・F16 は `--fix-special` で直した）、
 `fl=tok`・`rf=auto`（近似が使えるモデルなら `eos`）・`ka=1`、`-np` が 2 以上なら `-c` を 学習時の長さ × スロット数、`-ngl 0 --device none`（CPU だけ）。
 直したあとの既定で user_style を流すと、F16・`-np 1` は Lz3 と、Q8_0・`-np 5` は Lz1b と、点数まで同じだった。
