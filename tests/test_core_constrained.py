@@ -58,8 +58,8 @@ def tiny_model(tmp_path_factory) -> str:
 
 
 @pytest.fixture(scope="module")
-def cz(tiny_model):
-    return ConstrainedZenz(ZenzScorer(tiny_model, "cpu"))
+def cz(tiny_model, torch_device):
+    return ConstrainedZenz(ZenzScorer(tiny_model, torch_device))
 
 
 @pytest.fixture
@@ -113,9 +113,9 @@ def test_bounds_inside_multichar_token(dic):
     assert 2 in bounds_from_text(m, "今日は")
 
 
-def test_finished_rows_do_not_advance_position(tmp_path_factory, dic):
+def test_finished_rows_do_not_advance_position(tmp_path_factory, dic, torch_device):
     # 位置埋め込みが短いモデルで、長いプロンプトの系列が先に終わっても、残りの系列の生成で上限を超えない
-    short = ConstrainedZenz(ZenzScorer(_make_tiny(tmp_path_factory.mktemp("short"), 40), "cpu"))
+    short = ConstrainedZenz(ZenzScorer(_make_tiny(tmp_path_factory.mktemp("short"), 40), torch_device))
     long_ctx = "今日は良い天気ですね" * 2  # プロンプトが長い系列（すぐ終わる短い読み）と、短い系列（長い読み）を混ぜる
     rs = [_kana("キ"), _kana("テンキハキョウハイイテンキ")]
     single = [short.decode_scored(rs[0], dic, long_ctx), short.decode_scored(rs[1], dic, "")]
@@ -125,17 +125,17 @@ def test_finished_rows_do_not_advance_position(tmp_path_factory, dic):
     assert [d.text for d in batch] == [d.text for d in single]
 
 
-def test_pick_respects_max_tries(tiny_model, dic):
+def test_pick_respects_max_tries(tiny_model, dic, torch_device):
     import torch
 
-    cz1 = ConstrainedZenz(ZenzScorer(tiny_model, "cpu"), max_tries=1)
+    cz1 = ConstrainedZenz(ZenzScorer(tiny_model, torch_device), max_tries=1)
     m = __import__("core.constrained", fromlist=["LatticeMatcher"]).LatticeMatcher(_kana("キョウ"), dic)
     logits = torch.full((len(cz1.tok_bytes),), -10.0)
     bad = [t for t, b in enumerate(cz1.tok_bytes) if b == b"x"][0]  # ラティスに無いトークンを 1 位に
     good = [t for t, b in enumerate(cz1.tok_bytes) if b == "今".encode()][0]
     logits[bad], logits[good] = 1.0, 0.5
     assert cz1._pick(logits, m, m.start())[0] is None  # max_tries=1 では 1 位だけ見る
-    assert ConstrainedZenz(ZenzScorer(tiny_model, "cpu"), max_tries=2)._pick(logits, m, m.start())[0] == good
+    assert ConstrainedZenz(ZenzScorer(tiny_model, torch_device), max_tries=2)._pick(logits, m, m.start())[0] == good
 
 
 def test_batch_order_and_empty(cz, dic):

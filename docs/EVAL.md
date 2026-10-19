@@ -7,7 +7,7 @@
 ```
 uv sync --group eval
 # 変換器 × セット。結果は eval/out/<変換器>__<セット>.jsonl（1件1行）と .md（集計表）
-uv run python -m eval.run --converter zenz-baseline --set ajimee --set ajimee-noctx --set user_style --device cpu
+uv run python -m eval.run --converter zenz-baseline --set ajimee --set ajimee-noctx --set user_style --device cuda
 uv run python -m eval.run --converter zenz-baseline --set ajimee --limit 20      # 少数で試す
 uv run python -m eval.run --converter romaji2ja --set user_style                # 配布元の正規化あり
 uv run python -m eval.run --converter hf --model <パス|HF ID> --template zenz-v3-romaji --set file:data/test.jsonl
@@ -237,6 +237,8 @@ score = zenz の変換の対数確率 + f × 完成文の自然さ − w × 読�
 全セットの CPU 実測は精度が GPU と同じ（small: 82.2% / 34.1% / 84.5%、xsmall: 76.7% / 31.5% / 70.0%）。句読点 B の 1 バッチ採点は 2 段（文末 → 読点）に変えた（下の「句読点 B」）。
 
 #### 実行系の比較（torch 版 `core` と llama-server 版 `core-llama`、2026-10-15）
+
+（llama-server 版と torch の CPU の経路は 2026-10-20 に削除した。decisions.md D44。下は当時の記録）
 
 **訂正（2026-10-18、[LLAMA_PARITY.md](LLAMA_PARITY.md)）: この節の llama-server の数値は GPU のもの。** b10549 の CUDA ビルドは `-ngl` の既定が `auto` で、
 RTX 5060 Ti に全層を載せていた（「CUDA ビルドの CPU 実行」は誤り）。また約 1 ポイントの精度の差の原因は、GGUF の BOS/EOS の ID の取り違え

@@ -1,6 +1,6 @@
 """評価の実行。
 
-    uv run python -m eval.run --converter zenz-baseline --set ajimee --limit 20 --device cpu
+    uv run python -m eval.run --converter zenz-baseline --set ajimee --limit 20 --device cuda
 """
 
 import argparse
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None):
     ap.add_argument("--model", help="モデルのパスまたは HF の ID")
     ap.add_argument("--template", help="プロンプト雛形（prompts.py）")
     ap.add_argument("--limit", type=int)
-    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--device", default="cuda", help="torch の変換器は cuda だけ（CPU では core-ort を使う）")
     ap.add_argument("--warmup", type=int, default=2, help="計測前の空回し回数（初回の遅さを除く）")
     args = ap.parse_args(argv)
 

@@ -30,8 +30,8 @@ def tiny_model(tmp_path_factory):
     return str(path)
 
 
-def test_convert_interface(tiny_model):
-    conv = HFCausalLM(tiny_model, "zenz-v3-romaji", "cpu")
+def test_convert_interface(tiny_model, torch_device):
+    conv = HFCausalLM(tiny_model, "zenz-v3-romaji", torch_device)
     r = conv.convert_detailed("kyou", "ab")
     assert r.prompt == f"{CONTEXT}ab{INPUT}kyou{OUTPUT}"
     # 文字単位なので、プロンプトのトークン数は文字数に等しい（特殊トークンを足さない）
@@ -40,6 +40,6 @@ def test_convert_interface(tiny_model):
     assert isinstance(conv.convert("kyou"), str)
 
 
-def test_baseline_template_converts_to_katakana(tiny_model):
-    r = HFCausalLM(tiny_model, "zenz-v3", "cpu").convert_detailed("kyou", "")
+def test_baseline_template_converts_to_katakana(tiny_model, torch_device):
+    r = HFCausalLM(tiny_model, "zenz-v3", torch_device).convert_detailed("kyou", "")
     assert r.prompt == f"{INPUT}キョウ{OUTPUT}"

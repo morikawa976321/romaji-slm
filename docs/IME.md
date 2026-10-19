@@ -79,8 +79,8 @@ pwsh -NoProfile -File ime/uninstall.ps1
 ```
 
 - 設定は `%LOCALAPPDATA%\romaji-slm\ime.ini` にある（`device=auto|cuda|cpu`、`port`、前回の on/off、`threads`）。変えたらトレイの「終了」から起動し直す。
-  `threads` は変換の torch のスレッド数で、既定 4（本人の決定。D42）。0 なら torch の既定（論理コア数）で、ほかの処理が CPU を使っていると変換が極端に遅くなり、変換のたびに全コアを埋める。スレッド数を変えても変換結果は変わらない。サーバの起動の記録（`server.log` の `ready in` の行）に `threads=` が出る。
-  `engine` は変換の実行方式で、既定 `auto` は GPU（CUDA）があれば torch、無ければ ONNX Runtime 版（`core/ort_backend.py`）を使う（本人の決定。D43）。ONNX 版は torch 版と変換結果も候補の並び（候補ウィンドウの別の書き方を含む）も同じで、CPU では速い。`torch` / `onnx` で決め打ちできる。ONNX 版は初回の起動で zenz を `app\models\onnx\` に書き出す（380 MB、20〜40 秒。書き出した結果を torch と照らしてから使う）。ONNX 版が使えないとき（onnxruntime が無い、書き出しに失敗した）は torch 版で動く。記録の `ready in` の行に `engine=` が出る。
+  `threads` は変換の CPU のスレッド数（ONNX Runtime 版と、GPU のときの torch の CPU 側）で、既定 4（本人の決定。D42）。0 なら実行系の既定（論理コア数）で、ほかの処理が CPU を使っていると変換が極端に遅くなり、変換のたびに全コアを埋める。スレッド数を変えても変換結果は変わらない。サーバの起動の記録（`server.log` の `ready in` の行）に `threads=` が出る。
+  `engine` は変換の実行方式で、既定 `auto` は GPU（CUDA）があれば torch、無ければ ONNX Runtime 版（`core/ort_backend.py`）を使う（本人の決定。D43）。ONNX 版は torch 版と変換結果も候補の並び（候補ウィンドウの別の書き方を含む）も同じで、CPU では速い。`onnx` で決め打ちできる。`torch` は GPU のときだけで、GPU が無ければ ONNX 版で動く（torch の CPU の経路は削除した。D44）。ONNX 版は初回の起動で zenz を `app\models\onnx\` に書き出す（380 MB、20〜40 秒。書き出した結果を torch と照らしてから使う。書き出しの形を変えた版では次の起動で書き出し直し、古いファイルは消す）。ONNX 版が使えないとき（onnxruntime が無い、書き出しに失敗した）は、GPU があれば torch 版で動き、無ければ変換サーバは起動に失敗する（記録に理由が出る）。記録の `ready in` の行に `engine=` が出る。
 - **実利用の記録**（本人の依頼）: `%LOCALAPPDATA%\romaji-slm\history.jsonl` に 1 行 1 件の JSON で残す。残すのは、確定（`commit`）・Esc で捨てた文（`cancel`）・変換や送信に失敗して浮き窓に戻した文（`restore`）。項目は `time` `event` `romaji`（打った打鍵列） `context`（左文脈） `candidates`（出ていた候補） `chosen`（選んだ番号。1 位なら 0、打鍵列のままなら -1） `text`（入れた文） `raw` `app`（入力先の exe 名） `note`、確定の直後に Backspace で消して打ち直したときは `retype`（`backspaces` 消した字数、`prev_text` `prev_romaji` 直前の確定）。パスワード欄の打鍵は変換せずにそのまま送るので残らない。確定した後にアプリの中で直した結果は見えない。止めるには `ime.ini` を `history=0` にする。30 日を過ぎた行は常駐アプリが消し（起動時と 1 時間ごと）、振り返り済みの行は振り返りの道具が消す（REVIEW.md「消すこと」）。`no_history_apps` に並べたアプリ（既定はパスワード管理のアプリ）は記録しない。
 - サーバのログは `server.log`（打った文字列は残さない）。
 - 診断: `ime-state.txt`（5 秒ごとの状態。モード・確認待ち・フックの呼ばれた回数と最後に呼ばれてからの時間など）と `ime-debug.log`（モードの変化・欄の確認の結果・フックの付け直し・浮き窓の知らせ）。どちらも打った文字は書かない。
@@ -120,7 +120,7 @@ ThinkPad で上から順になぞる手順書は [THINKPAD.md](THINKPAD.md)。
 4. 展開したフォルダは消してよい。
 
 - 更新するときは、新しい zip で同じことをする。設定（ime.ini）・記録・ユーザー辞書は、その PC のものが残る。
-- 変換は CPU で動く（`device=auto`）。このデスクトップの CPU では 1 文の中央値 552 ms だった。ThinkPad での速さは未測定。
+- 変換は CPU の ONNX Runtime 版で動く（`device=auto`）。速さは THINKPAD.md「ThinkPad で分かれるもの」。ThinkPad での速さは未測定。
 - ユーザー辞書と利用履歴の振り返りは PC ごと。振り返り（ops-daily）はこのデスクトップでだけ動く。ThinkPad の辞書を揃えたいときは、`user_dict.tsv` を写す。
 - 試しに別のフォルダへ入れるとき: `powershell -ExecutionPolicy Bypass -File app\ime\install-zip.ps1 -Target <フォルダ> -NoShortcuts -NoLaunch`。`-NoShortcuts` を付けないと、今のショートカットを上書きする。
 

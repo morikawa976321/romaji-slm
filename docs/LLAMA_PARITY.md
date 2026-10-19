@@ -1,5 +1,9 @@
 # torch 版と llama-server 版の食い違いの調査（2026-10-18）
 
+> **2026-10-20 に llama-server 版と torch の CPU の経路を削除した（本人の決定、decisions.md D44）。** この文書は調べた結果の記録として残す。
+> 中のコマンド（`core-llama`・`eval.bench_backend`・`eval.parity_cause`・`--device cpu` の torch 版など）はもう動かない。
+> 削除する前の実装は git の cf88664 にある。今の速さの話は [SPEEDUP.md](SPEEDUP.md)、ThinkPad の測り方は [THINKPAD.md](THINKPAD.md)「速さを測る」。
+
 変換コアの 2 つの実行方式（torch 版 `core`、llama-server 版 `core-llama`。仕組みは [LLAMA_BACKEND.md](LLAMA_BACKEND.md)）で、
 変換結果と速度がなぜ違うのかを、片方だけを変えた変種を作って突き止めた。どちらに寄せるか・どう揃えるかの材料。
 **既定の実行方式（torch 版）と常駐入力（ime/）は変えていない。** 変種はすべてオプションで足した。
@@ -299,22 +303,7 @@ GGUF の BOS/EOS の ID（`infer.to_gguf` が作るときに直し、`LlamaBacke
 
 ## ThinkPad での測定手順
 
-開発機で作った zip を写して、ダブルクリックするだけ。リポジトリ・git・GPU は要らない（追従モードの clone とは別のフォルダに展開してよい）。
-
-1. 開発機で zip を作る（済み: `dist/romaji-slm-bench-20261019-be5a751.zip`、410 MB。作り直すときは `pwsh -NoProfile -File tools/pack-bench.ps1`）。
-   中身は HEAD のコード、辞書と読みの LM、zenz-v3.1-small（HF 形式）、GGUF（Q8_0・F16）、llama-server の CPU の部品だけ（CUDA の DLL は外した）、CPU 版 torch の uv.lock。
-2. ThinkPad に写して展開する。**AC 電源につなぎ、ほかのアプリを閉じる。**
-3. 展開したフォルダの `bench.cmd` をダブルクリックする。初回は uv・Python・CPU 版 torch・onnxruntime の取得で数分、測定は 13 通り × 1〜2 分。測っている間は触らない。
-   - 早く済ませたいときは、PowerShell で `powershell -ExecutionPolicy Bypass -File tools\thinkpad-bench.ps1 -Quick`（7 通り）。
-4. 終わると `bench-out\results.md` ができ、クリップボードにも入る。開発機のセッションに貼る。
-
-測るもの（`tools/thinkpad-bench.ps1`）: torch（今の常駐入力と同じ既定スレッド・4・8）、llama 版 F16（`-np 1`・`-np 5`、`-t 4`・`8`）と Q8_0、ONNX 版（4・8）、
-句読点を打たない入力での torch・llama・ONNX、最後にもう一度 torch。各 14 文 × 3 周。結果の先頭に CPU 名・電源・電源プラン・測る前の CPU 使用率・版が入る。
-各表の「20〜30 字（速度要件の範囲）」の行が判定に使う値。
-
-このデスクトップで zip（be5a751。GGUF の BOS/EOS を直し、llama 版の新しい既定と sol のレビューの修正が入った版）を空のフォルダに展開し、`-Quick -Smoke`（2 文・1 周・空回しなし）で 7 通りとも最後まで通ることを確かめた
-（uv sync、ONNX の書き出しは zip の torch 2.14.1+cpu で通る、results.md の作成とクリップボード）。その前の版では、CPU が埋まっていたときに llama 版の要求が
-60 秒の制限で切れたことがある。ThinkPad で同じことが起きたら、ほかのアプリを閉じてやり直す。
+[THINKPAD.md](THINKPAD.md)「速さを測る」に移した（2026-10-20。測るのは ONNX Runtime 版だけになった）。
 
 ## 付録 A: T0 と L0 の食い違い 40 件
 

@@ -92,10 +92,11 @@ namespace RomajiSlm
         public int Port = 8767;
         public bool History = true;
         public bool AcceptInjected = true;
-        // 変換サーバの torch のスレッド数。既定 4（本人の決定 2026-10-19「マシン内の他の処理に影響を与えないためにも」。docs/decisions.md D42）。
-        // 0 なら torch の既定（論理コア数。ほかの負荷があると極端に遅くなり、変換のたびに全コアを埋める）
+        // 変換サーバの CPU のスレッド数（ONNX Runtime 版と、GPU のときの torch の CPU 側）。既定 4（本人の決定 2026-10-19
+        // 「マシン内の他の処理に影響を与えないためにも」。docs/decisions.md D42）。0 なら実行系の既定（論理コア数）
         public int Threads = 4;
-        // 変換の実行方式: auto（GPU があれば torch、無ければ ONNX Runtime 版。本人の決定 2026-10-19、D43）/ torch / onnx
+        // 変換の実行方式: auto（GPU があれば torch、無ければ ONNX Runtime 版。本人の決定 2026-10-19、D43）/ torch（GPU のときだけ。
+        // 無ければ onnx で動く。CPU の torch 版は削除した、D44）/ onnx
         public string Engine = "auto";
         public int AutoUpdate = 3;   // 新しい版があるとき、この分数だけ打鍵が無ければ自動で入れ替える（0 で自動ではしない）
         // 追従モード: 写し元のリポジトリを GitHub のこのブランチに 30 分ごとに追いつかせる（ThinkPad 用。docs/IME.md）。
@@ -131,12 +132,12 @@ namespace RomajiSlm
             File.WriteAllText(Path,
                 "# romaji-slm 常駐入力の設定（docs/IME.md）。変えたらトレイの「終了」→ 起動し直す\r\n" +
                 "enabled=" + (Enabled ? "1" : "0") + "\r\n" +
-                "# device: auto（GPU があれば GPU）/ cuda / cpu\r\n" +
+                "# device: auto（GPU があれば GPU）/ cuda / cpu（cpu は ONNX Runtime 版）\r\n" +
                 "device=" + Device + "\r\n" +
                 "port=" + Port + "\r\n" +
-                "# threads: 変換の torch のスレッド数（既定 4。0 なら論理コア数で、ほかの処理に影響しやすい）\r\n" +
+                "# threads: 変換の CPU のスレッド数（既定 4。0 なら論理コア数で、ほかの処理に影響しやすい）\r\n" +
                 "threads=" + Threads + "\r\n" +
-                "# engine: auto（GPU があれば torch、無ければ ONNX Runtime 版。どちらも変換結果は同じ）/ torch / onnx\r\n" +
+                "# engine: auto（GPU があれば torch、無ければ ONNX Runtime 版。どちらも変換結果は同じ）/ torch（GPU のときだけ）/ onnx\r\n" +
                 "engine=" + Engine + "\r\n" +
                 "# history: 1 なら確定・取り消しのたびに打鍵列・候補・確定文を history.jsonl に残す（次の改良の材料）。0 で止める\r\n" +
                 "history=" + (History ? "1" : "0") + "\r\n" +

@@ -128,8 +128,8 @@ from core.window import alternatives  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def scorer(tmp_path_factory):
-    return ZenzScorer(_make_tiny(tmp_path_factory.mktemp("zenz-like-window"), 256), "cpu")
+def scorer(tmp_path_factory, torch_device):
+    return ZenzScorer(_make_tiny(tmp_path_factory.mktemp("zenz-like-window"), 256), torch_device)
 
 
 @pytest.fixture

@@ -58,7 +58,29 @@
 ## ThinkPad で分かれるもの
 
 - **ユーザー辞書と利用履歴**は PC ごと。利用履歴の振り返り（ops-daily、REVIEW.md）はデスクトップでだけ動くので、ThinkPad の入力からは辞書が育たない。デスクトップの辞書を使いたいときは、`%LOCALAPPDATA%\romaji-slm\user_dict.tsv` を ThinkPad の同じ場所に写す（変換サーバは更新を読み直す）。
-- **速さ**: ThinkPad では CPU で動く。デスクトップの CPU（Core Ultra 5 245KF）では、user_style の先頭 30 文で 1 文の中央値 552 ms だった。ThinkPad（Core Ultra 7 255H）での値は未測定（STATUS.md の §2 の 1）。
+- **速さ**: ThinkPad では CPU の ONNX Runtime 版で動く（D43・D44）。デスクトップの CPU（Core Ultra 5 245KF、ほかのセッションが CPU を 3〜4 割使っていたとき）では、
+  常駐入力の 1 要求（候補ウィンドウの別の書き方つき、user_style の 20〜30 字）が左文脈なしで中央値 779 ms、左文脈 60 字で 932 ms だった（SPEEDUP.md）。
+  ThinkPad（Core Ultra 7 255H）での値は未測定（本人の決定で、ほかの高速化の後に最後に測る。下の「速さを測る」）。
+
+## 速さを測る
+
+開発機で作った zip を写して、ダブルクリックするだけ。リポジトリ・git・GPU は要らない（追従モードの clone とは別のフォルダに展開してよい）。
+
+1. 開発機で zip を作る: `pwsh -NoProfile -File tools/pack-bench.ps1`（出力は `dist/romaji-slm-bench-<日付>-<hash>.zip`）。
+   中身は HEAD のコード、辞書と読みの LM、zenz-v3.1-small（HF 形式）、CPU 版 torch の uv.lock（torch は ONNX の書き出しにだけ使う）。
+2. ThinkPad に写して展開する。**AC 電源につなぎ、ほかのアプリを閉じる。**
+3. 展開したフォルダの `bench.cmd` をダブルクリックする。初回は uv・Python・CPU 版 torch・onnxruntime の取得で数分、ONNX の書き出しに 20〜40 秒。
+   測るのは 8 通りで 30 分前後。測っている間は触らない。
+   - 早く済ませたいときは、PowerShell で `powershell -ExecutionPolicy Bypass -File tools\thinkpad-bench.ps1 -Quick`（3 通り、10 分前後）。
+   - 流れだけ確かめるときは `-Smoke`（数値は使わない）。
+4. 終わると `bench-out\results.md` ができ、クリップボードにも入る。開発機のセッションに貼る。
+
+測るもの（`tools/thinkpad-bench.ps1`）:
+- 1 件の変換の内訳（`eval.parity_speed`、ONNX Runtime 版、句読点 B あり）: スレッド 2・4・6・8、句読点を打たない入力。各 14 文 × 3 周。
+- 常駐入力の実際の形での待ち（`eval.ime_sim`）: 候補ウィンドウの別の書き方つき・左文脈 60 字で、模擬の打鍵から全部打った打鍵列の 1 位が出るまで。
+  今の要求の出し方（14 文）と、別の書き方を後回しにする（B）・古い先読みを打ち切る（C）の 4 通り（7 文）。
+- 結果の先頭に CPU 名・電源・電源プラン・測る前の CPU 使用率・版が入る。各表の「20〜30 字（速度要件の範囲）」の行と、待ちの表が判定に使う値。
+- bench では測らないもの（SPEEDUP.md §7）: 電池で動かしたとき、Windows の QoS（E コアに回されるか）、本人の実際の打鍵での待ち。
 
 ## 確かめたこと（2026-10-18、開発機で ThinkPad の状況を再現）
 

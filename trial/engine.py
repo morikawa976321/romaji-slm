@@ -1,6 +1,7 @@
 """体験版サーバの変換エンジン: 設定（trial/configs.json の1項目）ごとに変換する。
 
 - CoreEngine: core.pipeline.CorePipeline を包む。同じ model・device の組はモデルと辞書を1回だけ読む。
+  device が cuda でない設定は ONNX Runtime 版（core.ort_backend.OrtCorePipeline）で動かす（torch は GPU だけ。docs/decisions.md D44）。
 - MockEngine: 決定的な偽の結果。torch とモデルが無い環境での動作確認とテストに使う。
 
 convert は {"text", "ms", "finished", "candidates", "error"} を返す。変換が終わらなかったときは
@@ -28,6 +29,7 @@ class CoreEngine:
 
     def __init__(self, pipeline_cls=None):
         self._cls = pipeline_cls
+        self._injected = pipeline_cls is not None  # 試験が差し込んだ偽のクラスなら、CPU でもそのクラスで作る
         self._pipes: dict[tuple, object] = {}
         self._shared: dict[tuple, tuple] = {}  # (model, device) → (scorer, dic)
         self._lock = threading.Lock()
@@ -83,7 +85,10 @@ class CoreEngine:
                 return self._pipes[key]
             cls = self._pipeline_cls()
             shared_key = (kwargs.get("model"), kwargs.get("device"))
-            if shared_key in self._shared:
+            if not self._injected and not str(kwargs.get("device", "cpu")).startswith("cuda"):
+                from core.ort_backend import OrtCorePipeline
+                pipe = OrtCorePipeline(**kwargs)
+            elif shared_key in self._shared:
                 with self._reuse(cls, *self._shared[shared_key]):
                     pipe = cls(**kwargs)
             else:

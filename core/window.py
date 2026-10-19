@@ -92,13 +92,6 @@ def _render(t: str, end: str, reading, en_case: str, bounds) -> str:
     return render_en_case(text, reading, en_case, bounds)
 
 
-def _can_score(p) -> bool:
-    """別の書き方を採点できるか。torch 版（backend 無し）と、ZenzScorer と同じ logprobs を持つ実行方式（ONNX 版
-    core.ort_backend）はできる。llama-server 版はできない。"""
-    backend = getattr(p, "backend", None)
-    return backend is None or hasattr(backend, "logprobs")
-
-
 def _scorer(p):
     """別の書き方を採点するもの: torch 版なら ZenzScorer、ONNX 版なら実行方式そのもの。"""
     backend = getattr(p, "backend", None)
@@ -149,9 +142,7 @@ def alternatives(p, best: dict, left_context: str = "", end: str = "", n_alt: in
 def pool(p, romaji: str, left_context: str = "", alts: bool = True, n_alt: int = N_ALT,
          strict: bool = False) -> Pool | None:
     """窓に並べうる候補を集める。alts=False なら読みの候補だけ（2026-10-18 までと同じ計算）。
-    strict=True なら別の書き方の失敗をそのまま投げる（評価で、失敗を候補が無かったことと取り違えないため）。
-
-    llama-server 版は別の書き方を採点する手段を持たないので、読みの候補だけにする（ONNX 版は torch 版と同じく採点する）。"""
+    strict=True なら別の書き方の失敗をそのまま投げる（評価で、失敗を候補が無かったことと取り違えないため）。"""
     t0 = time.perf_counter()
     cands = p.candidates(romaji, left_context)
     if not cands:
@@ -167,7 +158,7 @@ def pool(p, romaji: str, left_context: str = "", alts: bool = True, n_alt: int =
                for c in cands[1:] if c["score"] != float("-inf")]
     hira_text = _with_end("".join(chr(ord(ch) - 0x60) if "ァ" <= ch <= "ヶ" else ch for ch in best["reading"]), end)
     hira = Entry(hira_text, float("-inf"), "hira", best["reading"], bool(best["edits"])) if hira_text else None
-    if alts and _can_score(p) and best["score"] != float("-inf"):
+    if alts and best["score"] != float("-inf"):
         try:
             entries += alternatives(p, best, left_context, end, n_alt)
         except Exception as e:  # 別の書き方を諦めても、1 位と読みの候補は返す（常駐の変換を失敗にしない）

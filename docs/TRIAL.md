@@ -33,6 +33,8 @@ python -m trial.server --mock --mock-delay 1 --open   # 偽の ms だけ実際�
 uv run python -m trial.server --open                  # 本物の変換コア（zenz と models/mozc・models/reading が要る）
 ```
 
+configs.json の `device` が `cuda` でない設定は、ONNX Runtime 版（`core.ort_backend.OrtCorePipeline`）で動く（torch は GPU だけ。2026-10-20、decisions.md D44）。
+
 引数: `--port`（既定 8765、使用中なら次の空きを最大 20 個まで探す。0 なら OS に選ばせる）、`--mock`、`--mock-delay`、
 `--configs <path>`、`--examples <path>`、`--out <dir>`（記録の置き場所、既定 `trial/out`）、`--open`（既定のブラウザで開く）。
 

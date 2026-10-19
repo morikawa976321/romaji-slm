@@ -1,19 +1,16 @@
-# ThinkPad で速度を測るための zip を作る（docs/LLAMA_PARITY.md「ThinkPad での測定手順」）。
+# ThinkPad で速度を測るための zip を作る（docs/THINKPAD.md「速さを測る」）。
 #
-#   pwsh -NoProfile -File tools/pack-bench.ps1 [-HfHome <HF_HOME>] [-Gguf <GGUF>] [-LlamaBin <llama.cpp の実行ファイルのフォルダ>] [-OutDir dist]
+#   pwsh -NoProfile -File tools/pack-bench.ps1 [-HfHome <HF_HOME>] [-OutDir dist]
 #
-# 出力: dist/romaji-slm-bench-<yyyymmdd>-<短いハッシュ>.zip（約 400 MB）
+# 出力: dist/romaji-slm-bench-<yyyymmdd>-<短いハッシュ>.zip
 #   bench.cmd              ダブルクリックで測る（tools\thinkpad-bench.ps1 を Windows PowerShell で呼ぶ）
-#   core\ eval\ infer\ ... HEAD のコード（未コミットの変更は入らない）
-#   models\                辞書と読みの LM、zenz-v3.1-small のキャッシュ（models\hf）、GGUF（Q8_0・F16）
-#   llama-cpu\             llama-server と CPU の部品だけ（CUDA の DLL は外す。ThinkPad に NVIDIA の GPU は無い）
-# - torch は CPU 版。pack-ime.ps1 と同じく pyproject の index を whl/cpu に差し替えて uv lock を取り直す。
+#   core\ eval\ ...        HEAD のコード（未コミットの変更は入らない）
+#   models\                辞書と読みの LM、zenz-v3.1-small のキャッシュ（models\hf）
+# - torch は CPU 版（ONNX の書き出しにだけ使う。変換は ONNX Runtime 版）。pack-ime.ps1 と同じく pyproject の index を
+#   whl/cpu に差し替えて uv lock を取り直す。
 
 param(
     [string]$HfHome = $(if ($env:HF_HOME) { $env:HF_HOME } else { Join-Path $HOME '.cache/huggingface' }),
-    [string]$Gguf = 'models/zenz-v3.1-small-gguf/zenz-v3.1-small-Q8_0.gguf',
-    [string]$GgufF16 = 'models/zenz-v3.1-small-gguf/zenz-v3.1-small-F16.gguf',
-    [string]$LlamaBin = $(if ($env:LLAMA_CPP_BIN) { $env:LLAMA_CPP_BIN } else { 'C:\Users\tm976\mf\llama' }),
     [string]$OutDir = 'dist'
 )
 
@@ -22,8 +19,8 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 $hash = (git rev-parse --short HEAD).Trim()
-if (git status --porcelain -- core eval infer tools/thinkpad-bench.ps1 pyproject.toml uv.lock) {
-    Write-Warning 'core/ eval/ infer/ などに未コミットの変更がある。入れるのは HEAD（未コミットの変更は入らない）'
+if (git status --porcelain -- core eval tools/thinkpad-bench.ps1 pyproject.toml uv.lock) {
+    Write-Warning 'core/ eval/ などに未コミットの変更がある。入れるのは HEAD（未コミットの変更は入らない）'
 }
 $name = "romaji-slm-bench-$(Get-Date -Format 'yyyyMMdd')-$hash"
 $stage = Join-Path ([IO.Path]::GetTempPath()) $name
@@ -32,7 +29,7 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 
 Write-Host "コード: HEAD ($hash)"
 $zip0 = Join-Path ([IO.Path]::GetTempPath()) "$name-src.zip"
-git archive --format=zip -o $zip0 HEAD core eval infer tools/thinkpad-bench.ps1 pyproject.toml uv.lock
+git archive --format=zip -o $zip0 HEAD core eval tools/thinkpad-bench.ps1 pyproject.toml uv.lock
 Expand-Archive -Force $zip0 $stage
 Remove-Item $zip0
 if (Test-Path (Join-Path $stage 'eval/out')) { Remove-Item -Recurse -Force (Join-Path $stage 'eval/out') }
@@ -70,19 +67,6 @@ Get-ChildItem -LiteralPath $snap -Recurse -File -Force | ForEach-Object {
     $real = if ($_.LinkTarget) { [IO.Path]::GetFullPath([IO.Path]::Combine($_.DirectoryName, $_.LinkTarget)) } else { $_.FullName }
     Copy-Item -LiteralPath $real $to
 }
-
-Write-Host "GGUF: $Gguf, $GgufF16"
-foreach ($g in $Gguf, $GgufF16) { if (-not (Test-Path $g)) { throw "$g が無い（docs/STATUS.md §4 の infer.to_gguf で作る）" } }
-Copy-Item $Gguf (Join-Path $stage 'models/zenz-v3.1-small-Q8_0.gguf')
-Copy-Item $GgufF16 (Join-Path $stage 'models/zenz-v3.1-small-F16.gguf')
-
-Write-Host "llama-server（CPU の部品だけ）: $LlamaBin"
-$lb = Join-Path $stage 'llama-cpu'
-New-Item -ItemType Directory -Force $lb | Out-Null
-Get-ChildItem $LlamaBin -File | Where-Object {
-    ($_.Name -in 'llama-server.exe', 'llama-server-impl.dll', 'llama.dll', 'llama-common.dll', 'ggml.dll', 'ggml-base.dll',
-                 'mtmd.dll', 'libomp.dll', 'LICENSE-LLVM-OpenMP') -or $_.Name -like 'ggml-cpu-*.dll'
-} | Copy-Item -Destination $lb
 
 Write-Host 'pyproject.toml: torch を CPU 版の index に差し替えて uv lock'
 $py = Get-Content -Raw -Encoding utf8 (Join-Path $stage 'pyproject.toml')

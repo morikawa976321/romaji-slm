@@ -1,6 +1,6 @@
 """変換サーバのメモリを、読み込みの段階ごとと、変換を重ねたときの推移で測る（docs/RESOURCES.md）。Windows 専用。
 
-    uv run python -m tools.memprof out.jsonl [件数=600] [--device cuda|cpu]
+    uv run python -m tools.memprof out.jsonl [件数=600] [--device cuda|cpu]（cpu は ONNX Runtime 版。常駐入力の GPU の無い機械と同じ）
 
 1 行 1 段階の JSON を書く: ws_mb（作業セット）・private_mb（専有＝確保量）、GPU なら cuda_alloc_mb / cuda_reserved_mb、
 推移の行には読み段のキャッシュの項目数（lm_step・lm_end・parses）。入力は eval/sets の romaji を順に使う。
@@ -76,8 +76,13 @@ def main(argv: list[str]) -> None:
     if device == "cuda":
         torch.zeros(1, device="cuda")
         log("CUDA の文脈")
-    p = CorePipeline(device=device)
-    log("CorePipeline（transformers・zenz の重み・辞書）", params=sum(x.numel() for x in p.scorer.model.parameters()))
+    if device == "cuda":
+        p = CorePipeline(device=device)
+        log("CorePipeline（transformers・zenz の重み・辞書）", params=sum(x.numel() for x in p.scorer.model.parameters()))
+    else:
+        from core.ort_backend import OrtCorePipeline
+        p = OrtCorePipeline(threads=4)
+        log("OrtCorePipeline（ONNX Runtime・zenz の重み・辞書）")
 
     rows = []
     for f in SETS:

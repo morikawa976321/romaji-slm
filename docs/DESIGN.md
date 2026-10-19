@@ -70,7 +70,7 @@ ThinkPad は 2028-01 頃まで Windows、その後 Debian 13 に移る予定。�
 
 ### ThinkPad（Core Ultra 7 255H）での速度の模擬
 
-`eval/bench_cpu.ps1`（llama.cpp b10549 の `llama-bench`、CPU のみ）。1回の変換を「入力96トークン（文脈なし）または224トークン（左文脈あり）の処理＋32トークンの生成」として所要時間を出した。
+`eval/bench_cpu.ps1`（llama.cpp b10549 の `llama-bench`、CPU のみ。2026-10-20 に削除、D44）。1回の変換を「入力96トークン（文脈なし）または224トークン（左文脈あり）の処理＋32トークンの生成」として所要時間を出した。
 
 模擬の前提: デスクトップの Core Ultra 5 245KF は 255H と同じ Arrow Lake 世代（P コア Lion Cove・E コア Skymont）で、メモリも同じ DDR5-5600。最大クロックは 255H のほうが P で約2%、E で約4%低い。コアマスクで P コアだけ・E コアだけに固定して測った。255H の LPE コア（Skymont 2基・最大 2.5GHz）は、E コア2基の値をクロック比（4.6/2.5 ≒ 1.84）で割り増して見積もった。
 
@@ -100,13 +100,13 @@ ThinkPad は 2028-01 頃まで Windows、その後 Debian 13 に移る予定。�
    - 学習データ生成パイプライン（読み付与・ローマ字化・打鍵ミス注入・英字区間と記号の扱い）— 実装済み。実データで2万件生成（[DATA.md](DATA.md)）
    - 評価の仕組み（文字誤り率・完全一致・AJIMEE-Bench のローマ字版）— ハーネスは実装済み。方式1のベースラインは AJIMEE 87.0%・user_style 57.5%（英単語を含む文 10%・打鍵ミス 17%）（[EVAL.md](EVAL.md)）
    - 微調整スクリプト（CPU で小さい設定が通るところまで。本学習は 5060 Ti）
-   - 推論 CLI（GGUF 変換、llama.cpp で `ローマ字 → 日本語`）— 実装済み。llama.cpp は llama-server を子プロセスで使う（[INFER.md](INFER.md)）
+   - 推論 CLI（GGUF 変換、llama.cpp で `ローマ字 → 日本語`）— 実装した（llama.cpp は llama-server を子プロセスで使った）。2026-10-20 に削除（D44）
 4. **本学習と実用試験**（ローカル）— 1周目（2026-10-12）: 「読みは微調整モデル、変換は元の zenz」の組み合わせが最良（user_style 65.0%、打鍵ミスに強い）。英単語は未解決（[EVAL.md](EVAL.md)「微調整」）
 
 ## 確認済みの論点
 
 - zenz-v3.1-small のトークナイザ（GPT2Tokenizer、バイト単位 BPE、語彙 6000）は、ラテン小文字・数字・ASCII 記号をすべて単独トークンとして持つ。**微調整に語彙の拡張は要らない**（2026-10-12、[EVAL.md](EVAL.md)）
-- zenz 系のトークナイザは、GGUF の pre-tokenizer を `gpt-2` にすれば公式 llama.cpp で HF と同じトークン列になる。配布 GGUF の `gpt2-small-japanese-char` は azooKey のフォーク独自の名前で、中身は GPT-2 と同じ正規表現（2026-10-12、[INFER.md](INFER.md)）
+- zenz 系のトークナイザは、GGUF の pre-tokenizer を `gpt-2` にすれば公式 llama.cpp で HF と同じトークン列になる。配布 GGUF の `gpt2-small-japanese-char` は azooKey のフォーク独自の名前で、中身は GPT-2 と同じ正規表現（2026-10-12。当時の INFER.md、削除済み）
 
 ## 未確認の論点
 

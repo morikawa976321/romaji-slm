@@ -56,10 +56,11 @@
 使い方:
 
 ```
-uv run python -m eval.run --converter core --set user_style --device cpu                     # 既定 k=5,w=4,f=1,p=auto,e=typed
+uv run python -m eval.run --converter core --set user_style --device cuda                    # 既定 k=5,w=4,f=1,p=auto,e=typed（torch は GPU だけ）
+uv run python -m eval.run --converter "core-ort:t=4" --set user_style --device cpu             # CPU は ONNX Runtime 版（出力は torch 版と同じ）
 uv run python -m eval.run --converter "core:p=insert,e=registered" --set gen_val --device cuda  # 句読点 B ＋ 登録表記
-uv run python -m eval.run --converter "core-llama:np=5,t=8" --model models/zenz-v3.1-small-gguf/zenz-v3.1-small-Q8_0.gguf --set user_style --device cpu
-uv run python -m eval.bench_backend --gguf models/zenz-v3.1-small-gguf/zenz-v3.1-small-Q8_0.gguf   # torch 版と llama 版の速度
+uv run python -m eval.parity_speed --converter "core-ort:t=4,p=insert" --device cpu             # 1 件の変換の時間の内訳
+uv run python -m eval.ime_sim                                                                # 打鍵から 1 位が出るまでの待ち（常駐入力の要求の出し方を模擬）
 uv run python -m eval.diff eval/out/<before>.jsonl eval/out/<after>.jsonl                  # 改善・悪化・新たに壊れた件
 uv run python -m trial.server --open                                                         # 体験版（trial/configs.json・examples.json）
 pwsh -NoProfile -File tools/pack-trial.ps1                                                   # 配布 zip
@@ -100,21 +101,19 @@ pwsh -NoProfile -File tools/pack-trial.ps1                                      
 | `models/wac/` | 京大 Wikipedia 注釈コーパス（kana_lm の素材） | 同上で自動取得 |
 | `models/ajimee/` | AJIMEE-Bench の評価データ | `eval.run --set ajimee` の初回で自動取得 |
 | zenz-v3.1-small / xsmall | Hugging Face のキャッシュ（`~/.cache/huggingface`） | 初回の実行で自動取得 |
-| `models/zenz-v3.1-small-gguf/` | zenz-v3.1-small の GGUF（F16・Q8_0。llama-server 用） | `uv run python -m infer.to_gguf <HF の snapshot> --llama-cpp models/llama.cpp-src --llama-bin C:\Users\tm976\mf\llama --outdir models/zenz-v3.1-small-gguf --types f16,q8_0` |
+| `models/onnx/zenz-v3.1-small-v2.onnx` | ONNX Runtime 版の重み（380 MB） | `OrtBackend` の初回で自動で書き出す（torch が要る。20〜40 秒） |
 | `dist/romaji-slm-trial-*.zip` | 体験版の配布物 | `pwsh -NoProfile -File tools/pack-trial.ps1`（開発機で。CPU 版の `uv lock` とモデル同梱を含む） |
-| `models/llama.cpp-src/` | llama.cpp b10549 のソース（GGUF 変換スクリプト用） | `git clone --depth 1 --branch b10549 https://github.com/ggml-org/llama.cpp` |
-| `models/zenz-romaji-v1/`・`v2/`・`romaji2ja*`・`probe/`・`lrec-ime/`・`zenz-v3.2-*` | 止めた路線・速度の模擬の残骸 | 不要（消してよい） |
+| `models/zenz-romaji-v1/`・`v2/`・`romaji2ja*`・`probe/`・`lrec-ime/`・`zenz-v3.2-*`・`zenz-v3.1-small-gguf/`・`llama.cpp-src/` | 止めた路線・削除した llama 版・速度の模擬の残骸 | 不要（消してよい） |
 | `data/out300k/`・`data/out/` | 微調整用に生成した学習データ | `uv run python -m data.build --source hf --limit 300000 --out data/out300k/ --seed 0`（約90秒） |
 
 - Python 環境: `uv sync --all-groups`（torch は cu128 の index。依存グループ core・data・eval・dev）。
-- llama.cpp の実行ファイル: `C:\Users\tm976\mf\llama`（b10549、CUDA と CPU のビルド）。llama.cpp を使うテストは `LLAMA_CPP_DIR=models/llama.cpp-src`、`LLAMA_CPP_BIN=C:\Users\tm976\mf\llama` で動く。b10549 の llama-server は極小のランダムモデルの壊れた UTF-8 出力を HTTP 500 で拒むので、`tests/test_infer.py` の 3 件はこのマシンでは落ちる（INFER.md）。`tests/test_llama_backend.py` は文法で制約するので通る。
-- テスト: `uv run pytest`（2026-10-15 時点で 265 件通過、llama.cpp 無しでは 13 件スキップ）。
+- テスト: `uv run pytest`。torch 版の試験は GPU（cuda）で動き、GPU の無い機械では飛ばす（tests/conftest.py の `torch_device`）。
 - 体験版の開発用: `.claude/launch.json` の `trial`（本物のエンジン、8765）と `trial-mock`（MockEngine、8766）。
 
 ## 5. 作業の進め方で分かったこと（このリポジトリ固有）
 
 - **10分を超える評価・学習は、Claude Code のバックグラウンド実行に任せない**（10分で子プロセスごと止まる）。GPU なら user_style＋gen_test＋AJIMEE の全部で約5分、CPU でも約8分なので、1 本ずつバックグラウンドで足りる。
-- **速度はこのデスクトップの `--device cpu` で測る**（ThinkPad への換算は書かない）。GPU の ms は別セッションと取り合うので参考値。
+- **速度はこのデスクトップの CPU の ONNX Runtime 版（`core-ort`）で測る**（ThinkPad への換算は書かない）。GPU の ms は別セッションと取り合うので参考値。
 - **クラウドセッション**（Claude Code on the web）に CPU だけで閉じる部品を並行で作らせる（PR #1〜#9）。立て方は `tools/cloud-task.ps1`（`claude --cloud` は TTY が要るので、アプリの Terminal パネルで実行する。先に push する）。依頼文は `tools/tasks/`。クラウド側は依頼文のブランチ名に接尾辞を付ける。huggingface.co と download.pytorch.org に届かないので、zenz を使う作業と `uv lock` は手元でやる。クラウドは `core/pipeline.py` のような親が編集中のファイルも触るので、取り込み時に衝突を解く前提で依頼する。
 - **相談役**: astra（Codex consult）の計画レビューと体験版の設計レビューは D2・D3・D10。Codex review（QA 役）はコアの差分に対して 5 件の正当な欠陥を最小再現つきで返した（D11）。どちらも返答は第二意見として親が確かめてから採った。
 - 部品の境目は `core/types.py`（Reading / Seg / Edit / Conversion / Word）。変えるときは両側を一緒に直す。

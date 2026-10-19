@@ -20,6 +20,14 @@ from .types import Conversion
 MOZC_COST_SCALE = 500.0
 
 
+def torch_device(device: str) -> str:
+    """torch 版を動かす装置。GPU（cuda）だけ。CPU では ONNX Runtime 版（core.ort_backend、変換器 core-ort）を使う
+    （同じ照合で出力も同じで速い。torch の CPU の経路は削除した。docs/decisions.md D44）。"""
+    if not str(device).startswith("cuda"):
+        raise ValueError(f"torch 版は GPU（cuda）だけで動かす（device={device}）。CPU では ONNX Runtime 版（core-ort）を使う")
+    return device
+
+
 def zenz_prompt(zenz_input: str, left_context: str = "") -> str:
     head = CONTEXT + left_context if left_context else ""
     return f"{head}{INPUT}{zenz_input}{OUTPUT}"
@@ -33,12 +41,12 @@ def scoring_text(surface: str) -> str:
 class ZenzScorer:
     """元の zenz（Hugging Face 形式）で、プロンプトに続く文字列 + EOS の対数尤度を計算する。"""
 
-    def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu", batch: int = 32):
+    def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cuda", batch: int = 32):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self._torch = torch
-        self.device = device
+        self.device = torch_device(device)
         self.batch = batch
         self.tok = AutoTokenizer.from_pretrained(model)
         self.model = AutoModelForCausalLM.from_pretrained(model, dtype=torch.float32).to(device).eval()

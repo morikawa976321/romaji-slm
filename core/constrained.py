@@ -1,7 +1,7 @@
 """工程4（制約付き生成）: zenz に貪欲生成させ、出力が辞書ラティスの経路から外れるトークンを禁止する。
 
 N-best の再順位（core.select）は、辞書の上位 N に正解が入らないと選べない（AJIMEE で oracle@100 91%）。
-こちらは zenz 自身の好みで生成させつつ、出力を「ラティスのどれかの経路の表層」に限る（llama.cpp の grammar と同じ考え方）。
+こちらは zenz 自身の好みで生成させつつ、出力を「ラティスのどれかの経路の表層」に限る。
 照合はバイト単位: zenz はバイト単位 BPE で、1トークンが UTF-8 の1文字の途中で切れることがある。
 """
 
@@ -48,13 +48,11 @@ def _en_surface(seg, en_case: str) -> str:
 
 
 class LatticeMatcher:
-    def __init__(self, reading: Reading, dic: Dictionary, punct: str = "auto", en_case: str = "zenz",
-                 prune: bool = False):
+    def __init__(self, reading: Reading, dic: Dictionary, punct: str = "auto", en_case: str = "zenz"):
         """punct: 記号の表記。auto=全角/半角の両方を候補に残して zenz に選ばせる、ja=全角だけ、ascii=打ったまま。
         en_case: 英字の表記。zenz=登録表記と綴りの両方を残して zenz に選ばせる（旧来の振る舞い）。それ以外
         （typed / registered / auto）はラティスでは打った綴りだけにし、表記の置き換えは後段（core.pipeline.render_en_case）。
-        prune: 終点に届かない節点（行き止まり）へ入る弧を除く。llama-server 版の文法（core.gbnf）と同じ制約になる。
-        既定は刈らない（貪欲法が行き止まりに入った読みは未完 = score −∞ で捨てられる。docs/LLAMA_PARITY.md）。
+        行き止まり（終点に届かない節点）は刈らない。貪欲法が行き止まりに入った読みは未完（score −∞）で捨てられる。
         """
         if punct not in PUNCT_MODES:
             raise ValueError(f"punct は {PUNCT_MODES} のどれか: {punct}")
@@ -78,23 +76,6 @@ class LatticeMatcher:
             if b and (s, b, e) not in seen:
                 seen.add((s, b, e))
                 self.out.setdefault(s, []).append((b, e))
-        if prune:
-            live = self.live_nodes()
-            self.out = {s: [(b, e) for b, e in arcs if e in live] for s, arcs in self.out.items() if s in live}
-
-    def live_nodes(self) -> set[int]:
-        """終点へ届く節点（後ろ向きの到達可能性）。"""
-        back: dict[int, set[int]] = {}
-        for s, arcs in self.out.items():
-            for _, e in arcs:
-                back.setdefault(e, set()).add(s)
-        live, stack = {self.final}, [self.final]
-        while stack:
-            for s in back.get(stack.pop(), ()):
-                if s not in live:
-                    live.add(s)
-                    stack.append(s)
-        return live
 
     def start(self) -> frozenset[State]:
         return frozenset({(0, b"")})
@@ -141,7 +122,7 @@ def _sym_surfaces(seg, punct: str) -> frozenset[str]:
 
 def bounds_from_text(matcher: LatticeMatcher, text: str) -> tuple[int, ...]:
     """出力の文字列をラティスで先頭から辿り直し、語の切れ目になりうる文字位置を返す（Decoded.bounds と同じ定義）。
-    llama-server など、生成時に状態を追えない実行系のために使う。"""
+    生成していない文（候補ウィンドウの別の書き方。core.window）のために使う。"""
     data = scoring_text(text).encode()
     states, bounds = matcher.advance_bounds(matcher.start(), data)
     return _char_bounds(data, bounds)
@@ -160,10 +141,9 @@ def _char_bounds(out: bytes, byte_offsets: list[int]) -> tuple[int, ...]:
 
 
 class ConstrainedZenz:
-    def __init__(self, scorer, max_tries: int = 2000, prune: bool = False):
+    def __init__(self, scorer, max_tries: int = 2000):
         """scorer: core.select.ZenzScorer（モデルとトークナイザを使い回す）。
-        max_tries: 制約を満たすトークンを確率の上位何位まで探すか（0 なら語彙全体。llama-server 版は語彙全体）。
-        prune: LatticeMatcher の行き止まりの刈り込み（llama-server 版の文法と同じ制約にする）。"""
+        max_tries: 制約を満たすトークンを確率の上位何位まで探すか（0 なら語彙全体）。"""
         self.s = scorer
         tok = scorer.tok
         dec = {c: b for b, c in bytes_to_unicode().items()}
@@ -171,7 +151,6 @@ class ConstrainedZenz:
                           for t in tok.convert_ids_to_tokens(list(range(len(tok))))]
         self.eos = tok.eos_token_id
         self.max_tries = max_tries or len(self.tok_bytes)
-        self.prune = prune
 
     def decode(self, reading: Reading, dic: Dictionary, left_context: str = "", max_new: int | None = None) -> str:
         return self.decode_scored(reading, dic, left_context, max_new)[0]
@@ -184,7 +163,7 @@ class ConstrainedZenz:
         比べるとき、zenz がその読みと出力をどれだけ自然と見たかの尺度になる。
         """
         torch, model, tok = self.s._torch, self.s.model, self.s.tok
-        m = LatticeMatcher(reading, dic, punct, en_case, self.prune)
+        m = LatticeMatcher(reading, dic, punct, en_case)
         states = m.start()
         ids = tok(zenz_prompt(reading.zenz_input(), left_context), add_special_tokens=False,
                   return_tensors="pt").input_ids.to(self.s.device)
@@ -226,7 +205,7 @@ class ConstrainedZenz:
             return []
         torch, model, tok = self.s._torch, self.s.model, self.s.tok
         dev = self.s.device
-        matchers = [LatticeMatcher(r, dic, punct, en_case, self.prune) for r in readings]
+        matchers = [LatticeMatcher(r, dic, punct, en_case) for r in readings]
         states = [m.start() for m in matchers]
         prompts = [tok(zenz_prompt(r.zenz_input(), left_context), add_special_tokens=False).input_ids
                    for r in readings]

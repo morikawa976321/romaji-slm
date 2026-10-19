@@ -35,10 +35,13 @@ class Converter(Protocol):
 class HFCausalLM:
     """因果LMを貪欲法で EOS まで回す。生成の上限は入力の長さに比例させる（文字単位モデルは出力 ≲ 入力）。"""
 
-    def __init__(self, model: str, template: str, device: str = "cpu", name: str | None = None,
+    def __init__(self, model: str, template: str, device: str = "cuda", name: str | None = None,
                  add_special_tokens: bool = False, dtype: str = "float32"):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        from core.select import torch_device
+        device = torch_device(device)  # torch は GPU だけで動かす（docs/decisions.md D44）
 
         if template not in TEMPLATES:
             raise ValueError(f"未知の雛形: {template}")
@@ -82,7 +85,7 @@ class ReaderPlusZenz:
     変換の段を元の重みのまま使うための組み合わせ。生成するのは読みまで（OUTPUT が出た時点で止める）。
     """
 
-    def __init__(self, reader: str, converter: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cpu",
+    def __init__(self, reader: str, converter: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cuda",
                  name: str | None = None):
         self.reader = HFCausalLM(reader, "zenz-v3-romaji-reading", device)
         self.conv = HFCausalLM(converter, "zenz-v3", device)
@@ -153,14 +156,14 @@ PRESETS = {
 }
 
 
-def make_converter(name: str, device: str = "cpu", model: str | None = None,
+def make_converter(name: str, device: str = "cuda", model: str | None = None,
                    template: str | None = None) -> HFCausalLM:
     """name: PRESETS のキー、または `hf`（--model と --template を必ず指定）。"""
     if name == "hf":
         if not (model and template):
             raise ValueError("hf には --model と --template が要る")
         return HFCausalLM(model, template, device, name=f"hf:{Path(model).name}+{template}")
-    if name == "core" or name.startswith(("core:", "core-llama", "core-ort")):
+    if name == "core" or name.startswith(("core:", "core-ort")):
         # core / core:k=3 / core:k=3,w=1.0,f=1,b=0（b=0 は k 件を1件ずつ生成。速度の比較用）
         opts = dict(kv.split("=") for kv in name.partition(":")[2].split(",") if kv)
         # p=auto|ja|ascii|insert（句読点）、e=zenz|typed|registered|auto（英字の表記）、tc/te/tq=句読点 B の閾値（読点・句点・疑問符）
@@ -171,33 +174,15 @@ def make_converter(name: str, device: str = "cpu", model: str | None = None,
                   preselect=opts.get("ps", "1") == "1",  # ps=0 で読み段の上位をそのまま使う（D18 以前の振る舞い）
                   punct_end=opts.get("pe", "0") == "1",  # pe=1 で句読点 B が文末の句点も補う（D31 より前の既定）
                   user_dict=opts.get("ud") or None)  # ud=<パス> で本人のユーザー辞書を読む（docs/REVIEW.md の検証）
-        if name.startswith("core-llama"):
-            # core-llama:np=5,t=8,...（--model は GGUF。np=llama-server のスロット数、t=スレッド数、
-            # url=起動済みの llama-server に繋ぐ）
-            from core.llama_backend import LlamaCorePipeline
-            if not (model or "url" in opts):
-                raise ValueError("core-llama には --model（GGUF）か url= が要る")
-            # 変種（docs/LLAMA_PARITY.md）: de=stop（行き止まりで未完にする）、fl=gen（従来の自然さの強制生成。既定 tok）、
-            # rf=full|fast|eos（取り直しの仕方。既定 auto）、ka=0（要求ごとに接続し直す。既定 1）、
-            # ngl=<層数>|auto（GPU に載せる層。既定 0 = CPU だけ、auto はサーバーの既定）、
-            # eos=3（GGUF の BOS/EOS の ID を起動時に上書きする。既定でも起動時に確かめて直す）
-            extra = (["--override-kv", "tokenizer.ggml.bos_token_id=int:2,tokenizer.ggml.eos_token_id=int:3"]
-                     if opts.get("eos") == "3" else None)
-            ngl = opts.get("ngl", "0")
-            return LlamaCorePipeline(model, url=opts.get("url"), n_slots=int(opts.get("np", 5)), extra_args=extra,
-                                     threads=int(opts["t"]) if "t" in opts else None,
-                                     n_gpu_layers=None if ngl == "auto" else int(ngl),
-                                     dead_ends=opts.get("de", "prune"), fluency_mode=opts.get("fl", "tok"),
-                                     refill=opts.get("rf", "auto"), keep_alive=opts.get("ka", "1") == "1", **kw)
         if name.startswith("core-ort"):
-            # core-ort:t=8,...（実験。forward だけ ONNX Runtime に替えた torch 版。docs/LLAMA_PARITY.md）
+            # core-ort:t=8,...（CPU の変換。forward を ONNX Runtime で回す。照合・採点は torch 版と同じ。core/ort_backend.py）
             from core.ort_backend import OrtCorePipeline
             return OrtCorePipeline(model or "Miwa-Keita/zenz-v3.1-small",
                                    threads=int(opts["t"]) if "t" in opts else None, **kw)
         from core.pipeline import CorePipeline
-        # mt=<数>（制約を満たすトークンを探す上位の数。0 は語彙全体）、dp=1（行き止まりを刈る。llama 版の文法と同じ制約）
+        # torch 版は GPU だけ（--device cuda）。mt=<数>（制約を満たすトークンを探す上位の数。0 は語彙全体）
         return CorePipeline(model or "Miwa-Keita/zenz-v3.1-small", device, batched=opts.get("b", "1") != "0",
-                            max_tries=int(opts.get("mt", 2000)), prune=opts.get("dp", "0") == "1", **kw)
+                            max_tries=int(opts.get("mt", 2000)), **kw)
     if name == "reader+zenz":
         if not model:
             raise ValueError("reader+zenz には --model（読みを書く二段形式のモデル）が要る")

@@ -1,10 +1,10 @@
-"""変換コアの2つの実行系（torch 版 core と llama-server 版 core-llama）の食い違いを1件ずつ調べる（docs/LLAMA_PARITY.md）。
+"""変換コアの2つの実行系（GPU の torch 版 core と CPU の ONNX Runtime 版 core-ort）の食い違いを1件ずつ調べる。
 
     # 1. 変換器ごとに、候補の内訳つきで流す（eval.run と同じ行に、候補 k 件の読み・出力・点数・完走を足す）
     uv run python -m eval.parity run --converter core --device cuda --set user_style --set gen_test --tag core
-    uv run python -m eval.parity run --converter "core-llama:np=5,t=8" --model <GGUF> --set user_style --tag llama
+    uv run python -m eval.parity run --converter "core-ort:t=4" --device cpu --set user_style --tag ort
     # 2. 2つの結果を突き合わせ、食い違った件を原因の型に分ける
-    uv run python -m eval.parity compare eval/out/parity/core__user_style.jsonl eval/out/parity/llama__user_style.jsonl
+    uv run python -m eval.parity compare eval/out/parity/core__user_style.jsonl eval/out/parity/ort__user_style.jsonl
 
 結果は eval/out/parity/<tag>__<set>.jsonl（eval.diff でもそのまま読める）。
 """
@@ -40,9 +40,6 @@ def run_one(conv, romaji: str, left: str) -> tuple[str, list[dict], bool, float]
 
 
 def cmd_run(args) -> None:
-    if args.torch_threads:
-        import torch
-        torch.set_num_threads(args.torch_threads)
     conv = make_converter(args.converter, args.device, args.model)
     env = env_info(args.device)
     for _ in range(2):
@@ -63,13 +60,7 @@ def cmd_run(args) -> None:
                            "en_kept": english_kept(refs[0], out) if it.refs else None,
                            "edited": edited, "ms": ms, "cands": cands}
                     f.write(json.dumps(row, ensure_ascii=False) + "\n")
-            backend = getattr(conv, "backend", None)
-            extra = ""
-            if backend is not None and hasattr(backend, "n_refill"):
-                extra = (f" refill={backend.n_refill} resplit={backend.n_resplit} "
-                         f"dead={getattr(backend, 'n_dead', '-')}")
-            print(f"{args.tag} {set_name}: {len(items)} 件 {time.perf_counter() - t0:.0f} s{extra} -> {path}",
-                  flush=True)
+            print(f"{args.tag} {set_name}: {len(items)} 件 {time.perf_counter() - t0:.0f} s -> {path}", flush=True)
         (OUT / f"{args.tag}.env.json").write_text(json.dumps({"converter": args.converter, "model": args.model,
                                                               "env": env}, ensure_ascii=False, indent=1),
                                                   encoding="utf-8")
@@ -266,11 +257,10 @@ def main(argv: list[str] | None = None):
     r = sub.add_parser("run")
     r.add_argument("--converter", required=True)
     r.add_argument("--model")
-    r.add_argument("--device", default="cpu")
+    r.add_argument("--device", default="cuda", help="torch 版 core は cuda だけ。core-ort は CPU で動く（記録に書く装置）")
     r.add_argument("--set", action="append", required=True, dest="sets")
     r.add_argument("--tag", required=True, help="結果のファイル名の頭")
     r.add_argument("--limit", type=int)
-    r.add_argument("--torch-threads", type=int, help="torch のスレッド数（スレッド数で出力が変わらないかの確認用）")
     c = sub.add_parser("compare")
     c.add_argument("a")
     c.add_argument("b")
