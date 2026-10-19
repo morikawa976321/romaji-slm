@@ -27,6 +27,20 @@ def version() -> str:
     return p.read_text(encoding="utf-8").strip() if p.exists() else "dev"
 
 
+def thread_env(n: int) -> None:
+    """torch（Intel OpenMP・MKL）のスレッド数を、torch を読む前に環境変数で渡す（読み込み時にスレッドの池を作る部分が
+    あるため。ime.ini の値を利用者の環境変数より優先する）。torch を読んだ後に set_threads でも決める。"""
+    if n > 0:
+        for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+            os.environ[k] = str(n)
+
+
+def set_threads(n: int) -> None:
+    if n > 0:
+        import torch
+        torch.set_num_threads(n)
+
+
 def pick_device(device: str) -> str:
     if device != "auto":
         return device
@@ -94,7 +108,12 @@ def main(argv=None):
     # 候補ウィンドウの並べ方（core.window.ORDERS）。merge は本人の決定（docs/decisions.md D37）。reading で置き換える前に戻る
     ap.add_argument("--window", default="merge")
     ap.add_argument("--log", help="標準出力と標準エラーの行き先（pythonw では両方とも None で、進捗表示が落ちる）")
+    # torch のスレッド数（ime.ini の threads。既定 4、0 は torch の既定 = 論理コア数）。既定のままだと、ほかの処理が CPU を
+    # 使っているとき変換が極端に遅くなり（同じ負荷でスレッド 4 の 6 倍）、変換のたびに全コアを埋める（docs/LLAMA_PARITY.md）。
+    # スレッド数を変えても出力は変わらない（全評価セット 896 文で確認）
+    ap.add_argument("--threads", type=int, default=4)
     args = ap.parse_args(argv)
+    thread_env(args.threads)  # torch はまだ読まない（待ち受けを先に開くため）
     if args.log:
         sys.stdout = sys.stderr = open(args.log, "a", encoding="utf-8", buffering=1)
         print(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} start", flush=True)
@@ -126,6 +145,7 @@ def main(argv=None):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     from core.pipeline import CorePipeline  # 既定は本人の選択（句読点 B・英字は打ったまま。docs/decisions.md D14）
+    set_threads(args.threads)
     device = pick_device(args.device)
     t0 = time.perf_counter()
     from core.userdict import default_path, load as load_user
@@ -135,8 +155,9 @@ def main(argv=None):
     holder["ud_mtime"] = default_path().stat().st_mtime if default_path().exists() else 0.0
     holder["p"].convert_nbest("konnichiha", order=args.window)  # 最初の 1 件の遅さ（CUDA の初期化・辞書の索引）を起動時に済ませる
     ready.set()
-    print(f"romaji-slm ime server: 127.0.0.1:{args.port} device={device} ready in {time.perf_counter() - t0:.1f}s",
-          flush=True)
+    import torch
+    print(f"romaji-slm ime server: 127.0.0.1:{args.port} device={device} threads={torch.get_num_threads()} "
+          f"ready in {time.perf_counter() - t0:.1f}s", flush=True)
     try:
         threading.Event().wait()
     except KeyboardInterrupt:
