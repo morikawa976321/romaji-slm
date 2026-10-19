@@ -95,6 +95,8 @@ namespace RomajiSlm
         // 変換サーバの torch のスレッド数。既定 4（本人の決定 2026-10-19「マシン内の他の処理に影響を与えないためにも」。docs/decisions.md D42）。
         // 0 なら torch の既定（論理コア数。ほかの負荷があると極端に遅くなり、変換のたびに全コアを埋める）
         public int Threads = 4;
+        // 変換の実行方式: auto（GPU があれば torch、無ければ ONNX Runtime 版。本人の決定 2026-10-19、D43）/ torch / onnx
+        public string Engine = "auto";
         public int AutoUpdate = 3;   // 新しい版があるとき、この分数だけ打鍵が無ければ自動で入れ替える（0 で自動ではしない）
         // 追従モード: 写し元のリポジトリを GitHub のこのブランチに 30 分ごとに追いつかせる（ThinkPad 用。docs/IME.md）。
         // 空なら取りに行かない（このデスクトップのリポジトリは開発用で、複数のセッションが書いているので既定は空）
@@ -119,6 +121,7 @@ namespace RomajiSlm
                 else if (k == "no_history_apps") NoHistoryApps = v;
                 else if (k == "auto_update") int.TryParse(v, out AutoUpdate);
                 else if (k == "threads") { int n; if (int.TryParse(v, out n) && n >= 0) Threads = n; }
+                else if (k == "engine" && (v == "auto" || v == "torch" || v == "onnx")) Engine = v;
                 else if (k == "pull") Pull = v;
             }
         }
@@ -133,6 +136,8 @@ namespace RomajiSlm
                 "port=" + Port + "\r\n" +
                 "# threads: 変換の torch のスレッド数（既定 4。0 なら論理コア数で、ほかの処理に影響しやすい）\r\n" +
                 "threads=" + Threads + "\r\n" +
+                "# engine: auto（GPU があれば torch、無ければ ONNX Runtime 版。どちらも変換結果は同じ）/ torch / onnx\r\n" +
+                "engine=" + Engine + "\r\n" +
                 "# history: 1 なら確定・取り消しのたびに打鍵列・候補・確定文を history.jsonl に残す（次の改良の材料）。0 で止める\r\n" +
                 "history=" + (History ? "1" : "0") + "\r\n" +
                 "# accept_injected: 1 なら他のアプリが送り込んだキーも本人の打鍵として扱う（リモートデスクトップ越しなど、本人の打鍵が送り込みで届くとき要る）\r\n" +
@@ -191,7 +196,7 @@ namespace RomajiSlm
             string py = System.IO.Path.Combine(root, ".venv", "Scripts", "pythonw.exe");
             if (!File.Exists(py)) throw new FileNotFoundException("venv が無い: " + py);
             var psi = new ProcessStartInfo(py, "-m ime.server --port " + cfg.Port + " --device " + cfg.Device +
-                                           " --threads " + cfg.Threads + " --log \"" + log + "\"")
+                                           " --threads " + cfg.Threads + " --engine " + cfg.Engine + " --log \"" + log + "\"")
             {
                 WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
             };

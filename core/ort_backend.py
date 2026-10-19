@@ -1,10 +1,13 @@
-"""変換コアの生成と採点を ONNX Runtime で行う（実験。docs/LLAMA_PARITY.md「torch 版の照合のまま実行系だけ替える」）。
+"""変換コアの生成と採点を ONNX Runtime（CPU）で行う。常駐入力は GPU の無い機械でこれを使う（docs/decisions.md D43）。
 
-torch 版（core.constrained.ConstrainedZenz と core.select.fluency）と同じ手順・同じ照合を、forward だけ ONNX Runtime に替える。
-CPU の torch は 1 手の forward の固定費が支配的（D3）なので、軽い実行系で同じ計算をすれば、照合も探索も変えずに速くなるかを見る。
-GPT-2 を KV キャッシュを明示した形（_Step）に移して ONNX に書き出す（初回だけ torch が要る）。logits の差は HF と 3e-5 以内。
+torch 版（core.constrained.ConstrainedZenz と core.select.fluency・ZenzScorer.logprobs）と同じ手順・同じ照合で、forward だけ
+ONNX Runtime に替える。CPU の torch は 1 手の forward の固定費が支配的（D3）で、同じ計算を軽い実行系で回すと、照合も探索も
+変えずに速くなる（全評価セット 2400 文で出力が torch 版と同じ、CPU で 0.72 倍の時間。docs/LLAMA_PARITY.md）。
+GPT-2 を KV キャッシュを明示した形（_Step）に移して ONNX に書き出す（初回だけ torch が要る）。logits の差は HF と 3e-5 以内で、
+書き出した後に HF と照らし、外れていれば使わない。
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -57,11 +60,35 @@ def export_onnx(model: str, out: Path) -> None:
     args = (torch.zeros(B, 1, dtype=torch.long), torch.full((B, 1), P), torch.ones(B, P + 1, dtype=torch.long),
             torch.zeros(L, B, H, P, D), torch.zeros(L, B, H, P, D))
     out.parent.mkdir(parents=True, exist_ok=True)
-    torch.onnx.export(_Step().eval(), args, str(out), input_names=["ids", "pos", "mask", "pk", "pv"],
+    tmp = out.with_name(out.name + ".tmp")
+    # 書き終えてから名前を付け替える（途中で止まっても、壊れたファイルを次の起動で使わない）
+    torch.onnx.export(_Step().eval(), args, str(tmp), input_names=["ids", "pos", "mask", "pk", "pv"],
                       output_names=["logits", "nk", "nv"],
                       dynamic_axes={"ids": {0: "B", 1: "S"}, "pos": {0: "B", 1: "S"}, "mask": {0: "B", 1: "T"},
                                     "pk": {1: "B", 3: "Tp"}, "pv": {1: "B", 3: "Tp"}, "logits": {0: "B", 1: "S"},
                                     "nk": {1: "B", 3: "T"}, "nv": {1: "B", 3: "T"}}, opset_version=17, dynamo=False)
+    # 書き出した ONNX を HF と照らす（プロンプト 1 回と、KV キャッシュ付きの 1 手）。外れていれば使わない
+    import onnxruntime as ort
+    sess = ort.InferenceSession(str(tmp), providers=["CPUExecutionProvider"])
+    g = torch.Generator().manual_seed(0)
+    ids = torch.randint(5, hf.config.vocab_size, (2, 12), generator=g)
+    with torch.no_grad():
+        ref = hf(input_ids=ids, use_cache=True)
+        ref2 = hf(input_ids=ids[:, :1], past_key_values=ref.past_key_values, use_cache=True)
+    e = np.zeros((L, 2, H, 0, D), dtype=np.float32)
+    lg, nk, nv = sess.run(None, {"ids": ids.numpy(), "pos": np.tile(np.arange(12), (2, 1)), "mask": np.ones((2, 12), np.int64),
+                                 "pk": e, "pv": e})
+    lg2 = sess.run(None, {"ids": ids[:, :1].numpy(), "pos": np.full((2, 1), 12), "mask": np.ones((2, 13), np.int64),
+                          "pk": nk, "pv": nv})[0]
+    diff = max(float(np.abs(lg - ref.logits.numpy()).max()), float(np.abs(lg2 - ref2.logits.numpy()).max()))
+    del sess
+    if diff > _EXPORT_TOL:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"書き出した ONNX の logits が HF と {diff:.2e} 違う（許すのは {_EXPORT_TOL}）")
+    os.replace(tmp, out)
+
+
+_EXPORT_TOL = 1e-3  # 実測は 3e-5 以内（fp32 の和の順序の差）
 
 
 def _log_softmax(x: np.ndarray) -> np.ndarray:
@@ -183,25 +210,31 @@ class OrtBackend:
         return [Decoded(o.decode("utf-8", errors="replace"), lp, f, _char_bounds(bytes(o), bd))
                 for o, lp, f, bd in zip(outs, logp, finished, bounds)]
 
-    def logprobs(self, prompts: list[str], continuations: list[str], eos: bool = True) -> list[float]:
-        """core.select.ZenzScorer.logprobs と同じ（右詰めのパディング、続きのトークンの対数確率の和）。"""
+    _BATCH = 32  # ZenzScorer と同じ（1 回に流す系列の数。候補ウィンドウの別の書き方は 2 × 件数の系列になる）
+
+    def logprobs(self, prompts: list[str], continuations: list[str], eos: bool | list[bool] = True) -> list[float]:
+        """core.select.ZenzScorer.logprobs と同じ（右詰めのパディング、続きのトークンの対数確率の和）。
+        eos は系列ごとにも渡せる（候補ウィンドウ core.window が変換の確率と自然さを 1 回で測る）。"""
+        eos = eos if isinstance(eos, list) else [eos] * len(prompts)
         seqs = []
-        for p, c in zip(prompts, continuations):
+        for p, c, e in zip(prompts, continuations, eos):
             p_ids = self.tok(p, add_special_tokens=False).input_ids
-            c_ids = self.tok(c, add_special_tokens=False).input_ids + ([self.eos] if eos else [])
+            c_ids = self.tok(c, add_special_tokens=False).input_ids + ([self.eos] if e else [])
             seqs.append((p_ids + c_ids, len(p_ids)))
         out = []
-        B, T = len(seqs), max(len(s) for s, _ in seqs)
-        ids = np.full((B, T), self.pad, dtype=np.int64)
-        mask = np.zeros((B, T), dtype=np.int64)
-        for r, (s, _) in enumerate(seqs):
-            ids[r, :len(s)] = s
-            mask[r, :len(s)] = 1
-        pos = np.broadcast_to(np.arange(T, dtype=np.int64), (B, T)).copy()
-        logits = self._run(ids, pos, mask, self._empty(B), self._empty(B))[0]
-        for r, (s, n_p) in enumerate(seqs):
-            lp = _log_softmax(logits[r, n_p - 1:len(s) - 1].astype(np.float32))
-            out.append(float(lp[np.arange(len(s) - n_p), s[n_p:]].sum()))
+        for k in range(0, len(seqs), self._BATCH):
+            chunk = seqs[k:k + self._BATCH]
+            B, T = len(chunk), max(len(s) for s, _ in chunk)
+            ids = np.full((B, T), self.pad, dtype=np.int64)
+            mask = np.zeros((B, T), dtype=np.int64)
+            for r, (s, _) in enumerate(chunk):
+                ids[r, :len(s)] = s
+                mask[r, :len(s)] = 1
+            pos = np.broadcast_to(np.arange(T, dtype=np.int64), (B, T)).copy()
+            logits = self._run(ids, pos, mask, self._empty(B), self._empty(B))[0]
+            for r, (s, n_p) in enumerate(chunk):
+                lp = _log_softmax(logits[r, n_p - 1:len(s) - 1].astype(np.float32))
+                out.append(float(lp[np.arange(len(s) - n_p), s[n_p:]].sum()))
         return out
 
     def fluency(self, texts: list[str], left_context: str = "") -> list[float]:
@@ -211,5 +244,6 @@ class OrtBackend:
 
 class OrtCorePipeline(CorePipeline):
     def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", *, threads: int | None = None,
-                 name: str | None = None, **kwargs):
-        super().__init__(name=name or "core-ort", backend=OrtBackend(model, threads=threads), **kwargs)
+                 onnx_path: str | Path | None = None, name: str | None = None, **kwargs):
+        super().__init__(name=name or "core-ort", backend=OrtBackend(model, onnx_path=onnx_path, threads=threads),
+                         **kwargs)

@@ -41,6 +41,19 @@ def set_threads(n: int) -> None:
         torch.set_num_threads(n)
 
 
+def pick_engine(engine: str, device: str) -> str:
+    """auto なら、GPU（cuda）で動かすときは torch、CPU なら ONNX Runtime 版（onnxruntime が入っていれば）。"""
+    if engine != "auto":
+        return engine
+    if device == "cuda":
+        return "torch"
+    try:
+        import onnxruntime  # noqa: F401
+    except ImportError:
+        return "torch"
+    return "onnx"
+
+
 def pick_device(device: str) -> str:
     if device != "auto":
         return device
@@ -112,6 +125,9 @@ def main(argv=None):
     # 使っているとき変換が極端に遅くなり（同じ負荷でスレッド 4 の 6 倍）、変換のたびに全コアを埋める（docs/LLAMA_PARITY.md）。
     # スレッド数を変えても出力は変わらない（全評価セット 896 文で確認）
     ap.add_argument("--threads", type=int, default=4)
+    # 実行方式（ime.ini の engine）。auto: GPU があれば torch、無ければ ONNX Runtime 版（出力は torch 版と同じで CPU で速い。
+    # 本人の決定 2026-10-19、docs/decisions.md D43）。torch / onnx で決め打ち
+    ap.add_argument("--engine", choices=("auto", "torch", "onnx"), default="auto")
     args = ap.parse_args(argv)
     thread_env(args.threads)  # torch はまだ読まない（待ち受けを先に開くため）
     if args.log:
@@ -151,13 +167,22 @@ def main(argv=None):
     from core.userdict import default_path, load as load_user
     ud = load_user(default_path())   # 本人のユーザー辞書（docs/REVIEW.md）。中身はログに書かない（件数だけ）
     print(f"user dict: {default_path()} en={len(ud.en)} word={len(ud.words)} fix={len(ud.fixes)} errors={len(ud.errors)}", flush=True)
-    holder["p"] = CorePipeline(model=args.model, device=device, user_dict=ud)
+    engine = pick_engine(args.engine, device)
+    if engine == "onnx":
+        try:
+            from core.ort_backend import OrtCorePipeline
+            holder["p"] = OrtCorePipeline(model=args.model, threads=args.threads or None, user_dict=ud)
+        except Exception as e:  # ONNX 版が使えなくても常駐は止めない（torch 版で動く）
+            print(f"onnx engine failed, falling back to torch: {type(e).__name__}: {e}", flush=True)
+            engine = "torch"
+    if engine == "torch":
+        holder["p"] = CorePipeline(model=args.model, device=device, user_dict=ud)
     holder["ud_mtime"] = default_path().stat().st_mtime if default_path().exists() else 0.0
     holder["p"].convert_nbest("konnichiha", order=args.window)  # 最初の 1 件の遅さ（CUDA の初期化・辞書の索引）を起動時に済ませる
     ready.set()
     import torch
-    print(f"romaji-slm ime server: 127.0.0.1:{args.port} device={device} threads={torch.get_num_threads()} "
-          f"ready in {time.perf_counter() - t0:.1f}s", flush=True)
+    print(f"romaji-slm ime server: 127.0.0.1:{args.port} engine={engine} device={device if engine == 'torch' else 'cpu'} "
+          f"threads={torch.get_num_threads()} ready in {time.perf_counter() - t0:.1f}s", flush=True)
     try:
         threading.Event().wait()
     except KeyboardInterrupt:

@@ -646,3 +646,23 @@ AI の意見: Git で追従させるのに賛成。必要なのは 4 つ。
 - 確かめたこと: `ime/build.ps1 -Test`（Composer の試験）、`tests/test_ime_server.py`、置き場所を替えた自己試験 2 回（`threads` 無しの ime.ini で `threads=4`、
   `threads=2` で `threads=2`。どちらも kyouhaiitenkidesune → 今日はいい天気ですね）。
 - ThinkPad での値の見直しは、ほかの高速化を入れたあとの最後の測定で行う（本人の決定の 1）。
+
+### D43. GPU の無い機械の常駐入力は ONNX Runtime 版で動かす（2026-10-19、本人の決定の実施）
+
+- 本人の決定: 「ONNX 版は GPU の無い機械向けとして進めて。デスクトップは torch＋GPU のまま。候補ウィンドウの別の書き方も ONNX 版で出るようにして。」
+  （AI が、ONNX 版に変えたときに失うもの = このデスクトップでは GPU が使えず遅くなる・候補ウィンドウの別の書き方が出なくなる・保守の経路が増える・ディスクが増える、を挙げたあと）
+- 実施:
+  - `ime.ini` の `engine`（既定 `auto`）。auto は GPU（CUDA）で動かすなら torch、CPU なら ONNX Runtime 版。`torch` / `onnx` で決め打ち。サーバは `--engine`。
+    ONNX 版が使えなければ（onnxruntime が無い、書き出しに失敗）torch 版で動かし、記録に残す。
+  - 候補ウィンドウ（core/window.py）は、別の書き方を ZenzScorer と同じ `logprobs` を持つ実行方式で採点する（torch 版と ONNX 版。llama-server 版は従来どおり省く）。
+    ONNX 版の `logprobs` に系列ごとの EOS と、32 系列ずつの束を足した。
+  - ONNX の書き出しは一時ファイルに書いてから名前を付け替え、書き出した ONNX の logits を HF と照らす（1e-3 を超えたら使わない。実測は 3e-5 以内）。
+    置き場所は `app\models\onnx\`（更新で app を組み立て直しても残る。新しく入れた機械では初回の起動で書き出す）。
+  - onnxruntime 1.31.0・onnx 1.23.2 を依存（core）に足した。ONNX 版のスレッド数は `ime.ini` の `threads`（D42）。
+- 確かめたこと: `tests/test_ort_backend.py`（極小モデルで、制約付き生成・自然さ・系列ごとの EOS・候補ウィンドウが torch 版と一致）、自己試験 3 通り
+  （`device=cpu` → engine=onnx、`device=auto` → このデスクトップでは engine=torch・cuda、`engine=torch` → torch の CPU。どれも kyouhaiitenkidesune → 今日はいい天気ですね）、
+  常駐と同じ設定の候補の列（convert_nbest。候補ウィンドウの merge と別の書き方を含む）が、user_style 73・short_words 52・user_style_nopunct 68・
+  synth_user の先頭 300 の計 493 件で、torch（CPU、スレッド 4）と ONNX 版で 1 件も違わない（1 件の中央値 torch 1442 ms・ONNX 1127 ms。このデスクトップで、
+  ほかのテストと別のセッションが CPU を使っていたときの参考値）。
+- 残る失うもの: 保守する経路が 1 本増える（ONNX の書き出しのために GPT-2 の計算を手で書き直している。torch の旧式の書き出しは非推奨）。1 台あたり約 400 MB 増える。
+  ThinkPad での速さ・メモリ・起動時間は未測定（本人の決定で、ほかの高速化のあとに最後に測る）。

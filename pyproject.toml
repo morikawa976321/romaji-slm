@@ -33,6 +33,9 @@ eval = [
 core = [
     "marisa-trie>=1.2.0",
     "wordfreq>=3.1.1",
+    # GPU の無い機械の常駐入力が使う ONNX Runtime 版（core/ort_backend.py、docs/decisions.md D43）。onnx は初回の書き出しに要る
+    "onnxruntime>=1.31.0",
+    "onnx>=1.23.2",
 ]
 data = [
     "datasets>=4.0.0",
