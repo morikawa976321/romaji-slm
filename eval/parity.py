@@ -6,7 +6,8 @@
     # 2. 2つの結果を突き合わせ、食い違った件を原因の型に分ける
     uv run python -m eval.parity compare eval/out/parity/core__user_style.jsonl eval/out/parity/ort__user_style.jsonl
 
-結果は eval/out/parity/<tag>__<set>.jsonl（eval.diff でもそのまま読める）。
+結果は eval/out/parity/<tag>__<set>.jsonl（eval.diff でもそのまま読める）。変換器と機械は <tag>__<set>.env.json に、
+セットごとに書く（同じタグで設定の違う実行を混ぜても分かるように。compare は 2 つの変換器が違えば書き添える）。
 """
 
 import argparse
@@ -60,13 +61,25 @@ def cmd_run(args) -> None:
                            "en_kept": english_kept(refs[0], out) if it.refs else None,
                            "edited": edited, "ms": ms, "cands": cands}
                     f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            # タグ 1 つに 1 ファイルだと、後の実行が前の実行の条件を上書きする（2026-10-18 の O0 は E セットを p=auto、
+            # I セットを p=insert で回したのに、条件は p=insert だけが残った。docs/SPEEDUP.md §0）
+            env_path(path).write_text(json.dumps({"converter": args.converter, "model": args.model, "set": set_name,
+                                                  "env": env}, ensure_ascii=False, indent=1), encoding="utf-8")
             print(f"{args.tag} {set_name}: {len(items)} 件 {time.perf_counter() - t0:.0f} s -> {path}", flush=True)
-        (OUT / f"{args.tag}.env.json").write_text(json.dumps({"converter": args.converter, "model": args.model,
-                                                              "env": env}, ensure_ascii=False, indent=1),
-                                                  encoding="utf-8")
     finally:
         if hasattr(conv, "close"):
             conv.close()
+
+
+def env_path(path: Path | str) -> Path:
+    """結果の JSONL（<tag>__<set>.jsonl）に対応する条件のファイル。"""
+    return Path(path).with_suffix(".env.json")
+
+
+def converter_of(path: Path | str) -> str | None:
+    """結果を出した変換器。条件のファイルが無い古い記録（2026-10-20 より前）は None。"""
+    p = env_path(path)
+    return json.loads(p.read_text(encoding="utf-8"))["converter"] if p.exists() else None
 
 
 def load(path: Path | str) -> dict[str, dict]:
@@ -132,7 +145,7 @@ def compare(pa: Path | str, pb: Path | str) -> dict:
                      **info})
     n = len(ids)
     acc = lambda R: sum(bool(R[i].get("exact")) for i in ids) / max(1, n)  # noqa: E731
-    return {"n": n, "diff": rows, "acc_a": acc(A), "acc_b": acc(B),
+    return {"n": n, "diff": rows, "acc_a": acc(A), "acc_b": acc(B), "conv_a": converter_of(pa), "conv_b": converter_of(pb),
             "b_breaks": [r for r in rows if r["clean"] and r["ok_a"] and not r["ok_b"]],
             "b_fixes": [r for r in rows if r["ok_b"] and not r["ok_a"]]}
 
@@ -234,7 +247,11 @@ def render(res: dict, name_a: str, name_b: str) -> str:
     from collections import Counter
     rows = res["diff"]
     types = Counter(r["type"] for r in rows)
-    lines = [f"# 食い違い: {name_a}（A） vs {name_b}（B）", "",
+    ca, cb = res.get("conv_a"), res.get("conv_b")
+    conv = f"- 変換器 A `{ca or '記録なし'}` / B `{cb or '記録なし'}`"
+    if ca and cb and ca != cb:
+        conv += "（**設定が違う**: 食い違いには設定の差も入る）"
+    lines = [f"# 食い違い: {name_a}（A） vs {name_b}（B）", "", conv,
              f"- 件数 {res['n']}、出力が食い違った {len(rows)} 件（{', '.join(f'{k} {v}' for k, v in types.most_common())}）",
              f"- 完全一致 A {res['acc_a']:.1%} / B {res['acc_b']:.1%}",
              f"- 正常入力で A だけ正解（B が壊す）{len(res['b_breaks'])} 件、B だけ正解 {len(res['b_fixes'])} 件", "",
