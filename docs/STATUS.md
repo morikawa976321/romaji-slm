@@ -71,13 +71,14 @@ pwsh -NoProfile -File tools/pack-trial.ps1                                      
 
 本人は 2026-10-15 にデスクトップで体験版を試し、句読点 B・英字 打ったまま・「使ってみたい」と答えた（decisions.md「本人の回答」、D14）。未解決 4 点への本人の方針（原文は decisions.md「本人の方針」）に沿って、D16〜D18 で進めた: 読み段の PR #10・#11 と候補の絞り込みを取り込み、user_style 82.2% → 86.3%、打鍵ミスの文 63.6% → 90.9%、正常入力で新たに壊れた文 0。CPU の中央値は 379 → 507 ms。
 
-1. **ThinkPad での実測はまだ**。速度要件（20〜30 字 1 秒以内）の判定には ThinkPad で測る必要がある。torch・ONNX・llama の 3 方式を測る zip は `tools/pack-bench.ps1`（手順は LLAMA_PARITY.md「ThinkPad での測定手順」）。
+1. **ThinkPad での実測はまだ**。速度要件（20〜30 字 1 秒以内）の判定には ThinkPad で測る必要がある。本人の決定（2026-10-19）で、ほかの高速化を入れた後に最後に測る。torch・ONNX・llama の 3 方式を測る zip は `tools/pack-bench.ps1`（手順は LLAMA_PARITY.md「ThinkPad での測定手順」）。ただし今の bench は左文脈なしの `convert` だけを測る。常駐入力の実際の形（convert_nbest・左文脈 60 字）はこのデスクトップで約 2.4 倍重いので、最後の測定ではそれも測る（[SPEEDUP.md](SPEEDUP.md) §7）。
 2. **1 語に打鍵ミスが 3 つ以上**（本人の実入力 kangkaraereu）は読み段の候補に入らないまま（PR #11 の未解決の論点 1）。`max_edits=3` や 3 編集の語の弧は副作用が大きかった（docs/READING.md）。本人の方針（副作用が出るなら慎重に）に従い、入れていない。
-3. **速度**（2026-10-18 の調査、[LLAMA_PARITY.md](LLAMA_PARITY.md)・D41）: llama-server 版が正常入力を 6 件壊していた原因は GGUF の BOS/EOS の ID の取り違え（直せる。`core-llama:eos=3`）。これまでの llama 版の「CPU で 0.55 倍」は GPU の値で、本当の CPU では torch 版とほぼ同じ時間。forward だけ ONNX Runtime に替えた版（`core-ort`）は出力が torch 版と全件同じで、CPU で 0.72 倍。torch の既定スレッドはほかの負荷に弱い（スレッド 4 の 6 倍の時間の例）。既定は torch 版のまま。ThinkPad で 1 秒を超えたら、スレッド数の固定 → ONNX 版の順に試す。ThinkPad の測定は `dist/romaji-slm-bench-*.zip` の `bench.cmd`。
+3. **速度**（2026-10-18 の調査、[LLAMA_PARITY.md](LLAMA_PARITY.md)・D41）: llama-server 版が正常入力を 6 件壊していた原因は GGUF の BOS/EOS の ID の取り違え（直せる。`core-llama:eos=3`）。これまでの llama 版の「CPU で 0.55 倍」は GPU の値で、本当の CPU では torch 版とほぼ同じ時間。forward だけ ONNX Runtime に替えた版（`core-ort`）は出力が torch 版と全件同じで、CPU で 0.72 倍。torch の既定スレッドはほかの負荷に弱い（スレッド 4 の 6 倍の時間の例）。その後、常駐入力のスレッド数を 4 に固定し（D42）、GPU の無い機械は ONNX 版で動かすことにした（D43。デスクトップは torch＋GPU のまま）。ThinkPad の測定は `dist/romaji-slm-bench-*.zip` の `bench.cmd`。
 4. 文中の句点（2 文の間）は本人の方針で着手しない（1 文ずつ変換する）。
 5. IME 化は 2026-10-16 の本人の依頼で常駐入力として着手した（§0）。
 6. `uv run pytest` が 1 回だけ 1 件落ち、続く 3 回は全件通った（2026-10-16）。どのテストかは特定していない。
 7. **候補ウィンドウ（merge、D37）の所要**: 別の書き方を足す分は、このデスクトップの GPU で中央値 20〜75 ms、CPU（別の作業で負荷 100% のとき）で短い単語 153 ms・文 445 ms（D37）。ThinkPad では測っていない。1 位も同じ読みの別の書き方と同じ式で選び直すと AJIMEE きれい 153 → 155・user_style 63 → 64（誤補正 3 のまま）になる（保存した候補での机上の値。1 位が変わるので今回は入れていない）。
+8. **さらに速くする余地**（2026-10-20 の軽い検討、[SPEEDUP.md](SPEEDUP.md)。本人の依頼で報告まで、コードは変えていない）: ONNX 版の常駐入力の 1 要求（左文脈 60 字）は、このデスクトップ（負荷あり）で 1.8 秒、94% が forward。行どうしで共通の前置きの KV を使い回す試作で、出力を変えずに 0.55 倍。次は 1 手ごとの KV の写し（1 手の 2〜4 割）。別の書き方を最初の応答から外す・古い先読みを打ち切るは、振る舞いが変わるので本人の判断。int8 の動的量子化は精度が落ちて使えない。torch＋GPU は 0.3 秒、llama 版には投資しない。
 
 ## 3. 止めた路線（再開時に繰り返さない）
 

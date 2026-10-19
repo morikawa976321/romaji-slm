@@ -14,4 +14,5 @@
 - 変換コア 工程2「読みラティス」（打鍵列 → 読みの N-best）: [docs/READING.md](docs/READING.md)、`python -m core.reading "ローマ字"`
 - 推論 CLI・GGUF 変換: [docs/INFER.md](docs/INFER.md)、`python -m infer "ローマ字"`、`python -m infer.to_gguf`
 - 常駐入力の資源（メモリ・GPU・CPU・ディスクの内訳と増え方、減らす手の候補）: [docs/RESOURCES.md](docs/RESOURCES.md)、`python -m tools.memprof out.jsonl`
+- 変換の実行方式の比較（torch・ONNX Runtime・llama-server）: [docs/LLAMA_PARITY.md](docs/LLAMA_PARITY.md)。さらに速くする余地（3 経路の内訳と、出力を変えない手・変える手）: [docs/SPEEDUP.md](docs/SPEEDUP.md)
 - 辞書による変換候補（読み → 表記の N-best、Mozc 辞書）: [docs/KANAKANJI.md](docs/KANAKANJI.md)、`python -m core.fetch_mozc`、`python -m core.kanakanji "キョウハイイテンキデスネ"`
