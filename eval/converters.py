@@ -173,6 +173,8 @@ def make_converter(name: str, device: str = "cuda", model: str | None = None,
                   tau_end=float(opts.get("te", -6.0)), tau_q=float(opts.get("tq", -5.0)), name=name,
                   preselect=opts.get("ps", "1") == "1",  # ps=0 で読み段の上位をそのまま使う（D18 以前の振る舞い）
                   punct_end=opts.get("pe", "0") == "1",  # pe=1 で句読点 B が文末の句点も補う（D31 より前の既定）
+                  # ct=0 で読点の位置を「。」を仮に付けずに比べる、cl=0 で短い文にも読点を足す（どちらも D46 より前の振る舞い）
+                  comma_tail=opts.get("ct", "1") == "1", comma_min_len=int(opts.get("cl", 10)),
                   user_dict=opts.get("ud") or None)  # ud=<パス> で本人のユーザー辞書を読む（docs/REVIEW.md の検証）
         if name.startswith("core-ort"):
             # core-ort:t=8,...（CPU の変換。forward を ONNX Runtime で回す。照合・採点は torch 版と同じ。core/ort_backend.py）

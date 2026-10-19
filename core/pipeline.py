@@ -118,7 +118,7 @@ class CorePipeline:
                  batched: bool = True, punct: str = "insert", en_case: str = "typed",
                  tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None,
                  preselect: bool = True, n_pre: int = 30, punct_end: bool = False, user_dict=None,
-                 max_tries: int = 2000):
+                 max_tries: int = 2000, comma_tail: bool = True, comma_min_len: int = 10):
         """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
         punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
         既定の punct="insert"・en_case="typed" は本人の選択（docs/decisions.md「本人の回答」2026-10-15）。
@@ -149,6 +149,12 @@ class CorePipeline:
         # punct_end: 句読点 B で文末の「。」「？」も補うか。既定は補わない（本人の決定 2026-10-17「Aを採用する」:
         # 常駐入力では文節ごとに確定することが多く、文の途中に句点が付いた。句点は本人が「.」を打つ）
         self.punct_end = punct_end
+        # comma_tail: 文末を補わないときも、読点の位置は文末に「。」を仮に付けた文で比べる（出力には付けない）。
+        # tau_comma は文末つきの文で決めた値で、「。」の無い文で比べると本人の文体の合成セットで正しい読点が減った（EVAL.md「句読点 B」）
+        # comma_min_len: 句読点を除いて この字数に満たない文には読点を足さない。常駐入力は文節ごとに短く確定し
+        # （利用履歴の 62 確定で中央 4 字、87% が 10 字未満）、短い確定の中の読点は誤りになりやすい。
+        # 10 字未満で正解に読点がある文は、評価セット（user_style・synth_user）で 2% ほど
+        self.comma_tail, self.comma_min_len = comma_tail, comma_min_len
         # preselect: 読み段の候補 n_pre 件を辞書の変換コストで並べ直して上位 k 件を選ぶ（core.preselect、PR #11）
         self.preselect, self.n_pre = preselect, n_pre
         self.name = name or f"core(k={k},w_read={w_read})"
@@ -231,18 +237,23 @@ class CorePipeline:
         戻り値は (文, 挿入後の文字位置に直した語の切れ目)。切れ目は render_en_case が使う。
         """
         vs = punct_variants(text, bounds)
+        if not self.punct_end:
+            vs = [v for v in vs if v[2] == ""]
+        if sum(ch not in _PUNCT for ch in text) < self.comma_min_len:
+            vs = [v for v in vs if v[3] is None]
         if len(vs) == 1:
             return text, bounds
         tau_end = {"": 0.0, "。": self.tau_end, "？": self.tau_q}
 
-        def pick(cands):
-            fl = self._fluency([v[0] for v in cands], left_context)
+        def pick(cands, tail=""):
+            fl = self._fluency([v[0] + tail for v in cands], left_context)
             return max(zip(cands, fl), key=lambda vf: vf[1] - self.tau_comma * vf[0][1] - tau_end[vf[0][2]])[0]
 
         # 2 段で選ぶ（まず文末の 3 候補、次にその文末で読点の位置）。全組合せ（3 × 切れ目の数）を1バッチで採点すると
         # CPU で 1 件 300 ms ほど増えた（user_style_nopunct で中央値 379 → 703 ms）。段階に分けると採点する文が約 1/3 になる
         end = pick([v for v in vs if v[3] is None])[2] if self.punct_end else ""
-        new_text, _, _, b = pick([v for v in vs if v[2] == end])
+        tail = "。" if self.comma_tail and not self.punct_end and text[-1] not in _PUNCT else ""
+        new_text, _, _, b = pick([v for v in vs if v[2] == end], tail)
         if b is not None:
             bounds = tuple(sorted({x if x < b else x + 1 for x in bounds} | {b, b + 1}))
         return new_text, bounds
