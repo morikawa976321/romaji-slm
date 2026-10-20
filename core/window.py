@@ -146,7 +146,7 @@ def pool(p, romaji: str, left_context: str = "", alts: bool = True, n_alt: int =
          strict: bool = False) -> Pool | None:
     """窓に並べうる候補を集める。alts=False なら読みの候補だけ（2026-10-18 までと同じ計算）。後から add_alternatives で
     別の書き方を足すと、alts=True と同じ中身になる（常駐入力は最初の応答を読みの候補だけで返し、別の書き方は暇なときか
-    候補ウィンドウを開いたときに足す。docs/decisions.md D46）。
+    候補ウィンドウを開いたときに足す。docs/decisions.md D47）。
     strict=True なら別の書き方の失敗をそのまま投げる（評価で、失敗を候補が無かったことと取り違えないため）。"""
     t0 = time.perf_counter()
     cands = p.candidates(romaji, left_context)

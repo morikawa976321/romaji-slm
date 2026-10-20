@@ -49,7 +49,7 @@ namespace RomajiSlm
     /// 待ち行列を戻したときに送る離鍵（押下は捨てたので、離鍵だけ届けてアプリのキー状態を揃える）
     public sealed class ReplayEffect : Effect { public List<KeyEv> Keys; public ReplayEffect(List<KeyEv> k) { Keys = k; } }
     /// 変換の要求。Prefetch: 打っている途中の先読み・候補ウィンドウの列（サーバは後から来た要求があればやめる。確定の要求は false）。
-    /// Full: 候補ウィンドウの別の書き方まで揃った列（false なら 1 位と読みの候補だけで速く返る。docs/decisions.md D46）
+    /// Full: 候補ウィンドウの別の書き方まで揃った列（false なら 1 位と読みの候補だけで速く返る。docs/decisions.md D47）
     public sealed class RequestEffect : Effect
     {
         public int Id; public string Romaji, Context; public bool Prefetch, Full;
@@ -684,10 +684,10 @@ namespace RomajiSlm
             if (buf.Length == 0 || FieldPending) return;
             string k = Key(buf.ToString(), context);
             if (failed.ContainsKey(k)) return;
-            // 打っている途中は 1 位と読みの候補だけを頼む。候補ウィンドウを開いたら、別の書き方まで揃った列を頼む（D46）
+            // 打っている途中は 1 位と読みの候補だけを頼む。候補ウィンドウを開いたら、別の書き方まで揃った列を頼む（D47）
             bool wantFull = Phase == Phase.Candidates && !fullKeys.Contains(k) && !fullFailed.Contains(k);
             if (cache.ContainsKey(k) && !wantFull) return;
-            // 走っている要求: 確定の要求は置き換えない。同じ打鍵列ならその応答を待つ。別の打鍵列の先読みなら置き換える（D46）
+            // 走っている要求: 確定の要求は置き換えない。同じ打鍵列ならその応答を待つ。別の打鍵列の先読みなら置き換える（D47）
             if (inflight != null && (!inflight.Prefetch || inflight.Key == k)) return;
             if (Phase == Phase.Candidates || now - lastKeyAt >= DebounceMs)
                 Send(buf.ToString(), now, true, Phase == Phase.Candidates);

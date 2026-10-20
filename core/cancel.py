@@ -1,4 +1,4 @@
-"""変換の打ち切り。常駐入力の先読みは、後から新しい要求が来たらやめる（docs/SPEEDUP.md §0 の C、docs/decisions.md D46）。
+"""変換の打ち切り。常駐入力の先読みは、後から新しい要求が来たらやめる（docs/SPEEDUP.md §0 の C、docs/decisions.md D47）。
 
 呼び出し側（ime/server.py）が scope で「もう要らないか」を渡す。生成と採点は forward の前に check を呼ぶ。
 ONNX Runtime 版は走っている forward の途中でも止められる（running に止め方を渡し、新しい要求が来たら interrupt が呼ぶ）。

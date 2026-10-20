@@ -271,7 +271,7 @@ namespace RomajiSlm
         }
 
         /// 変換。戻り値は (候補, サーバ側の ms)。失敗は例外（後から来た要求に置き換えられた先読みは 409）。
-        /// full: 別の書き方まで揃った列（false なら 1 位と読みの候補だけ）。prefetch: 後から来た要求があればサーバがやめてよい（D46）
+        /// full: 別の書き方まで揃った列（false なら 1 位と読みの候補だけ）。prefetch: 後から来た要求があればサーバがやめてよい（D47）
         public string[] Convert(string romaji, string context, bool full, bool prefetch, out double ms)
         {
             var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + cfg.Port + "/convert?mode=" + (full ? "full" : "first") +

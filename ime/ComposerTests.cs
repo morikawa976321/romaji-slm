@@ -650,7 +650,7 @@ namespace RomajiSlm
                 c.Tick(200);
                 var pre = Req(Drain(c, 200));   // a の先読み
                 Type(c, "b", 210);
-                Press(c, Composer.VK_RETURN, Mods.None, 211);   // ab を確定（未変換）。a の先読みを置き換えて頼む（D46）
+                Press(c, Composer.VK_RETURN, Mods.None, 211);   // ab を確定（未変換）。a の先読みを置き換えて頼む（D47）
                 Press(c, Composer.VK_TAB, ctrl, 212);           // 確定を待つ Ctrl+Tab。離鍵から預かる
                 var req = Req(Drain(c, 212));
                 Check(req != null && req.Romaji == "ab", "commit requested while holding: " + (req == null ? "none" : req.Romaji));
@@ -924,7 +924,7 @@ namespace RomajiSlm
                 Check(c.Mode == Mode.English, "toggled once");
             });
 
-            Run("打っている途中の先読みは 1 位と読みの候補だけを頼み、新しい打鍵列が出せるようになったら置き換える（D46）", () =>
+            Run("打っている途中の先読みは 1 位と読みの候補だけを頼み、新しい打鍵列が出せるようになったら置き換える（D47）", () =>
             {
                 var c = Ready();
                 Type(c, "kyou", 0);
@@ -1006,7 +1006,7 @@ namespace RomajiSlm
                 Check(Texts(Drain(c, 300)) == "雨", "commit resolved by the prefetch");
             });
 
-            Run("候補ウィンドウを開くと別の書き方まで揃った列を頼み、届いたら選んでいた候補を選んだまま替える（D46）", () =>
+            Run("候補ウィンドウを開くと別の書き方まで揃った列を頼み、届いたら選んでいた候補を選んだまま替える（D47）", () =>
             {
                 var c = Ready();
                 Type(c, "kami", 0);

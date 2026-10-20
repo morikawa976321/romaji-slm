@@ -8,7 +8,7 @@ POST /convert[?mode=first|full][&prefetch=1]
                mode=first は 1 位と読みの候補だけで返し、そのあと暇なうちに候補ウィンドウの別の書き方を足しておく。
                mode=full（既定）は別の書き方まで揃った列（core.window.nbest と同じ）。1 位はどちらも同じ。
                prefetch=1 の要求は、後から別の要求が来たら forward の切れ目でやめて 409 を返す（打っている途中の先読み。
-               確定の要求には付けない）。docs/decisions.md D46
+               確定の要求には付けない）。docs/decisions.md D47
 GET  /health   "ok <版>"（読み込みが終わるまで応答しない）
 
 入力の文字列はログにも標準出力にも残さない（パスワード欄で誤って押された打鍵も来うる）。
@@ -76,7 +76,7 @@ def format_response(ms: float, cands: list[str]) -> bytes:
 
 class Lists:
     """常駐入力の候補の列。打鍵列と左文脈ごとに、候補の集まり（core.window.Pool）を最近の分だけ取っておく。
-    first は 1 位と読みの候補だけ、full は別の書き方を足した列で、full は core.window.nbest と同じ（D46）。"""
+    first は 1 位と読みの候補だけ、full は別の書き方を足した列で、full は core.window.nbest と同じ（D47）。"""
 
     KEEP = 16
 
@@ -248,7 +248,7 @@ def main(argv=None):
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(convert, ready, idle))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
-    from core.pipeline import CorePipeline  # 既定は本人の選択（句読点 B・英字は打ったまま。docs/decisions.md D14）
+    from core.pipeline import CorePipeline  # 既定は本人の選択（句読点は自動で足さない D47・英字は打ったまま D14。docs/decisions.md）
     device = pick_device(args.device)
     t0 = time.perf_counter()
     from core.userdict import default_path, load as load_user
