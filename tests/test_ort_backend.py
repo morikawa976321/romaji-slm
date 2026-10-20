@@ -168,3 +168,41 @@ def test_window_alternatives_use_ort(ort, tiny_model, dic, torch_device, monkeyp
         for x, y in zip(a.entries, b.entries):
             assert y.score == pytest.approx(x.score, abs=1e-3)
         assert hf.convert_nbest(romaji) == ox.convert_nbest(romaji)
+
+
+def test_lists_first_then_full_matches_nbest(ort, tiny_model, dic, monkeypatch):
+    # 常駐入力（ime/server.py の Lists）: 最初の応答は 1 位と読みの候補だけ、後から別の書き方を足すと convert_nbest と同じ列
+    pytest.importorskip("wordfreq")
+    from core.pipeline import CorePipeline
+    from ime.server import Lists
+    monkeypatch.setattr(Dictionary, "load", classmethod(lambda cls, *a, **k: dic))
+    ox = CorePipeline(k=3, punct="insert", backend=ort)
+    for romaji in ["kyouhatenki", "kyou", "tenki"]:
+        for lc in LEFT_CONTEXTS:
+            lists = Lists(ox, "merge")
+            first, full = lists.first(romaji, lc), lists.full(romaji, lc)
+            assert full == ox.convert_nbest(romaji, lc)
+            assert first and first[0] == full[0]
+            assert Lists(ox, "merge").full(romaji, lc) == full   # 最初から full を頼んでも同じ
+            assert Lists(ox, "reading").first(romaji, lc) == ox.convert_nbest(romaji, lc, order="reading")
+
+
+def test_cancel_stops_ort_and_is_not_swallowed(ort, dic, monkeypatch):
+    pytest.importorskip("wordfreq")
+    from core import cancel, window
+    from core.pipeline import CorePipeline
+    with pytest.raises(cancel.Cancelled), cancel.scope(lambda: True):
+        ort.decode_batch(READINGS, dic, "")
+    monkeypatch.setattr(Dictionary, "load", classmethod(lambda cls, *a, **k: dic))
+    ox = CorePipeline(k=3, punct="insert", backend=ort)
+    for romaji in ["kyouhatenki", "kyou", "tenki"]:
+        pl = window.pool(ox, romaji, alts=False)
+        if len(window.pool(ox, romaji, alts=True).entries) == len(pl.entries):
+            continue   # 別の書き方が無い（採点しない）
+        with pytest.raises(cancel.Cancelled), cancel.scope(lambda: True):
+            window.add_alternatives(ox, pl)   # 別の書き方の失敗を握りつぶす所に拾われない
+        assert not pl.alts
+        window.add_alternatives(ox, pl)
+        assert pl.alts
+        return
+    pytest.skip("極小の辞書で別の書き方が出る打鍵列が無い")

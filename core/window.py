@@ -54,6 +54,9 @@ class Pool:
     hira: Entry | None           # 最後の枠: 1 位の読みのひらがな
     entries: list[Entry]         # 1 位以外。読みの候補は点数順、別の書き方は点数順
     ms: dict = field(default_factory=dict)   # 段ごとの所要（candidates / alt）
+    best: dict | None = None     # 1 位の候補（CorePipeline.candidates の 1 件。別の書き方を後から足すときに使う）
+    end: str = ""                # 1 位が文末に補った記号（2 位以下にも同じく付ける）
+    alts: bool = False           # 別の書き方を足し終えたか（add_alternatives）
 
 
 # 幅の対（全角, 半角）。別の書き方の幅を 1 位に揃える
@@ -141,7 +144,9 @@ def alternatives(p, best: dict, left_context: str = "", end: str = "", n_alt: in
 
 def pool(p, romaji: str, left_context: str = "", alts: bool = True, n_alt: int = N_ALT,
          strict: bool = False) -> Pool | None:
-    """窓に並べうる候補を集める。alts=False なら読みの候補だけ（2026-10-18 までと同じ計算）。
+    """窓に並べうる候補を集める。alts=False なら読みの候補だけ（2026-10-18 までと同じ計算）。後から add_alternatives で
+    別の書き方を足すと、alts=True と同じ中身になる（常駐入力は最初の応答を読みの候補だけで返し、別の書き方は暇なときか
+    候補ウィンドウを開いたときに足す。docs/decisions.md D46）。
     strict=True なら別の書き方の失敗をそのまま投げる（評価で、失敗を候補が無かったことと取り違えないため）。"""
     t0 = time.perf_counter()
     cands = p.candidates(romaji, left_context)
@@ -158,15 +163,32 @@ def pool(p, romaji: str, left_context: str = "", alts: bool = True, n_alt: int =
                for c in cands[1:] if c["score"] != float("-inf")]
     hira_text = _with_end("".join(chr(ord(ch) - 0x60) if "ァ" <= ch <= "ヶ" else ch for ch in best["reading"]), end)
     hira = Entry(hira_text, float("-inf"), "hira", best["reading"], bool(best["edits"])) if hira_text else None
-    if alts and best["score"] != float("-inf"):
+    pl = Pool(first, hira, entries, {"candidates": (t1 - t0) * 1000, "alt": 0.0}, best, end)
+    if alts:
+        add_alternatives(p, pl, left_context, n_alt, strict)
+    return pl
+
+
+def add_alternatives(p, pl: Pool, left_context: str = "", n_alt: int = N_ALT, strict: bool = False) -> Pool:
+    """pool(alts=False) の結果に 1 位の読みの別の書き方を足す（2 回目からは何もしない）。left_context は pool と同じものを渡す。"""
+    if pl.alts:
+        return pl
+    t1 = time.perf_counter()
+    if pl.best["score"] != float("-inf"):
         try:
-            entries += alternatives(p, best, left_context, end, n_alt)
+            pl.entries += alternatives(p, pl.best, left_context, pl.end, n_alt)
         except Exception as e:  # 別の書き方を諦めても、1 位と読みの候補は返す（常駐の変換を失敗にしない）
             if strict:
                 raise
             print(f"window: alternatives failed: {type(e).__name__}", file=sys.stderr, flush=True)  # 入力の文字列は出さない
-    t2 = time.perf_counter()
-    return Pool(first, hira, entries, {"candidates": (t1 - t0) * 1000, "alt": (t2 - t1) * 1000})
+    pl.alts = True
+    pl.ms["alt"] = (time.perf_counter() - t1) * 1000
+    return pl
+
+
+def texts(pl: Pool, order: str = DEFAULT_ORDER, n: int = 6, edit_slots: int | None = None) -> list[str]:
+    """窓の中身の文の列（nbest と同じ並べ方）。"""
+    return [e.text for e in arrange(pl, order, n, EDIT_SLOTS if edit_slots is None else edit_slots)]
 
 
 def arrange(pl: Pool, order: str = DEFAULT_ORDER, n: int = 6, edit_slots: int = 1) -> list[Entry]:
@@ -213,6 +235,4 @@ def nbest(p, romaji: str, left_context: str = "", n: int = 6, order: str = DEFAU
           edit_slots: int | None = None) -> list[str]:
     """常駐の入力が次候補に使う、重複のない候補の列。1 位は convert と同じ文。edit_slots は quota の枠（None で EDIT_SLOTS）。"""
     pl = pool(p, romaji, left_context, alts=order != "reading")
-    if pl is None:
-        return []
-    return [e.text for e in arrange(pl, order, n, EDIT_SLOTS if edit_slots is None else edit_slots)]
+    return [] if pl is None else texts(pl, order, n, edit_slots)

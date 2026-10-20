@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import cancel
 from .constrained import Decoded, LatticeMatcher, _char_bounds, bytes_to_unicode
 from .kanakanji import Dictionary
 from .pipeline import CorePipeline
@@ -151,6 +152,7 @@ class OrtBackend:
             so.intra_op_num_threads = threads
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self.sess = ort.InferenceSession(str(path), so, providers=["CPUExecutionProvider"])
+        self._ort = ort
         self.tok = AutoTokenizer.from_pretrained(model)
         dec = {c: b for b, c in bytes_to_unicode().items()}
         self.tok_bytes = [bytes(dec[ch] for ch in t) if t is not None else b""
@@ -167,7 +169,21 @@ class OrtBackend:
         self.n_params = 0
 
     def _run(self, ids, pos, mask, pk, pv):
-        out = self.sess.run(None, {"ids": ids, "pos": pos, "mask": mask, **dict(zip(self._pk, pk)), **dict(zip(self._pv, pv))})
+        # 常駐入力の古い先読みは、forward の前と、走っている forward の途中（RunOptions.terminate）でやめる（core.cancel）
+        cancel.check()
+        feed = {"ids": ids, "pos": pos, "mask": mask, **dict(zip(self._pk, pk)), **dict(zip(self._pv, pv))}
+        stale = cancel.stopper()
+        if stale is None:
+            out = self.sess.run(None, feed)
+        else:
+            ro = self._ort.RunOptions()
+            with cancel.running(stale, lambda: setattr(ro, "terminate", True)):
+                try:
+                    out = self.sess.run(None, feed, ro)
+                except Exception:
+                    if ro.terminate:
+                        raise cancel.Cancelled from None
+                    raise
         return out[0], out[1:1 + self.L], out[1 + self.L:]
 
     def _empty(self, B: int) -> list[np.ndarray]:

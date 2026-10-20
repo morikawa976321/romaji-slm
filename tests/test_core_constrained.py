@@ -197,3 +197,12 @@ def test_render_en_case():
     # 辞書語の表層（アイフォン→iPhone）の中の同じ綴りは拾わない: 語の切れ目に揃う出現だけを置き換える
     r2 = Reading((Seg("kana", 0, 5, "アイフォン"), Seg("en", 5, 6, "i", ("i",))))
     assert render_en_case("iPhonei", r2, "auto", bounds=(6,)) == "iPhoneI"
+
+
+def test_decode_stops_when_cancelled(cz, dic):
+    # 常駐入力の古い先読みは、生成の 1 手ごとに確かめてやめる（core.cancel）
+    from core import cancel
+    with pytest.raises(cancel.Cancelled), cancel.scope(lambda: True):
+        cz.decode_batch([_kana("キョウ")], dic, "")
+    with cancel.scope(lambda: False):
+        assert cz.decode_batch([_kana("キョウ")], dic, "")

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from eval.prompts import CONTEXT, INPUT, OUTPUT
 
+from .cancel import check as _check_cancel
 from .types import Conversion
 
 MOZC_COST_SCALE = 500.0
@@ -72,6 +73,7 @@ class ZenzScorer:
                 ids[r, :len(s)] = torch.tensor(s)
                 mask[r, :len(s)] = 1
             ids, mask = ids.to(self.device), mask.to(self.device)
+            _check_cancel()
             with torch.no_grad():
                 logp = torch.log_softmax(self.model(input_ids=ids, attention_mask=mask).logits.float(), dim=-1)
             for r, (s, n_p) in enumerate(chunk):

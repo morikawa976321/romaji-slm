@@ -81,7 +81,7 @@ pwsh -NoProfile -File ime/uninstall.ps1
 - 設定は `%LOCALAPPDATA%\romaji-slm\ime.ini` にある（`device=auto|cuda|cpu`、`port`、前回の on/off、`threads`）。変えたらトレイの「終了」から起動し直す。
   `threads` は変換の CPU のスレッド数（ONNX Runtime 版と、GPU のときの torch の CPU 側）で、既定 4（本人の決定。D42）。0 なら実行系の既定（論理コア数）で、ほかの処理が CPU を使っていると変換が極端に遅くなり、変換のたびに全コアを埋める。スレッド数を変えても変換結果は変わらない。サーバの起動の記録（`server.log` の `ready in` の行）に `threads=` が出る。
   `engine` は変換の実行方式で、既定 `auto` は GPU（CUDA）があれば torch、無ければ ONNX Runtime 版（`core/ort_backend.py`）を使う（本人の決定。D43）。ONNX 版は torch 版と変換結果も候補の並び（候補ウィンドウの別の書き方を含む）も同じで、CPU では速い。`onnx` で決め打ちできる。`torch` は GPU のときだけで、GPU が無ければ ONNX 版で動く（torch の CPU の経路は削除した。D44）。ONNX 版は初回の起動で zenz を `app\models\onnx\` に書き出す（380 MB、20〜40 秒。書き出した結果を torch と照らしてから使う。書き出しの形を変えた版では次の起動で書き出し直し、古いファイルは消す）。ONNX 版が使えないとき（onnxruntime が無い、書き出しに失敗した）は、GPU があれば torch 版で動き、無ければ変換サーバは起動に失敗する（記録に理由が出る）。記録の `ready in` の行に `engine=` が出る。
-- **実利用の記録**（本人の依頼）: `%LOCALAPPDATA%\romaji-slm\history.jsonl` に 1 行 1 件の JSON で残す。残すのは、確定（`commit`）・Esc で捨てた文（`cancel`）・変換や送信に失敗して浮き窓に戻した文（`restore`）。項目は `time` `event` `romaji`（打った打鍵列） `context`（左文脈） `candidates`（出ていた候補） `chosen`（選んだ番号。1 位なら 0、打鍵列のままなら -1） `text`（入れた文） `raw` `app`（入力先の exe 名） `note`、確定の直後に Backspace で消して打ち直したときは `retype`（`backspaces` 消した字数、`prev_text` `prev_romaji` 直前の確定）。パスワード欄の打鍵は変換せずにそのまま送るので残らない。確定した後にアプリの中で直した結果は見えない。止めるには `ime.ini` を `history=0` にする。30 日を過ぎた行は常駐アプリが消し（起動時と 1 時間ごと）、振り返り済みの行は振り返りの道具が消す（REVIEW.md「消すこと」）。`no_history_apps` に並べたアプリ（既定はパスワード管理のアプリ）は記録しない。
+- **実利用の記録**（本人の依頼）: `%LOCALAPPDATA%\romaji-slm\history.jsonl` に 1 行 1 件の JSON で残す。残すのは、確定（`commit`）・Esc で捨てた文（`cancel`）・変換や送信に失敗して浮き窓に戻した文（`restore`）。項目は `time` `event` `romaji`（打った打鍵列） `context`（左文脈） `candidates`（出ていた候補。2026-10-20 からは、候補ウィンドウを開かなかった文は 1 位と読みの候補だけ。D46） `chosen`（選んだ番号。1 位なら 0、打鍵列のままなら -1） `text`（入れた文） `raw` `app`（入力先の exe 名） `note`、確定の直後に Backspace で消して打ち直したときは `retype`（`backspaces` 消した字数、`prev_text` `prev_romaji` 直前の確定）。パスワード欄の打鍵は変換せずにそのまま送るので残らない。確定した後にアプリの中で直した結果は見えない。止めるには `ime.ini` を `history=0` にする。30 日を過ぎた行は常駐アプリが消し（起動時と 1 時間ごと）、振り返り済みの行は振り返りの道具が消す（REVIEW.md「消すこと」）。`no_history_apps` に並べたアプリ（既定はパスワード管理のアプリ）は記録しない。
 - サーバのログは `server.log`（打った文字列は残さない）。
 - 診断: `ime-state.txt`（5 秒ごとの状態。モード・確認待ち・フックの呼ばれた回数と最後に呼ばれてからの時間など）と `ime-debug.log`（モードの変化・欄の確認の結果・フックの付け直し・浮き窓の知らせ）。どちらも打った文字は書かない。
 - フックの見張り: キーボードの Raw Input（`RIDEV_INPUTSINK`）にはキーが届いているのに、フックが 1.5 秒呼ばれていなければ、Windows がフックを外したとみなして付け直す（10 秒に 1 回まで）。管理者権限の窓が前面の間も付け直しが起きうるが、害はない。トレイの「使用状況をコピー」で、確定の回数・別候補を選んだ回数・待ち時間の中央値・アプリ別の回数を、貼れる文にして出す。数だけで、文字列は持たない。
@@ -130,10 +130,16 @@ ThinkPad で上から順になぞる手順書は [THINKPAD.md](THINKPAD.md)。
 キー ─ 低レベルキーボードフック（ime/RomajiSlmIme.cs）─ Composer（ime/Composer.cs、状態機械）
                                                          │ 変換の要求（HTTP、127.0.0.1:8767）
                                                          ▼
-                                               ime/server.py（CorePipeline.convert_nbest、GPU があれば GPU）
+                                               ime/server.py（core.window の候補の列。GPU があれば torch、無ければ ONNX Runtime 版）
 確定 ─ SendInput(KEYEVENTF_UNICODE) で 1 回で送る
 ```
 
+- **変換の要求**（本人の決定 2026-10-20、D46）: 打鍵が 120 ms 止まると、今の打鍵列の 1 位と読みの候補だけを頼む
+  （`/convert?mode=first&prefetch=1`）。候補ウィンドウの別の書き方は、サーバが応答したあと暇なうちに揃えておく。
+  走っている先読みより新しい打鍵列を出せるようになったら新しい方を送り、サーバは古い方を forward の切れ目
+  （ONNX 版は実行の途中）でやめて 409 を返す。確定の要求（Enter）はやめない。確定を待つ文は、別の打鍵列の先読みを置き換えて頼む。
+  候補ウィンドウを開くと別の書き方まで揃った列を頼み（`mode=full`。暇なうちに揃っていればすぐ返る）、届いたら選んでいた候補を
+  選んだまま替える。揃った列は、以前の 1 回で揃える列（core.window.nbest）と同じ。1 位はどちらの列も同じ。
 - フックの中では状態の更新だけをする。通信・描画・MS-IME の開閉は、フックを抜けてから行う。フックの処理が遅いと、Windows が黙ってフックを外すため（LowLevelHooksTimeout）。
 - 変換サーバはトレイアプリが起動する。トレイアプリがジョブオブジェクト（KILL_ON_JOB_CLOSE）で抱えるので、トレイアプリが落ちてもサーバは残らない。サーバが落ちたら 3 回まで起動し直す。
 - **確定待ちの間の打鍵**: Enter を押してから確定文を実際に送り終えるまで（〜0.3 秒）に、アプリへ渡すはずのキー（2 度目の Enter・矢印・英字・Ctrl+C などの修飾キーつき）が押されることがある。これはその場では渡さずに積み、確定文のあとに同じ順で、1 回の `SendInput` で送る。先に渡すと、チャットで確定文より先に送信が起きる。積んだ修飾キーは OS に届いていないので、修飾キーの状態はフックで自分で追う。

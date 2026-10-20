@@ -48,10 +48,13 @@ namespace RomajiSlm
     public sealed class DeliverEffect : Effect { }
     /// 待ち行列を戻したときに送る離鍵（押下は捨てたので、離鍵だけ届けてアプリのキー状態を揃える）
     public sealed class ReplayEffect : Effect { public List<KeyEv> Keys; public ReplayEffect(List<KeyEv> k) { Keys = k; } }
+    /// 変換の要求。Prefetch: 打っている途中の先読み・候補ウィンドウの列（サーバは後から来た要求があればやめる。確定の要求は false）。
+    /// Full: 候補ウィンドウの別の書き方まで揃った列（false なら 1 位と読みの候補だけで速く返る。docs/decisions.md D46）
     public sealed class RequestEffect : Effect
     {
-        public int Id; public string Romaji, Context;
-        public RequestEffect(int id, string r, string c) { Id = id; Romaji = r; Context = c; }
+        public int Id; public string Romaji, Context; public bool Prefetch, Full;
+        public RequestEffect(int id, string r, string c, bool prefetch = false, bool full = true)
+        { Id = id; Romaji = r; Context = c; Prefetch = prefetch; Full = full; }
     }
     /// MS-IME の開閉。Window は要求したときの前面の窓（遅れて実行しても宛先を変えない）
     public sealed class SetImeEffect : Effect { public bool Open; public IntPtr Window; public SetImeEffect(bool o, IntPtr w) { Open = o; Window = w; } }
@@ -123,6 +126,10 @@ namespace RomajiSlm
         readonly List<Effect> effects = new List<Effect>();
         readonly Dictionary<string, string[]> cache = new Dictionary<string, string[]>();
         readonly Queue<string> cacheOrder = new Queue<string>();
+        // cache のうち、別の書き方まで揃った列（候補ウィンドウ用）と、揃えるのに失敗した列（もう頼まない）
+        readonly HashSet<string> fullKeys = new HashSet<string>(), fullFailed = new HashSet<string>();
+        // 応答を待っている要求。置き換えた古い先読みの応答も、届けば cache に入れる（打ち戻したときに使える）
+        readonly Dictionary<int, Pending> outstanding = new Dictionary<int, Pending>();
         readonly Dictionary<string, string> failed = new Dictionary<string, string>();
         readonly List<Entry> queue = new List<Entry>();
         readonly List<Entry> taken = new List<Entry>();   // TakeReady で渡し、結果を待っている分
@@ -147,7 +154,7 @@ namespace RomajiSlm
         // フォーカスの通知を出さないアプリ（focus が空）では欄の移動が分からないので、未確定の文が終わるたびに消す
         bool verified;
         readonly List<HeldKey> fieldHold = new List<HeldKey>();   // 欄の確認が済むまで預かった打鍵
-        Pending inflight;
+        Pending inflight;   // いちばん新しい要求。先読みなら、もっと新しい打鍵列を出すときに置き換える（古い方はサーバがやめる）
 
         sealed class Item
         {
@@ -156,7 +163,7 @@ namespace RomajiSlm
         }
         sealed class Entry { public Item Commit; public KeyEv Key; public bool Moves; }   // Moves: 欄を移しうるキーの押下
         sealed class HeldKey { public KeyEv Ev; public Mods M; public long At; }
-        sealed class Pending { public int Id; public string Key; public long SentAt; }
+        sealed class Pending { public int Id; public string Key; public long SentAt; public bool Prefetch, Full; }
 
         public string Buffer { get { return buf.ToString(); } }
         public bool Composing { get { return buf.Length > 0; } }
@@ -644,6 +651,12 @@ namespace RomajiSlm
         {
             if (inflight != null && now - inflight.SentAt > TimeoutMs)
                 OnResult(inflight.Id, null, "時間切れ", now);
+            if (outstanding.Count > (inflight != null ? 1 : 0))
+            {
+                var gone = new List<int>();   // 置き換えた古い要求で、応答の来ないもの
+                foreach (var kv in outstanding) if (kv.Value != inflight && now - kv.Value.SentAt > TimeoutMs) gone.Add(kv.Key);
+                foreach (var g in gone) outstanding.Remove(g);
+            }
             foreach (var e in queue)
             {
                 if (e.Commit == null || e.Commit.Text != null) continue;
@@ -657,51 +670,82 @@ namespace RomajiSlm
         {
             // 欄の確認で預かっている間も、それより前に確定した文の変換は進める（止めると、その確定を待つ欄を移すキーと
             // 互いに待ち合って止まる）。預かった打鍵は浮き窓に入っていないので、止めるのは今の未確定文の先読みだけ
-            if (inflight != null || !ServerReady || taken.Count > 0) return;
+            if (!ServerReady || taken.Count > 0) return;
             foreach (var e in queue)
             {
                 if (e.Commit == null) continue;
                 // 変換済みでまだ送っていない確定が前にあれば、送り終えて左文脈に入るまで次を要求しない
                 if (e.Commit.Text != null) return;
-                Send(e.Commit.Romaji, now);
+                // 確定を待つ文: 同じ打鍵列の要求が走っていればその応答で決まる。走っているのが別の打鍵列の先読みなら置き換える
+                if (inflight != null && (!inflight.Prefetch || inflight.Key == Key(e.Commit.Romaji, context))) return;
+                Send(e.Commit.Romaji, now, false, false);
                 return;
             }
             if (buf.Length == 0 || FieldPending) return;
             string k = Key(buf.ToString(), context);
-            if (cache.ContainsKey(k) || failed.ContainsKey(k)) return;
+            if (failed.ContainsKey(k)) return;
+            // 打っている途中は 1 位と読みの候補だけを頼む。候補ウィンドウを開いたら、別の書き方まで揃った列を頼む（D46）
+            bool wantFull = Phase == Phase.Candidates && !fullKeys.Contains(k) && !fullFailed.Contains(k);
+            if (cache.ContainsKey(k) && !wantFull) return;
+            // 走っている要求: 確定の要求は置き換えない。同じ打鍵列ならその応答を待つ。別の打鍵列の先読みなら置き換える（D46）
+            if (inflight != null && (!inflight.Prefetch || inflight.Key == k)) return;
             if (Phase == Phase.Candidates || now - lastKeyAt >= DebounceMs)
-                Send(buf.ToString(), now);
+                Send(buf.ToString(), now, true, Phase == Phase.Candidates);
         }
 
-        void Send(string romaji, long now)
+        void Send(string romaji, long now, bool prefetch, bool full)
         {
-            inflight = new Pending { Id = nextId++, Key = Key(romaji, context), SentAt = now };
-            effects.Add(new RequestEffect(inflight.Id, romaji, context));
+            inflight = new Pending { Id = nextId++, Key = Key(romaji, context), SentAt = now, Prefetch = prefetch, Full = full };
+            outstanding[inflight.Id] = inflight;
+            effects.Add(new RequestEffect(inflight.Id, romaji, context, prefetch, full));
             effects.Add(new RedrawEffect());
         }
 
         /// 変換の応答。cands が null なら失敗（error に理由）
         public void OnResult(int id, string[] cands, string error, long now)
         {
-            if (inflight == null || inflight.Id != id) return;
-            string k = inflight.Key;
-            inflight = null;
+            Pending p;
+            if (!outstanding.TryGetValue(id, out p)) return;
+            outstanding.Remove(id);
+            bool current = inflight == p;
+            if (current) inflight = null;
+            string k = p.Key;
             bool ok = cands != null && cands.Length > 0;
+            // 揃った列を頼んで失敗しても、出ている 1 位と読みの候補はそのまま使う（もう頼まない）
+            bool fullOnly = p.Full && cache.ContainsKey(k);
             if (ok)
             {
-                cache[k] = cands;
-                cacheOrder.Enqueue(k);
-                while (cacheOrder.Count > 64) cache.Remove(cacheOrder.Dequeue());
+                if (p.Full || !fullKeys.Contains(k))   // 揃った列を、後から届いた 1 位と読みの候補だけの列で上書きしない
+                {
+                    // 候補ウィンドウに出ている列を揃った列に替えるときは、選んでいた候補を選んだままにする（1 位は同じ）
+                    var shown = Candidates;
+                    string sel = Phase == Phase.Candidates && shown != null && Key(buf.ToString(), context) == k
+                        ? shown[Math.Min(CandIndex, shown.Length - 1)] : null;
+                    if (!cache.ContainsKey(k))
+                    {
+                        cacheOrder.Enqueue(k);
+                        while (cacheOrder.Count > 64)
+                        {
+                            var old = cacheOrder.Dequeue();
+                            cache.Remove(old); fullKeys.Remove(old); fullFailed.Remove(old);
+                        }
+                    }
+                    cache[k] = cands;
+                    if (p.Full) fullKeys.Add(k);
+                    if (sel != null) { int i = Array.IndexOf(cands, sel); CandIndex = i >= 0 ? i : Math.Min(CandIndex, cands.Length - 1); }
+                }
                 failed.Remove(k);
             }
-            else
+            else if (current && fullOnly) fullFailed.Add(k);
+            else if (current)
             {
                 failed[k] = error ?? "候補なし";
                 effects.Add(new StatEffect("fail", 1));
             }
+            // 置き換えた古い要求の失敗（サーバがやめた）は何もしない
             Item head = null;
             foreach (var e in queue) if (e.Commit != null && e.Commit.Text == null) { head = e.Commit; break; }
-            if (head != null && Key(head.Romaji, context) == k)
+            if (head != null && Key(head.Romaji, context) == k && (ok || (current && !fullOnly)))
             {
                 if (ok) { head.Text = cands[0]; head.Cands = cands; head.Context = context; }
                 else

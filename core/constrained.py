@@ -7,6 +7,7 @@ N-best の再順位（core.select）は、辞書の上位 N に正解が入ら�
 
 from typing import NamedTuple
 
+from .cancel import check as _check_cancel
 from .kanakanji import Dictionary, _build_lattice
 from .select import scoring_text, zenz_prompt
 from .types import Reading
@@ -175,6 +176,7 @@ class ConstrainedZenz:
         finished = False
         bounds: list[int] = []
         for _ in range(max_new):
+            _check_cancel()
             with torch.no_grad():
                 r = model(input_ids=step_ids, past_key_values=past, use_cache=True)
             past = r.past_key_values
@@ -226,6 +228,7 @@ class ConstrainedZenz:
         bounds: list[list[int]] = [[] for _ in readings]
         step_ids, step_pos, past = ids, pos, None
         for step in range(max(limits)):
+            _check_cancel()
             with torch.no_grad():
                 r = model(input_ids=step_ids, attention_mask=mask, position_ids=step_pos,
                           past_key_values=past, use_cache=True)

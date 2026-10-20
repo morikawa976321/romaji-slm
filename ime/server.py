@@ -2,8 +2,13 @@
 
     uv run python -m ime.server [--port 8767] [--device auto|cuda|cpu] [--engine auto|torch|onnx] [--threads 4]
 
-POST /convert  本文（UTF-8）: 1 行目 = 打鍵列、2 行目以降 = 左文脈
+POST /convert[?mode=first|full][&prefetch=1]
+               本文（UTF-8）: 1 行目 = 打鍵列、2 行目以降 = 左文脈
                応答（UTF-8）: 1 行目 = 変換にかかった ms、2 行目以降 = 候補（1 位が既定の変換）
+               mode=first は 1 位と読みの候補だけで返し、そのあと暇なうちに候補ウィンドウの別の書き方を足しておく。
+               mode=full（既定）は別の書き方まで揃った列（core.window.nbest と同じ）。1 位はどちらも同じ。
+               prefetch=1 の要求は、後から別の要求が来たら forward の切れ目でやめて 409 を返す（打っている途中の先読み。
+               確定の要求には付けない）。docs/decisions.md D46
 GET  /health   "ok <版>"（読み込みが終わるまで応答しない）
 
 入力の文字列はログにも標準出力にも残さない（パスワード欄で誤って押された打鍵も来うる）。
@@ -15,8 +20,12 @@ import os
 import sys
 import threading
 import time
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+from core.cancel import Cancelled, interrupt, scope
 
 DEFAULT_PORT = 8767  # 体験版（trial/server.py）は 8765、その MockEngine 版（.claude/launch.json）は 8766
 ROOT = Path(__file__).resolve().parent.parent
@@ -65,8 +74,76 @@ def format_response(ms: float, cands: list[str]) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def make_handler(convert, ready: threading.Event):
-    lock = threading.Lock()  # torch のモデルを複数の要求で同時に動かさない
+class Lists:
+    """常駐入力の候補の列。打鍵列と左文脈ごとに、候補の集まり（core.window.Pool）を最近の分だけ取っておく。
+    first は 1 位と読みの候補だけ、full は別の書き方を足した列で、full は core.window.nbest と同じ（D46）。"""
+
+    KEEP = 16
+
+    def __init__(self, p, order: str):
+        self.p, self.order = p, order
+        self.pools: OrderedDict = OrderedDict()
+
+    def clear(self) -> None:
+        self.pools.clear()
+
+    def _pool(self, romaji: str, ctx: str):
+        from core import window
+        k = (romaji, ctx)
+        if k in self.pools:
+            self.pools.move_to_end(k)
+            return self.pools[k]
+        pl = window.pool(self.p, romaji, ctx, alts=False)
+        self.pools[k] = pl
+        while len(self.pools) > self.KEEP:
+            self.pools.popitem(last=False)
+        return pl
+
+    def first(self, romaji: str, ctx: str) -> list[str]:
+        from core import window
+        pl = self._pool(romaji, ctx)
+        return [] if pl is None else window.texts(pl, self.order)
+
+    def full(self, romaji: str, ctx: str) -> list[str]:
+        from core import window
+        pl = self._pool(romaji, ctx)
+        if pl is None:
+            return []
+        if self.order != "reading":  # reading の並べ方は別の書き方を使わない（nbest と同じ）
+            window.add_alternatives(self.p, pl, ctx)
+        return window.texts(pl, self.order)
+
+
+def make_handler(convert, ready: threading.Event, idle=None):
+    """convert(romaji, ctx, full) が候補の列を返す。idle(romaji, ctx) は mode=first の応答のあと、暇なうちに full の列を
+    用意しておく（無ければしない）。変換は同時に 1 つだけ（錠）。prefetch の要求と暇なときの用意は、後から別の要求が
+    来たらやめる（core.cancel。走っている forward も止める）。"""
+    lock = threading.Lock()  # モデルを複数の要求で同時に動かさない
+    newest = {"seq": 0, "key": None, "full": False}   # いちばん新しい要求
+    seq_lock = threading.Lock()
+
+    def arrive(key, full: bool) -> int:
+        with seq_lock:
+            newest["seq"] += 1
+            newest.update(key=key, full=full)
+            my = newest["seq"]
+        interrupt()   # もう要らなくなった変換の、走っている forward を止める
+        return my
+
+    def run_idle(my: int, romaji: str, ctx: str) -> None:
+        # 後から来た要求があればやめる。ただし同じ打鍵列の full の要求なら、ここで揃えた列をそのまま使うので続ける
+        def stale():
+            return newest["seq"] != my and not (newest["full"] and newest["key"] == (romaji, ctx))
+        try:
+            with lock:
+                if stale():
+                    return
+                with scope(stale):
+                    idle(romaji, ctx)
+        except Cancelled:
+            pass
+        except Exception as e:  # 用意できなくても、候補ウィンドウを開いたときに作り直す
+            print(f"idle: {type(e).__name__}", flush=True)
 
     class Handler(BaseHTTPRequestHandler):
         timeout = 10  # 要求を送らずに保持された接続で、他の要求と生存確認を止めない（接続ごとのスレッド＋読み取りの時間切れ）
@@ -88,20 +165,33 @@ def make_handler(convert, ready: threading.Event):
             self._send(200, f"ok {version()}".encode())
 
         def do_POST(self):
-            if self.path != "/convert":
+            url = urlsplit(self.path)
+            if url.path != "/convert":
                 return self._send(404, b"not found")
+            q = parse_qs(url.query)
+            full = q.get("mode", ["full"])[0] != "first"
+            prefetch = q.get("prefetch", ["0"])[0] == "1"
             n = int(self.headers.get("Content-Length") or 0)
             romaji, ctx = parse_request(self.rfile.read(n))
             if not romaji:
                 return self._send(400, b"empty")
+            my = arrive((romaji, ctx), full)
+            stale = (lambda: newest["seq"] != my) if prefetch else None
             ready.wait()
             t0 = time.perf_counter()
             try:
                 with lock:
-                    cands = convert(romaji, ctx)
+                    if stale is not None and stale():
+                        raise Cancelled
+                    with scope(stale):
+                        cands = convert(romaji, ctx, full)
+            except Cancelled:
+                return self._send(409, b"superseded")
             except Exception as e:  # 1 件の失敗で常駐を落とさない
                 return self._send(500, f"{type(e).__name__}".encode())
             self._send(200, format_response((time.perf_counter() - t0) * 1000, cands))
+            if not full and idle is not None and cands:
+                threading.Thread(target=run_idle, args=(my, romaji, ctx), daemon=True).start()
 
     return Handler
 
@@ -134,9 +224,13 @@ def main(argv=None):
     ready = threading.Event()
     holder = {}
 
-    def convert(romaji, ctx):
+    def convert(romaji, ctx, full):
         reload_user_dict()
-        return holder["p"].convert_nbest(romaji, ctx, order=args.window)
+        lists = holder["lists"]
+        return lists.full(romaji, ctx) if full else lists.first(romaji, ctx)
+
+    def idle(romaji, ctx):
+        holder["lists"].full(romaji, ctx)
 
     def reload_user_dict():
         """ユーザー辞書が更新されていたら読み直す（振り返りの後に再起動しなくてよいように）。変換の錠の中で呼ばれる"""
@@ -147,10 +241,11 @@ def main(argv=None):
             holder["ud_mtime"] = m
             ud = load_user(p)
             holder["p"].set_user_dict(ud)
+            holder["lists"].clear()   # 取っておいた候補の列は前の辞書で作ったもの
             print(f"user dict reloaded: en={len(ud.en)} word={len(ud.words)} fix={len(ud.fixes)} errors={len(ud.errors)}", flush=True)
 
     # 先に待ち受けを開く。トレイアプリは /health が返るまで「準備中」と表示する
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(convert, ready))
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(convert, ready, idle))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     from core.pipeline import CorePipeline  # 既定は本人の選択（句読点 B・英字は打ったまま。docs/decisions.md D14）
@@ -176,6 +271,7 @@ def main(argv=None):
         set_threads(args.threads)
         holder["p"] = CorePipeline(model=args.model, device=device, user_dict=ud)
     holder["ud_mtime"] = default_path().stat().st_mtime if default_path().exists() else 0.0
+    holder["lists"] = Lists(holder["p"], args.window)
     holder["p"].convert_nbest("konnichiha", order=args.window)  # 最初の 1 件の遅さ（CUDA の初期化・辞書の索引）を起動時に済ませる
     ready.set()
     print(f"romaji-slm ime server: 127.0.0.1:{args.port} engine={engine} device={device if engine == 'torch' else 'cpu'} "

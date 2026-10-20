@@ -650,12 +650,14 @@ namespace RomajiSlm
                 c.Tick(200);
                 var pre = Req(Drain(c, 200));   // a の先読み
                 Type(c, "b", 210);
-                Press(c, Composer.VK_RETURN, Mods.None, 211);   // ab を確定（未変換）
+                Press(c, Composer.VK_RETURN, Mods.None, 211);   // ab を確定（未変換）。a の先読みを置き換えて頼む（D46）
                 Press(c, Composer.VK_TAB, ctrl, 212);           // 確定を待つ Ctrl+Tab。離鍵から預かる
-                Drain(c, 212);
-                c.OnResult(pre.Id, new[] { "あ" }, null, 300);
-                var req = Req(Drain(c, 300));
+                var req = Req(Drain(c, 212));
                 Check(req != null && req.Romaji == "ab", "commit requested while holding: " + (req == null ? "none" : req.Romaji));
+                c.OnResult(pre.Id, new[] { "あ" }, null, 300);   // 置き換えた先読みの応答
+                Check(Req(Drain(c, 300)) == null, "no duplicate commit request");
+                c.OnResult(req.Id, new[] { "あb" }, null, 310);
+                Check(Texts(Drain(c, 310)) == "あb", "commit sent");
             });
 
             Run("欄を移しうるキーが届いてすぐの確認は、アプリが移し終えるまで待つ", () =>
@@ -920,6 +922,151 @@ namespace RomajiSlm
                 c.OnKey(Composer.VK_SPACE, true, Mods.ShiftOnly, 2, W1);
                 Check(c.OnKey(Composer.VK_SPACE, false, Mods.ShiftOnly, 3, W1), "up swallowed");
                 Check(c.Mode == Mode.English, "toggled once");
+            });
+
+            Run("打っている途中の先読みは 1 位と読みの候補だけを頼み、新しい打鍵列が出せるようになったら置き換える（D46）", () =>
+            {
+                var c = Ready();
+                Type(c, "kyou", 0);
+                c.Tick(200);
+                var r1 = Req(Drain(c, 200));
+                Check(r1 != null && r1.Romaji == "kyou" && r1.Prefetch && !r1.Full, "prefetch first only");
+                Type(c, "ha", 300);
+                c.Tick(350);
+                Check(Req(Drain(c, 350)) == null, "no request before debounce");
+                c.Tick(500);
+                var r2 = Req(Drain(c, 500));
+                Check(r2 != null && r2.Romaji == "kyouha" && r2.Prefetch && r2.Id != r1.Id, "superseded while in flight");
+                c.OnResult(r1.Id, null, "Conflict", 510);   // サーバがやめた古い先読み
+                Check(c.Error == null && c.Converting, "superseded failure ignored");
+                c.OnResult(r2.Id, new[] { "今日は" }, null, 700);
+                Check(c.Candidates != null && c.Candidates[0] == "今日は" && !c.Converting, "newest result shown");
+                Press(c, Composer.VK_BACK, Mods.None, 710);
+                Press(c, Composer.VK_BACK, Mods.None, 711);
+                Check(c.Buffer == "kyou" && c.Candidates == null, "old prefix not cached (its request was stopped)");
+            });
+
+            Run("置き換えた古い先読みでも、変換できていれば候補は取っておく", () =>
+            {
+                var c = Ready();
+                Type(c, "ame", 0);
+                c.Tick(200);
+                var r1 = Req(Drain(c, 200));
+                Type(c, "da", 300);
+                c.Tick(500);
+                var r2 = Req(Drain(c, 500));
+                c.OnResult(r1.Id, new[] { "雨" }, null, 520);   // やめる前に終わっていた
+                Check(c.Converting, "newest still in flight");
+                Press(c, Composer.VK_BACK, Mods.None, 530);
+                Press(c, Composer.VK_BACK, Mods.None, 531);
+                Check(c.Buffer == "ame" && c.Candidates != null && c.Candidates[0] == "雨", "late result cached");
+                c.OnResult(r2.Id, new[] { "雨だ" }, null, 600);
+            });
+
+            Run("確定の要求は置き換えない。確定を待つ間は次の文の先読みを出さない", () =>
+            {
+                var c = Ready();
+                Type(c, "ame", 0);
+                Press(c, Composer.VK_RETURN, Mods.None, 10);
+                var r1 = Req(Drain(c, 10));
+                Check(r1 != null && !r1.Prefetch && !r1.Full, "commit request is not prefetch");
+                Type(c, "da", 20);
+                c.Tick(500);
+                Check(Req(Drain(c, 500)) == null, "no prefetch while commit pending");
+                c.OnResult(r1.Id, new[] { "雨" }, null, 600);
+                var o = Drain(c, 600);
+                Check(Texts(o) == "雨", "sent");
+                var r2 = Req(o);
+                Check(r2 != null && r2.Romaji == "da" && r2.Prefetch, "next prefetch after commit");
+            });
+
+            Run("確定を待つ文は、別の打鍵列の先読みを置き換えて頼む", () =>
+            {
+                var c = Ready();
+                Type(c, "ame", 0);
+                c.Tick(200);
+                var r1 = Req(Drain(c, 200));
+                Type(c, "da", 300);
+                Press(c, Composer.VK_RETURN, Mods.None, 310);   // ameda を確定（ame の先読みが走っている）
+                var r2 = Req(Drain(c, 310));
+                Check(r2 != null && r2.Romaji == "ameda" && !r2.Prefetch, "commit supersedes prefetch");
+                c.OnResult(r2.Id, new[] { "雨だ" }, null, 400);
+                Check(Texts(Drain(c, 400)) == "雨だ", "sent");
+            });
+
+            Run("同じ打鍵列の先読みが走っていれば、確定はその応答で決まる", () =>
+            {
+                var c = Ready();
+                Type(c, "ame", 0);
+                c.Tick(200);
+                var r1 = Req(Drain(c, 200));
+                Press(c, Composer.VK_RETURN, Mods.None, 210);
+                Check(Req(Drain(c, 210)) == null, "no second request for the same romaji");
+                c.OnResult(r1.Id, new[] { "雨" }, null, 300);
+                Check(Texts(Drain(c, 300)) == "雨", "commit resolved by the prefetch");
+            });
+
+            Run("候補ウィンドウを開くと別の書き方まで揃った列を頼み、届いたら選んでいた候補を選んだまま替える（D46）", () =>
+            {
+                var c = Ready();
+                Type(c, "kami", 0);
+                c.Tick(200);
+                var r1 = Req(Drain(c, 200));
+                c.OnResult(r1.Id, new[] { "紙", "髪" }, null, 250);
+                Press(c, Composer.VK_SPACE, Mods.None, 300);
+                c.Tick(300);
+                var r2 = Req(Drain(c, 300));
+                Check(r2 != null && r2.Romaji == "kami" && r2.Full && r2.Prefetch, "full list requested on open");
+                Press(c, Composer.VK_SPACE, Mods.None, 310);
+                Check(c.CandIndex == 1 && c.Candidates[1] == "髪", "moving on the first list");
+                c.OnResult(r2.Id, new[] { "紙", "神", "髪" }, null, 400);
+                Check(c.Candidates.Length == 3 && c.CandIndex == 2, "selection kept");
+                c.Tick(450);
+                Check(Req(Drain(c, 450)) == null, "no more requests");
+                Press(c, Composer.VK_RETURN, Mods.None, 460);
+                Check(Texts(Drain(c, 460)) == "髪", "selected sent");
+            });
+
+            Run("何も無いうちに候補ウィンドウを開くと、すぐ揃った列を頼む", () =>
+            {
+                var c = Ready();
+                Type(c, "kami", 0);
+                Press(c, Composer.VK_SPACE, Mods.None, 10);
+                c.Tick(10);
+                var r = Req(Drain(c, 10));
+                Check(r != null && r.Full, "full requested at once");
+            });
+
+            Run("揃った列を頼んで失敗しても、出ている候補は残し、もう頼まない", () =>
+            {
+                var c = Ready();
+                Type(c, "kami", 0);
+                c.Tick(200);
+                var r1 = Req(Drain(c, 200));
+                c.OnResult(r1.Id, new[] { "紙", "髪" }, null, 250);
+                Press(c, Composer.VK_SPACE, Mods.None, 300);
+                c.Tick(300);
+                var r2 = Req(Drain(c, 300));
+                c.OnResult(r2.Id, null, "500", 350);
+                Check(c.Error == null && c.Candidates != null && c.Candidates.Length == 2, "first list kept");
+                c.Tick(500);
+                Check(Req(Drain(c, 500)) == null, "not retried");
+            });
+
+            Run("後から届いた 1 位と読みの候補だけの列で、揃った列を上書きしない", () =>
+            {
+                var c = Ready();
+                Type(c, "kami", 0);
+                c.Tick(200);
+                var r1 = Req(Drain(c, 200));
+                Press(c, Composer.VK_SPACE, Mods.None, 210);   // 1 位と読みの候補の応答の前に開いた（同じ打鍵列なので待つ）
+                c.Tick(210);
+                Check(Req(Drain(c, 210)) == null, "waits for the same romaji");
+                c.OnResult(r1.Id, new[] { "紙", "髪" }, null, 250);
+                var r2 = Req(Drain(c, 250));
+                Check(r2 != null && r2.Full, "then asks the full list");
+                c.OnResult(r2.Id, new[] { "紙", "神", "髪" }, null, 300);
+                Check(c.Candidates.Length == 3, "full list");
             });
 
             Console.WriteLine(failures == 0 ? "all passed" : failures + " failure(s)");

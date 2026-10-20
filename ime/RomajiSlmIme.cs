@@ -270,10 +270,12 @@ namespace RomajiSlm
                 return s.ReadToEnd();
         }
 
-        /// 変換。戻り値は (候補, サーバ側の ms)。失敗は例外
-        public string[] Convert(string romaji, string context, out double ms)
+        /// 変換。戻り値は (候補, サーバ側の ms)。失敗は例外（後から来た要求に置き換えられた先読みは 409）。
+        /// full: 別の書き方まで揃った列（false なら 1 位と読みの候補だけ）。prefetch: 後から来た要求があればサーバがやめてよい（D46）
+        public string[] Convert(string romaji, string context, bool full, bool prefetch, out double ms)
         {
-            var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + cfg.Port + "/convert");
+            var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + cfg.Port + "/convert?mode=" + (full ? "full" : "first") +
+                                                        (prefetch ? "&prefetch=1" : ""));
             req.Proxy = null;
             req.Method = "POST";
             req.Timeout = 15000;
@@ -1152,13 +1154,14 @@ namespace RomajiSlm
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 string[] cands = null; string err = null; double ms;
-                try { cands = server.Convert(r.Romaji, r.Context, out ms); }
+                try { cands = server.Convert(r.Romaji, r.Context, r.Full, r.Prefetch, out ms); }
                 catch (WebException ex) { err = ex.Response != null ? ((HttpWebResponse)ex.Response).StatusCode.ToString() : ex.Status.ToString(); }
                 catch (Exception ex) { err = ex.GetType().Name; }
                 popup.BeginInvoke((Action)(() =>
                 {
                     long t0;
-                    if (sentAt.TryGetValue(r.Id, out t0)) { usage.Latency(Now - t0); sentAt.Remove(r.Id); }
+                    // 待ちの記録は変換できた要求だけ（置き換えてサーバがやめた先読みは、すぐ 409 で返るので数えない）
+                    if (sentAt.TryGetValue(r.Id, out t0)) { if (cands != null) usage.Latency(Now - t0); sentAt.Remove(r.Id); }
                     comp.OnResult(r.Id, cands, err, Now);
                     Run();
                 }));
@@ -1380,7 +1383,7 @@ namespace RomajiSlm
                                 double ms;
                                 var t0 = clock.ElapsedMilliseconds;
                                 string[] c = null; string err = null;
-                                try { c = server.Convert(req.Romaji, req.Context, out ms); } catch (Exception ex) { err = ex.Message; }
+                                try { c = server.Convert(req.Romaji, req.Context, req.Full, req.Prefetch, out ms); } catch (Exception ex) { err = ex.Message; }
                                 comp.OnResult(req.Id, c, err, clock.ElapsedMilliseconds);
                                 Console.WriteLine("wall " + (clock.ElapsedMilliseconds - t0) + " ms");
                             }
