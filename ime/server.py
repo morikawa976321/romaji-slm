@@ -248,7 +248,7 @@ def main(argv=None):
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(convert, ready, idle))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
-    from core.pipeline import CorePipeline  # 既定は本人の選択（句読点は自動で足さない D47・英字は打ったまま D14。docs/decisions.md）
+    from core.pipeline import CorePipeline  # 既定は本人の選択（句読点は自動で足さない D48・英字は打ったまま D14。docs/decisions.md）
     device = pick_device(args.device)
     t0 = time.perf_counter()
     from core.userdict import default_path, load as load_user

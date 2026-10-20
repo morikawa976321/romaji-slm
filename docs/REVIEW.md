@@ -41,7 +41,7 @@
 5. **確かめる**: 今の辞書と、提案を足した辞書の 2 通りで評価し、`eval.diff` で比べる（GPU があれば `--device cuda`）。
    - 提案を足した辞書は `review\<日付>\candidate_dict.tsv`。今の `user_dict.tsv` に `proposed.tsv` を足したもの。
    - 評価するセット: `user_style`、`file:eval/sets/gen_test.jsonl`、`ajimee`、`file:eval/sets/synth_user.jsonl`、`file:%LOCALAPPDATA%\romaji-slm\review\real_local.jsonl`。
-   - 変換器の指定: `core:p=insert,e=typed,ud=<辞書のパス>`（`ud` を付けない回が「今の辞書なし」の基準。今の辞書がある回は `ud=<user_dict.tsv>` も）。
+   - 変換器の指定: `core:e=typed,ud=<辞書のパス>`（常駐と同じ設定。句読点は自動で足さない、D48。2 回目・3 回目の記録は `p=insert` だった。`ud` を付けない回が「今の辞書なし」の基準。今の辞書がある回は `ud=<user_dict.tsv>` も）。
    - **採る条件**: user_style・gen_test・AJIMEE・synth_user で「正常入力で新たに壊れた」が 0 件。かつ、real_local で改善がある。新たに壊れた文が出たら、その原因の行を proposed.tsv から外して確かめ直す。
 6. **入れる**: 条件を満たした行だけを `uv run python -m tools.review_history merge review\<日付>\proposed.tsv` で `user_dict.tsv` に足す（控えが `user_dict.<時刻>.bak` に残る）。
 7. **マーカーを進める**: `uv run python -m tools.review_history mark <1 で控えた until> --note "<一言>"`。このとき道具が、振り返り済みの行（history.jsonl のマーカー以前）、作業フォルダ（review\<日付>\）、リポジトリの eval/out の real_local の評価結果、90 日を過ぎた評価の組を消す。消えて困るものは、この前に辞書と記録へ移しておく。

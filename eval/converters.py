@@ -168,7 +168,7 @@ def make_converter(name: str, device: str = "cuda", model: str | None = None,
         opts = dict(kv.split("=") for kv in name.partition(":")[2].split(",") if kv)
         # p=auto|ja|ascii|insert（句読点）、e=zenz|typed|registered|auto（英字の表記）、tc/te/tq=句読点 B の閾値（読点・句点・疑問符）
         kw = dict(k=int(opts.get("k", 5)), w_read=float(opts.get("w", 4.0)), w_flu=float(opts.get("f", 1.0)),
-                  punct=opts.get("p", "auto"),  # 評価の既定は auto のまま（過去の表と比べるため。本人の既定は insert）
+                  punct=opts.get("p", "auto"),  # 常駐入力の既定と同じ auto（D48。句読点 B は p=insert）
                   en_case=opts.get("e", "typed"), tau_comma=float(opts.get("tc", -0.5)),
                   tau_end=float(opts.get("te", -6.0)), tau_q=float(opts.get("tq", -5.0)), name=name,
                   preselect=opts.get("ps", "1") == "1",  # ps=0 で読み段の上位をそのまま使う（D18 以前の振る舞い）

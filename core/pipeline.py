@@ -115,13 +115,14 @@ class CorePipeline:
     # 既定値は user_style・gen_test・AJIMEE で比べて決めた（docs/EVAL.md「完成文の自然さ」。w_read/w_flu の比が効く）
     def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", device: str = "cuda", k: int = 5,
                  n_read: int = 20, w_read: float = 4.0, w_flu: float = 1.0, name: str | None = None,
-                 batched: bool = True, punct: str = "insert", en_case: str = "typed",
+                 batched: bool = True, punct: str = "auto", en_case: str = "typed",
                  tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None,
                  preselect: bool = True, n_pre: int = 30, punct_end: bool = False, user_dict=None,
                  max_tries: int = 2000, comma_tail: bool = True, comma_min_len: int = 10):
         """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
         punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
-        既定の punct="insert"・en_case="typed" は本人の選択（docs/decisions.md「本人の回答」2026-10-15）。
+        既定は punct="auto"（句読点は自動で足さず、打った句読点の全角・半角だけを zenz が選ぶ。本人の決定、docs/decisions.md D48）と
+        en_case="typed"（本人の選択、D14）。ラティスでは insert と auto は同じなので、insert との違いは補うかどうかだけ。
         tau_comma / tau_end / tau_q: 読点・句点・疑問符の挿入1つあたりに自然さから引く閾値（負なら挿入を促す）。
         既定値は user_style の句読点を打たない版で決めた（EVAL.md「句読点 B」。te=-6 で句点の再現率 0.79・適合率 0.98。
         Wikipedia の断片（gen_test omit_punct）では文末に句点を付けすぎるが、本人の用途は完結した文なのでこちらに寄せた）。

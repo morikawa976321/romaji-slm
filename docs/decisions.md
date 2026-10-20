@@ -779,3 +779,16 @@ B＝別の書き方を最初の応答から外す、C＝古い先読みの打ち
   - 候補の列: 常駐と同じ設定の候補の列（user_style 73・short_words 52・user_style_nopunct 68・synth_user の先頭 300 の 493 件 × 左文脈 2 通り = 986 要求）を、
     HEAD（15a85dd）の convert_nbest と比べた。ONNX 版・torch＋GPU のどちらも、first の 1 位、first の後に足した full、揃える途中でやめてから
     頼み直した full（3 件に 1 件）、最初から頼んだ full（198 要求）が 1 件も違わない。
+
+## 本人の決定（2026-10-20、読点）
+
+> 読点も句点と同様に自動では付けず全て私が入力することにしよう
+
+### D48. 句読点は自動で足さない（読点も止める）（2026-10-20、本人の決定の実施）
+
+- `CorePipeline(punct="auto")` を既定にした。常駐入力（ime/server.py）・模擬の打鍵（eval.ime_sim）・memprof はこの既定を使う。
+  ラティスでは insert と auto は同じなので、打った句読点の扱い（全角・半角を zenz が選ぶ）は変わらず、変わるのは句読点を補わないことだけ。
+- 確かめたこと（`OrtCorePipeline(threads=4)`、このデスクトップの CPU）: 句読点を打った user_style 73 文は、前の既定（`p=insert`）の記録 O1 と出力が全件同じ。
+  句読点を打たない user_style_nopunct 68 文は、61 文が同じで、7 文は句読点 B の読点が無くなっただけ。
+- 合わせて直したもの: ThinkPad の bench（tools/thinkpad-bench.ps1）を常駐と同じ設定に、振り返りの評価の変換器（REVIEW.md 手順 5）を `core:e=typed` に。
+- 句読点 B（D8・D31・D46）は `p=insert` で残した。体験版（trial/）は A・B を比べる道具なので変えていない。

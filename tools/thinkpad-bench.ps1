@@ -51,20 +51,20 @@ $head = @(
     "- 版: $(if (Test-Path (Join-Path $Root 'VERSION')) { Get-Content (Join-Path $Root 'VERSION') } else { (git rev-parse --short HEAD) })", ''
 )
 
-# 1 件の変換の内訳（句読点 B あり。常駐入力と同じ）。スレッド数を振る。句読点を打たない入力は句読点 B の採点も走る
+# 1 件の変換の内訳（常駐入力と同じ設定。句読点は自動で足さない、D48）。スレッド数を振る。句読点を打たない入力も測る
 $np = 'file:eval/sets/user_style_nopunct.jsonl'
 $runs = @(
-    @{ tag = 'ort-t4';         mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=4,p=insert', '--device', 'cpu') },
+    @{ tag = 'ort-t4';         mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=4', '--device', 'cpu') },
     @{ tag = 'ime-t4';         mod = 'eval.ime_sim';      args = @('--threads', '4', '--profiles', 'normal', '--policies', 'base') },
-    @{ tag = 'ort-t4-nopunct'; mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=4,p=insert', '--device', 'cpu', '--set', $np) }
+    @{ tag = 'ort-t4-nopunct'; mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=4', '--device', 'cpu', '--set', $np) }
 )
 if (-not $Quick) {
     $runs += @(
-        @{ tag = 'ort-t2';     mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=2,p=insert', '--device', 'cpu') },
-        @{ tag = 'ort-t6';     mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=6,p=insert', '--device', 'cpu') },
-        @{ tag = 'ort-t8';     mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=8,p=insert', '--device', 'cpu') },
+        @{ tag = 'ort-t2';     mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=2', '--device', 'cpu') },
+        @{ tag = 'ort-t6';     mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=6', '--device', 'cpu') },
+        @{ tag = 'ort-t8';     mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=8', '--device', 'cpu') },
         @{ tag = 'ime-t4-all'; mod = 'eval.ime_sim';      args = @('--threads', '4', '--profiles', 'fast,normal', '--policies', 'base,B,C,BC', '--limit', '7') },
-        @{ tag = 'ort-t4-again'; mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=4,p=insert', '--device', 'cpu') }
+        @{ tag = 'ort-t4-again'; mod = 'eval.parity_speed'; args = @('--converter', 'core-ort:t=4', '--device', 'cpu') }
     )
 }
 
