@@ -172,6 +172,15 @@ class CorePipeline:
         self.fixes = ud.fixes
         self.user_dict = ud
 
+    def release_memory(self) -> None:
+        """変換の中で確保して今は使っていないメモリを返す（常駐の変換サーバが暇なときに呼ぶ。出力は変わらない）。
+        torch 版は CUDA の予約を返す: 予約は一番重い要求の分まで広がったまま残り、150 要求で GPU 専用が 1,346 MB
+        （返すと 556 MB、専有も約 480 MB 減る。docs/RESOURCES.md「減らす手の実測」）。"""
+        if self.backend is not None:
+            self.backend.release_memory()
+        else:   # torch 版は GPU だけ（core.select.torch_device）
+            self.scorer._torch.cuda.empty_cache()
+
     def candidates(self, romaji: str, left_context: str = "") -> list[dict]:
         """読みの上位 k 件の変換と点数（点数の高い順）。"""
         out = []

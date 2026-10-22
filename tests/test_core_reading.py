@@ -287,3 +287,29 @@ def test_edits_after_uppercase_span_point_into_typed_keys():
     shifted = {(e.kind, e.pos - 2, e.detail) for r in top("UIkyouhaiitenki", 20) for e in r.edits}
     assert plain and plain & shifted
     assert all(e.pos >= 2 for r in top("UIkyouhaiitenki", 20) for e in r.edits)
+
+
+def test_capped_cache_clears_when_full_and_keeps_values():
+    # 読み段のキャッシュは上限で全部消す（常駐で増え続けないように。docs/RESOURCES.md）。消した後も同じ値を返す
+    from core.reading import _capped
+    calls = []
+
+    @_capped(3)
+    def f(a, b):
+        calls.append((a, b))
+        return (a * b, str(a))
+
+    vals = [f(i, 2) for i in range(5)] + [f(4, 2), f(0, 2)]
+    assert vals == [(i * 2, str(i)) for i in range(5)] + [(8, "4"), (0, "0")]
+    assert f.cache_info().currsize <= 3
+    assert calls.count((4, 2)) == 1 and calls.count((0, 2)) == 2   # (0, 2) は 3 個目を入れる前に消えた
+    f.cache_clear()
+    assert f.cache_info().currsize == 0
+
+
+def test_reading_caches_are_capped():
+    from core.kana_lm import load
+    from core.reading import _lm_end, _lm_step
+    readings("kyouhaiitenkidesune")
+    assert 0 < _lm_step.cache_info().currsize <= 200_000 and _lm_end.cache_info().currsize <= 20_000
+    assert len(load()._memo) <= 300_000

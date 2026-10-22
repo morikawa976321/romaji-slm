@@ -145,11 +145,12 @@ def test_newer_request_supersedes_prefetch_but_not_commit():
 
 
 def test_idle_preparation_stops_for_another_request_but_not_for_its_own_full():
-    started, finished, stopped = threading.Event(), [], []
+    # 打鍵列ごとの合図（ab の応答を受けてから待つまでに、ab の用意がもう始まっていることがある）
+    started, finished, stopped = {"a": threading.Event(), "ab": threading.Event()}, [], []
     from core.cancel import Cancelled, check
 
     def idle(romaji, ctx):
-        started.set()
+        started[romaji].set()
         try:
             for _ in range(100):
                 check()
@@ -162,10 +163,9 @@ def test_idle_preparation_stops_for_another_request_but_not_for_its_own_full():
     srv, url = serve(lambda r, c, f: [r + ("+alt" if f else "")], idle)
     try:
         post(url + "/convert?mode=first&prefetch=1", b"a\n")
-        assert started.wait(5)
+        assert started["a"].wait(5)
         assert post(url + "/convert?mode=first&prefetch=1", b"ab\n").split("\n")[1] == "ab"   # 別の打鍵列: 用意をやめる
-        started.clear()
-        assert started.wait(5)   # ab の用意が始まる
+        assert started["ab"].wait(5)   # ab の用意が始まる
         assert post(url + "/convert?mode=full&prefetch=1", b"ab\n").split("\n")[1] == "ab+alt"   # 同じ打鍵列の full: 続ける
         assert stopped == ["a"] and finished == ["ab"]
     finally:
@@ -200,3 +200,34 @@ def test_composer_state_machine():
     r = subprocess.run(["pwsh", "-NoProfile", "-File", str(ROOT / "ime" / "build.ps1"), "-Test"],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_release_runs_after_a_quiet_period_and_after_idle_preparation():
+    events, released = [], threading.Event()
+
+    def convert(romaji, ctx, full):
+        events.append(("convert", romaji))
+        return [romaji]
+
+    def idle(romaji, ctx):
+        time.sleep(0.3)   # 暇なときの用意が走っている間は返さない（錠の中で、その後に）
+        events.append(("idle", romaji))
+
+    def release():
+        events.append(("release",))
+        released.set()
+
+    ready = threading.Event()
+    ready.set()
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(convert, ready, idle, release=release, release_after=0.2))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        for r in ("a", "am", "ame"):   # 打っている間（間が release_after より短い）は返さない
+            post(url + "/convert?mode=first&prefetch=1", r.encode() + b"\n")
+            time.sleep(0.05)
+        assert released.wait(5)
+        assert events.count(("release",)) == 1
+        assert events.index(("release",)) > events.index(("idle", "ame"))
+    finally:
+        srv.shutdown()

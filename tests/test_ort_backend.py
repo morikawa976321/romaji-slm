@@ -6,6 +6,9 @@
 """
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,10 +19,11 @@ pytest.importorskip("onnx")
 
 from core.constrained import ConstrainedZenz, LatticeMatcher, bounds_from_text  # noqa: E402
 from core.kanakanji import Dictionary  # noqa: E402
-from core.select import ZenzScorer, fluency  # noqa: E402
+from core.select import ZenzScorer, fluency, zenz_prompt  # noqa: E402
 from eval.prompts import CONTEXT, INPUT, OUTPUT  # noqa: E402
 from tests.test_core_constrained import ENTRIES, POS, READINGS  # noqa: E402
 
+ROOT = Path(__file__).resolve().parent.parent
 TOL = 1e-4
 CORPUS = ["キョウハイイテンキデスネ", "今日は良い天気ですね", "京", "点", "木", "きょうはてんき", "ハ", "ネ",
           "。、.", INPUT + CONTEXT + OUTPUT, "abcdefghijklmnopqrstuvwxyz"]
@@ -206,3 +210,73 @@ def test_cancel_stops_ort_and_is_not_swallowed(ort, dic, monkeypatch):
         assert pl.alts
         return
     pytest.skip("極小の辞書で別の書き方が出る打鍵列が無い")
+
+
+TOKENIZER_TEXTS = [*CORPUS, *FLUENCY_TEXTS, CONTEXT + "今日は" + INPUT + "キョウハ" + OUTPUT, "a</s>b", "<s>x</s>",
+                   "[PAD][UNK]", "foo </s> bar", " leading", "x  y\n\tz", "転機 😀𠮷"]
+
+
+def _same_as_autotokenizer(model: str, texts: list[str]) -> None:
+    from transformers import AutoTokenizer
+
+    from core.ort_backend import ZenzTokenizer
+    a, b = AutoTokenizer.from_pretrained(model), ZenzTokenizer(model)
+    assert (len(b), b.eos_token_id, b.pad_token_id) == (len(a), a.eos_token_id, a.pad_token_id)
+    ids = list(range(len(a)))
+    assert b.convert_ids_to_tokens(ids) == a.convert_ids_to_tokens(ids)
+    for t in texts:
+        assert b(t, add_special_tokens=False).input_ids == a(t, add_special_tokens=False).input_ids, t
+
+
+def test_tokenizer_matches_autotokenizer(tiny_model):
+    # ONNX 版は torch を読まないよう transformers を通さずにトークナイザを組む（docs/RESOURCES.md）。文中の特殊トークンも同じに割る
+    _same_as_autotokenizer(tiny_model, TOKENIZER_TEXTS)
+
+
+def test_tokenizer_matches_autotokenizer_on_zenz():
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+    try:
+        path = Path(hf_hub_download("Miwa-Keita/zenz-v3.1-small", "vocab.json", local_files_only=True)).parent
+        hf_hub_download("Miwa-Keita/zenz-v3.1-small", "merges.txt", local_files_only=True)
+        hf_hub_download("Miwa-Keita/zenz-v3.1-small", "tokenizer_config.json", local_files_only=True)
+    except LocalEntryNotFoundError:
+        pytest.skip("zenz-v3.1-small を取得していない")
+    from eval.datasets import load_set
+    texts = list(TOKENIZER_TEXTS)
+    for it in load_set("user_style"):
+        texts += [zenz_prompt(it.romaji, it.left_context), *it.refs]
+    _same_as_autotokenizer(str(path), texts)
+
+
+def test_onnx_engine_does_not_import_torch(ort, tiny_model):
+    # GPU の無い機械で torch を読むと常駐の専有が約 950 MB 重くなる。読み込みと 1 回の生成で torch も transformers も読まない
+    code = ("import sys; from core.ort_backend import OrtBackend; "
+            f"b = OrtBackend({tiny_model!r}, onnx_path={ort.sess._model_path!r}, threads=1); "
+            "b.release_memory(); "
+            "assert 'torch' not in sys.modules and 'transformers' not in sys.modules, sorted(m for m in sys.modules if 'torch' in m)")
+    r = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr[-2000:]
+
+
+@pytest.mark.parametrize("left_context", LEFT_CONTEXTS)
+def test_release_memory_keeps_outputs(ort, dic, left_context):
+    before = ort.decode_batch(READINGS, dic, left_context)
+    flu = ort.fluency(FLUENCY_TEXTS, left_context)
+    ort.release_memory()
+    assert ort.decode_batch(READINGS, dic, left_context) == before
+    ort.release_memory()
+    assert ort.fluency(FLUENCY_TEXTS, left_context) == flu
+
+
+def test_release_memory_on_torch_returns_the_cuda_reserve(tiny_model, dic, torch_device, monkeypatch):
+    import torch
+
+    from core.pipeline import CorePipeline
+    monkeypatch.setattr(Dictionary, "load", classmethod(lambda cls, *a, **k: dic))
+    cp = CorePipeline(tiny_model, torch_device, k=3, punct="insert")
+    x = torch.empty(64 * 2**20, device=torch_device)   # 256 MB を確保して手放す（予約は残る）
+    del x
+    before = torch.cuda.memory_reserved()
+    cp.release_memory()
+    assert torch.cuda.memory_reserved() < before - 200 * 2**20

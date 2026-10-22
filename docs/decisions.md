@@ -829,3 +829,44 @@ B＝別の書き方を最初の応答から外す、C＝古い先読みの打ち
     - 1 位以外を選んだ件数は、ウィンドウを開いた回数ではない。
     - fp16 を本人の判断に回すのは正しい。トレイの CPU 時間も見るべき。
   - いずれも報告に反映した。
+
+## 本人の決定（2026-10-22、資源）
+
+> 出力を変えない手 1〜5 を常駐入力に入れて。全セットで出力が同じことと、ime の試験を確かめてから。
+
+> 途中途中でsolレビューを受けて。
+
+### D50. 出力を変えない資源の手 1〜5 を常駐入力に入れる（2026-10-22、本人の決定の実施）
+
+- 入れたもの（D49 の 1〜5）:
+  1. ONNX 版で torch を読まない。`core/ort_backend.py` の `ZenzTokenizer` が tokenizers で vocab.json・merges.txt から組む。
+     `ime/server.py` の `pick_device("auto")` は nvcuda.dll（ctypes の cuInit・cuDeviceGetCount）で GPU を見る。
+  2. ONNX Runtime のスピン待ちを止める（`session.intra_op.allow_spinning=0`）。
+  3. 読み段のキャッシュに上限を付ける。`core/reading.py` の `_capped`（溢れたら全部消す）で `_lm_step` は 20 万・`_lm_end` は 2 万、`KanaLM._memo` は 30 万。
+  4・5. `CorePipeline.release_memory()` で、ONNX 版はアリーナを縮め、torch 版は `torch.cuda.empty_cache()`。
+     変換サーバは、最後の要求から 30 秒だれも要求しなかったら、変換の錠の中で呼ぶ。
+- AI の判断:
+  - **返すまでの静けさを 30 秒にした**: 最初は 2 秒にしたが、返した後の最初の要求が ONNX 版で中央値 +約 75 ms 遅くなった（RESOURCES.md「入れた後」）。
+    考えながら打つ間のたびに払うことになるので、席を離れたくらいの間だけにした。値は目安で、詰めていない。
+  - **前置きの KV の取り置きは返すときも消さない**: 消すと、間を置いた後の最初の要求で左文脈を計算し直す（約 38 ms）。減るのも最大 56 MB と小さい。
+  - **torch が CUDA を使えないとき**: ドライバはあるが torch が CUDA を使えない（CPU 版の torch など）ときは ONNX 版で動かす。
+    今までは `torch.cuda.is_available()` で GPU の有無を見ていたので、その場合も ONNX 版だった。
+- 確かめたこと（このデスクトップ）:
+  - 全セット 2400 文（eval.parity）: ONNX 版（`core-ort:t=4`）・torch 版（`core`、GPU）とも、2026-10-21 の記録と出力・候補・点数まで同じ（点数の差 0）。
+  - 本物の変換サーバ（入れる前の HEAD 018749a と比べた）:
+    - 候補の列は 100 文で同じ。
+    - ONNX 版は torch の DLL を読まない。専有は起動直後 1,859 → 917 MB、30 秒暇になった後 2,465 → 1,032 MB。起動は 6.4 → 約 4 秒。
+    - torch 版は暇になった後 GPU 専用 1,256 → 566 MB。
+  - `uv run pytest` は 338 件が通った。足した試験:
+    - トークナイザ: 極小のモデルと zenz で AutoTokenizer と同じ id。
+    - ONNX 版が torch も transformers も読まない。
+    - 返す前後で出力が同じ。torch 版で CUDA の予約が実際に返る。
+    - キャッシュの上限。
+    - サーバが静かになってから、暇なうちの用意の後に返す。
+  - `ime/build.ps1 -Test` は全部通った。
+- sol のレビュー:
+  - 1 回目: `ZenzScorer.device` は文字列なので、torch 版の返す処理が毎回 AttributeError になる（major）。直して、GPU で予約が返る試験を足した。
+  - 1 回目でもう 1 つ: 既存の `test_idle_preparation_stops_for_another_request_but_not_for_its_own_full` が落ちたと報告があった。
+    原因は試験の競合で、ab の応答から `started.clear()` までの間に ab の用意が始まると空振りする。こちらの負荷下でも 3 回に 1 回落ちた。
+    合図を打鍵列ごとに分けて直し、6 回続けて通った。
+  - 2 回目: 合格（pass）。軽微 1 件: ドライバはあるが torch が CUDA を使えない機械では、確かめるために torch を読んでから ONNX 版にするので軽くならない。IME.md に書き足した。

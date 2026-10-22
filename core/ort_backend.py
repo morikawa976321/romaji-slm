@@ -120,6 +120,48 @@ def _log_softmax(x: np.ndarray) -> np.ndarray:
     return x - m - np.log(np.exp(x - m).sum(axis=-1, keepdims=True))
 
 
+class _Encoding:
+    __slots__ = ("input_ids",)
+
+    def __init__(self, ids: list[int]):
+        self.input_ids = ids
+
+
+class ZenzTokenizer:
+    """zenz の GPT-2 のトークナイザを、transformers を通さず tokenizers で vocab.json・merges.txt から組む。
+    transformers 5 の AutoTokenizer は transformers.generation を通して torch を読み、ONNX 版の常駐が専有で約 950 MB 重くなる
+    （docs/RESOURCES.md「減らす手の実測」）。AutoTokenizer と同じ id を返すことは tests/test_ort_backend.py で確かめる。
+    使うのは OrtBackend が呼ぶ分（呼び出し・convert_ids_to_tokens・len・eos/pad）だけ。"""
+
+    _SPECIAL = ("<s>", "</s>", "[PAD]", "[UNK]")   # tokenizer_config.json の bos/eos/pad/unk。文中に現れたらその 1 トークン
+
+    def __init__(self, model: str):
+        from tokenizers import AddedToken, Tokenizer, decoders, models, pre_tokenizers
+
+        if Path(model).is_dir():
+            vocab, merges = Path(model) / "vocab.json", Path(model) / "merges.txt"
+        else:
+            from huggingface_hub import hf_hub_download
+            vocab, merges = hf_hub_download(model, "vocab.json"), hf_hub_download(model, "merges.txt")
+        t = Tokenizer(models.BPE.from_file(str(vocab), str(merges)))
+        t.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+        t.decoder = decoders.ByteLevel()
+        t.add_special_tokens([AddedToken(s, normalized=True) for s in self._SPECIAL])
+        self._t = t
+        v = t.get_vocab()
+        self.eos_token_id, self.pad_token_id = v["</s>"], v["[PAD]"]
+        self._n = t.get_vocab_size()
+
+    def __call__(self, text: str, add_special_tokens: bool = False) -> _Encoding:
+        return _Encoding(self._t.encode(text, add_special_tokens=False).ids)
+
+    def convert_ids_to_tokens(self, ids: list[int]) -> list[str | None]:
+        return [self._t.id_to_token(i) for i in ids]
+
+    def __len__(self) -> int:
+        return self._n
+
+
 def _lcp(a, b) -> int:
     n = min(len(a), len(b))
     i = 0
@@ -140,7 +182,6 @@ class OrtBackend:
     def __init__(self, model: str = "Miwa-Keita/zenz-v3.1-small", onnx_path: str | Path | None = None,
                  threads: int | None = None, max_tries: int = 2000, share: bool = True):
         import onnxruntime as ort
-        from transformers import AutoTokenizer
 
         path = Path(onnx_path) if onnx_path else default_path(model)
         if not path.exists():
@@ -151,9 +192,12 @@ class OrtBackend:
         if threads:
             so.intra_op_num_threads = threads
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        # 既定では実行のたびに、待っているスレッドが空回りして次の仕事を待つ（実測で応答のあと約 0.3 秒、約 3 コア）。
+        # 止めても待ちは変わらず、1 要求の CPU 時間が 23%（空回りを含めて 43%）減った（docs/RESOURCES.md「減らす手の実測」）
+        so.add_session_config_entry("session.intra_op.allow_spinning", "0")
         self.sess = ort.InferenceSession(str(path), so, providers=["CPUExecutionProvider"])
         self._ort = ort
-        self.tok = AutoTokenizer.from_pretrained(model)
+        self.tok = ZenzTokenizer(model)
         dec = {c: b for b, c in bytes_to_unicode().items()}
         self.tok_bytes = [bytes(dec[ch] for ch in t) if t is not None else b""
                           for t in self.tok.convert_ids_to_tokens(list(range(len(self.tok))))]
@@ -185,6 +229,17 @@ class OrtBackend:
                         raise cancel.Cancelled from None
                     raise
         return out[0], out[1:1 + self.L], out[1 + self.L:]
+
+    def release_memory(self) -> None:
+        """変換の中で広げたメモリのアリーナのうち、今使っていない塊を OS に返す（常駐入力が暇なときに呼ぶ。出力は変わらない）。
+        アリーナは一番重い要求の分まで広がったまま戻らず、150 要求で専有が約 460 MB 多かった（docs/RESOURCES.md）。
+        縮めるのは RunOptions を付けた実行の終わりなので、1 トークンの実行を 1 回する。"""
+        ro = self._ort.RunOptions()
+        ro.add_run_config_entry("memory.enable_memory_arena_shrinkage", "cpu:0")
+        e = self._empty(1)
+        one = np.ones((1, 1), dtype=np.int64)
+        self.sess.run(None, {"ids": one * self.eos, "pos": one * 0, "mask": one,
+                             **dict(zip(self._pk, e)), **dict(zip(self._pv, e))}, ro)
 
     def _empty(self, B: int) -> list[np.ndarray]:
         return [np.zeros((B, self.H, 0, self.D), dtype=np.float32)] * self.L

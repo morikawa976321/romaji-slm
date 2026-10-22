@@ -201,6 +201,8 @@ class KanaLM:
             acc += self.bow[n].get(h, 0.0)
         else:
             v = self.unk
+        if len(self._memo) >= 300_000:  # 上限が無いと常駐で増え続ける（core.reading._capped と同じ理由。docs/RESOURCES.md）
+            self._memo.clear()
         v = self._memo[key] = acc + v
         return v
 

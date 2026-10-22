@@ -38,7 +38,7 @@ def version() -> str:
 
 def thread_env(n: int) -> None:
     """torch（Intel OpenMP・MKL）の CPU のスレッド数を、torch を読む前に環境変数で渡す（読み込み時にスレッドの池を作る部分が
-    あるため。ime.ini の値を利用者の環境変数より優先する）。torch は GPU を見るためと ONNX の書き出しのために読む。"""
+    あるため。ime.ini の値を利用者の環境変数より優先する）。torch を読むのは torch 版（GPU）と ONNX の初回の書き出しだけ。"""
     if n > 0:
         for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
             os.environ[k] = str(n)
@@ -56,11 +56,22 @@ def pick_engine(engine: str, device: str) -> str:
     return "torch" if engine != "onnx" and device == "cuda" else "onnx"
 
 
+def has_cuda_driver() -> bool:
+    """NVIDIA のドライバで CUDA の装置が 1 つ以上使えるか。torch を読まずに見る（GPU の無い機械で torch を読むと、
+    ONNX 版の常駐の専有が約 950 MB 重くなる。docs/RESOURCES.md「減らす手の実測」）。torch が CUDA を使えるかは別で、main で確かめる。"""
+    import ctypes
+    try:
+        lib = ctypes.WinDLL("nvcuda.dll") if os.name == "nt" else ctypes.CDLL("libcuda.so.1")
+    except OSError:
+        return False
+    n = ctypes.c_int(0)
+    return lib.cuInit(0) == 0 and lib.cuDeviceGetCount(ctypes.byref(n)) == 0 and n.value > 0
+
+
 def pick_device(device: str) -> str:
     if device != "auto":
         return device
-    import torch
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    return "cuda" if has_cuda_driver() else "cpu"
 
 
 def parse_request(body: bytes) -> tuple[str, str]:
@@ -114,13 +125,43 @@ class Lists:
         return window.texts(pl, self.order)
 
 
-def make_handler(convert, ready: threading.Event, idle=None):
+# 要求がこの秒数来なければ、変換の中で広げたメモリを返す（release）。返した後の最初の要求は広げ直す分だけ遅い
+# （このデスクトップの ONNX 版で中央値 +約 75 ms、torch 版は +10 ms 前後。2 秒で返すと、考えながら打つ間のたびに払う）ので、
+# 席を離れたくらいの間だけにする。30 は AI が決めた目安（docs/decisions.md D50）
+RELEASE_AFTER = 30.0
+
+
+def make_handler(convert, ready: threading.Event, idle=None, release=None, release_after: float = RELEASE_AFTER):
     """convert(romaji, ctx, full) が候補の列を返す。idle(romaji, ctx) は mode=first の応答のあと、暇なうちに full の列を
     用意しておく（無ければしない）。変換は同時に 1 つだけ（錠）。prefetch の要求と暇なときの用意は、後から別の要求が
-    来たらやめる（core.cancel。走っている forward も止める）。"""
+    来たらやめる（core.cancel。走っている forward も止める）。release() は、最後の要求から release_after 秒だれも
+    来なかったときに、暇なときの用意の後で呼ぶ（無ければしない）。"""
     lock = threading.Lock()  # モデルを複数の要求で同時に動かさない
     newest = {"seq": 0, "key": None, "full": False}   # いちばん新しい要求
     seq_lock = threading.Lock()
+    timer = {"t": None}
+    timer_lock = threading.Lock()
+
+    def schedule_release() -> None:
+        if release is None:
+            return
+        my = newest["seq"]
+
+        def fire():
+            with lock:   # 暇なときの用意が走っていれば、その後で
+                if newest["seq"] != my:   # その後に要求が来た。その要求の終わりにまた予約される
+                    return
+                try:
+                    release()
+                except Exception as e:
+                    print(f"release: {type(e).__name__}", flush=True)
+
+        with timer_lock:
+            if timer["t"] is not None:
+                timer["t"].cancel()
+            t = timer["t"] = threading.Timer(release_after, fire)
+            t.daemon = True
+            t.start()
 
     def arrive(key, full: bool) -> int:
         with seq_lock:
@@ -186,9 +227,11 @@ def make_handler(convert, ready: threading.Event, idle=None):
                     with scope(stale):
                         cands = convert(romaji, ctx, full)
             except Cancelled:
-                return self._send(409, b"superseded")
+                return self._send(409, b"superseded")   # 後から来た要求の終わりに返す
             except Exception as e:  # 1 件の失敗で常駐を落とさない
+                schedule_release()
                 return self._send(500, f"{type(e).__name__}".encode())
+            schedule_release()
             self._send(200, format_response((time.perf_counter() - t0) * 1000, cands))
             if not full and idle is not None and cands:
                 threading.Thread(target=run_idle, args=(my, romaji, ctx), daemon=True).start()
@@ -245,7 +288,8 @@ def main(argv=None):
             print(f"user dict reloaded: en={len(ud.en)} word={len(ud.words)} fix={len(ud.fixes)} errors={len(ud.errors)}", flush=True)
 
     # 先に待ち受けを開く。トレイアプリは /health が返るまで「準備中」と表示する
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(convert, ready, idle))
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port),
+                              make_handler(convert, ready, idle, release=lambda: holder["p"].release_memory()))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     from core.pipeline import CorePipeline  # 既定は本人の選択（句読点は自動で足さない D48・英字は打ったまま D14。docs/decisions.md）
@@ -257,6 +301,11 @@ def main(argv=None):
     engine = pick_engine(args.engine, device)
     if args.engine == "torch" and engine != "torch":
         print("engine=torch needs a GPU (cuda); using onnx", flush=True)
+    if engine == "torch":
+        import torch
+        if not torch.cuda.is_available():   # ドライバはあるが torch が CUDA を使えない（CPU 版の torch など）
+            print("torch cannot use cuda; using onnx", flush=True)
+            device, engine = "cpu", "onnx"
     if engine == "onnx":
         try:
             from core.ort_backend import OrtCorePipeline

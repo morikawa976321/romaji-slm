@@ -19,7 +19,8 @@ import heapq
 import itertools
 import sys
 from dataclasses import dataclass, replace
-from functools import lru_cache
+from functools import lru_cache, wraps
+from typing import NamedTuple
 
 from .english import _USER_EN, FUZZY_MIN_LEN, SHORT_OK, lexicon, user_bonus
 from .kana_lm import AFTER_EN, AFTER_NUM, BOS, EOS, ORDER, load as load_lm, word_cost
@@ -795,8 +796,33 @@ _START = BOS * (ORDER - 1)
 _CTX_AFTER = {"en": BOS * (ORDER - 2) + AFTER_EN, "num": BOS * (ORDER - 2) + AFTER_NUM}
 
 
-# 上限なし。頭打ちにならない: 常駐で 1 件あたり約 2,500 項目増え、600 件で 151 万項目（docs/RESOURCES.md）
-@lru_cache(maxsize=None)
+class _CapInfo(NamedTuple):
+    currsize: int
+
+
+def _capped(n: int):
+    """lru_cache と同じ使い方のキャッシュで、n 項目に達したら全部消す。上限が無いと常駐で頭打ちにならず
+    （別々の 2,000 文で専有 +1.6 GB、_lm_step は 407 万項目）、後から消しても Python は OS に返さない。
+    LRU（maxsize=n）より管理の手間が無い分速い（docs/RESOURCES.md「減らす手の実測」）。"""
+    def deco(f):
+        memo: dict = {}
+
+        @wraps(f)
+        def g(*a):
+            v = memo.get(a)
+            if v is None:
+                if len(memo) >= n:
+                    memo.clear()
+                v = memo[a] = f(*a)
+            return v
+        g.cache_clear = memo.clear
+        g.cache_info = lambda: _CapInfo(len(memo))
+        return g
+    return deco
+
+
+# 上限は試した値（20 万・2 万。かなの LM の memo の 30 万と組で、別々の 2,000 文で +69 MB、読み段 1 回 +6 ms）で、詰めた値ではない
+@_capped(200_000)
 def _lm_step(ctx: str, text: str) -> tuple[float, str]:
     lm = load_lm()
     total = 0.0
@@ -807,7 +833,7 @@ def _lm_step(ctx: str, text: str) -> tuple[float, str]:
     return COST["lm_weight"] * total, h
 
 
-@lru_cache(maxsize=None)
+@_capped(20_000)
 def _lm_end(ctx: str) -> float:
     """かなの連続が英字・数字の区間の前で終わる読みらしさ（オ|cr、ギ|thib のような切れ目は高い）。"""
     if ctx[-1] in (BOS, AFTER_EN, AFTER_NUM):
