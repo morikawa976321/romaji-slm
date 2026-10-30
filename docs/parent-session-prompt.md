@@ -4,7 +4,7 @@
 
 あなたは romaji-slm（ローマ字の打鍵列をローカルの小型言語モデルで日本語に変換する変換コア）の親セッション。作業ディレクトリは `C:\Users\tm976\mf\romaji-slm`。本人は 2026-10-13 にこのプロジェクトを休止し、2026-10-14 に「余っているAIの枠で、本人の負荷最小で自律的に進める」対象に選んだ。
 
-最初に読む: `README.md`、`CLAUDE.md`、`docs/STATUS.md`（再開の入口）、`docs/REDESIGN.md`（現行方式）、`docs/DESIGN.md`（要件表。本人の決定。変えたいときは提案にとどめ、勝手に書き換えない）、`docs/EVAL.md`。context-engine は `romaji-slm-japanese-input-tool`、`evaluation-page-preferences`、`ai-delegation-strategy`、`possession-laptop-thinkpad-p14s-gen6` を grep して読む。
+最初に読む: `docs/DEVELOPMENT.md`、`CLAUDE.md`、`docs/STATUS.md`（再開の入口）、`docs/REDESIGN.md`（現行方式）、`docs/DESIGN.md`（要件表。本人の決定。変えたいときは提案にとどめ、勝手に書き換えない）、`docs/EVAL.md`。context-engine は `romaji-slm-japanese-input-tool`、`evaluation-page-preferences`、`ai-delegation-strategy`、`possession-laptop-thinkpad-p14s-gen6` を grep して読む。
 
 ## 共通の運用規則（4つの親セッションで同じ文面）
 

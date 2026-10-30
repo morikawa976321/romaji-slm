@@ -1,6 +1,6 @@
 # romaji-slm — このリポジトリで作業するときの規則
 
-入口は [README.md](README.md)、要件と方式は [docs/DESIGN.md](docs/DESIGN.md)。
+入口は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、要件と方式は [docs/DESIGN.md](docs/DESIGN.md)。
 
 - **ユーザーとの会話は日本語で行う。**
 - **要件表（docs/DESIGN.md「要件」）は本人の決定。** 変えたいときは提案にとどめ、勝手に書き換えない。
