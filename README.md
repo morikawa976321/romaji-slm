@@ -16,3 +16,7 @@
 - 変換の実行方式: GPU は torch、CPU は ONNX Runtime 版（`core/ort_backend.py`）。速さの内訳と速くした手・残りの手: [docs/SPEEDUP.md](docs/SPEEDUP.md)。
   llama-server 版との比較（2026-10-18、llama-server 版はその後削除）: [docs/LLAMA_PARITY.md](docs/LLAMA_PARITY.md)
 - 辞書による変換候補（読み → 表記の N-best、Mozc 辞書）: [docs/KANAKANJI.md](docs/KANAKANJI.md)、`python -m core.fetch_mozc`、`python -m core.kanakanji "キョウハイイテンキデスネ"`
+
+## 同梱データの出典
+
+`data/samples/sample_200.jsonl` は、[Miwa-Keita/zenz-v2.5-dataset](https://huggingface.co/datasets/Miwa-Keita/zenz-v2.5-dataset)（Miwa Keita）の文を元に、ローマ字化・打鍵ミスの付与・読みの付け直しを加えて作った 200 件で、元データのライセンス（大半は CC BY-SA 4.0、llm-jp-corpus v3 由来の部分は ODC-BY）に従う。作り方は [docs/DATA.md](docs/DATA.md)。
