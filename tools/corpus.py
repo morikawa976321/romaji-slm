@@ -285,6 +285,33 @@ def apply_fixes(text: str, fixes: list[dict]) -> tuple[str, int, int]:
     return text, hit, miss
 
 
+def add_fixes(fixes: list[dict]) -> int:
+    """親が足す直し（{id, from, to}）を、その文が入った束の fix/out に書き足す。足した数を返す。
+
+    直す係が拾わなかった誤りを、親が読み直して足すときに使う（docs/CORPUS.md 手順 5）。
+    同じ文・同じ from の直しは二重に足さない。まだ直す係が返していない束には足さない
+    （out ができると、その束が済んだとみなされて直す係に回らなくなる）。
+    """
+    owner = {r["id"]: f.stem for f in FIX_IN.glob("*.jsonl") for r in read_jsonl(f)}
+    added = 0
+    for fx in fixes:
+        p = FIX_OUT / f"{owner.get(fx['id'], '')}.json"
+        if fx["id"] not in owner or not p.exists():
+            raise SystemExit(f"直し済みの束に無い文: {fx['id']}")
+        out = json.loads(p.read_text(encoding="utf-8"))
+        if any((o.get("id"), o.get("from")) == (fx["id"], fx["from"]) for o in out.get("fixes", [])):
+            continue
+        out.setdefault("fixes", []).append({"id": fx["id"], "from": fx["from"], "to": fx["to"]})
+        p.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+        added += 1
+    return added
+
+
+def cmd_add_fixes(args) -> None:
+    fixes = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    print(f"直しを {add_fixes(fixes)} 個足した（渡したのは {len(fixes)} 個）。apply で当てる。")
+
+
 def cmd_apply(args) -> None:
     fixes, drops, answered = collections.defaultdict(list), set(), set()
     for f in FIX_OUT.glob("*.json"):
@@ -335,8 +362,10 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("collect", "prepare", "apply", "stats"):
         sub.add_parser(name)
+    sub.add_parser("add-fixes", help="親が足す直し（JSON の配列 [{id, from, to}]）を fix/out に書き足す").add_argument("file")
     args = ap.parse_args()
-    {"collect": cmd_collect, "prepare": cmd_prepare, "apply": cmd_apply, "stats": cmd_stats}[args.cmd](args)
+    {"collect": cmd_collect, "prepare": cmd_prepare, "apply": cmd_apply, "stats": cmd_stats,
+     "add-fixes": cmd_add_fixes}[args.cmd](args)
 
 
 if __name__ == "__main__":
