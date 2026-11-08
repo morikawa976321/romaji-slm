@@ -180,7 +180,7 @@ class CorePipeline:
         self.user_dict = ud
 
     def set_vocab(self, vocab) -> None:
-        """本人の語彙の加点を入れ替える（UserVocab かパス。None は使わない）。"""
+        """本人の語彙の書き分けの点を入れ替える（UserVocab かパス。None は使わない）。"""
         from .uservocab import UserVocab, load as load_vocab
         self.vocab = vocab if isinstance(vocab, UserVocab) else (load_vocab(vocab) if vocab else UserVocab())
 

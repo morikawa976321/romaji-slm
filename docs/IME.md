@@ -124,6 +124,8 @@ ThinkPad で上から順になぞる手順書は [THINKPAD.md](THINKPAD.md)。
 - 更新するときは、新しい zip で同じことをする。設定（ime.ini）・記録・ユーザー辞書は、その PC のものが残る。
 - 変換は CPU の ONNX Runtime 版で動く（`device=auto`）。速さは THINKPAD.md「ThinkPad で分かれるもの」。ThinkPad での速さは未測定。
 - ユーザー辞書と利用履歴の振り返りは PC ごと。振り返り（ops-daily）はこのデスクトップでだけ動く。ThinkPad の辞書を揃えたいときは、`user_dict.tsv` を写す。
+- 本人の語彙の表（`%LOCALAPPDATA%\romaji-slm\corpus\vocab.tsv`、docs/CORPUS.md）も PC ごと。作るのはこのデスクトップ（材料と SudachiPy がある）で、
+  ThinkPad で使うときは同じ場所へ写す。無ければ書き分けの点を使わないのと同じ。
 - 試しに別のフォルダへ入れるとき: `powershell -ExecutionPolicy Bypass -File app\ime\install-zip.ps1 -Target <フォルダ> -NoShortcuts -NoLaunch`。`-NoShortcuts` を付けないと、今のショートカットを上書きする。
 
 ## 仕組み
