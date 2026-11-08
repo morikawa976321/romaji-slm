@@ -95,16 +95,77 @@ def count(rows: list[dict]) -> tuple[dict, collections.Counter]:
     return table, unknown
 
 
-def main() -> None:
-    rows = read_jsonl(CLEAN)
-    if not rows:
-        raise SystemExit(f"{CLEAN} が無い。先に tools.corpus apply を走らせる")
-    table, unknown = count(rows)
+def write_table(path, table: dict) -> None:
     items = sorted(table.items(), key=lambda kv: (-kv[1][0], kv[0]))
-    with open(VOCAB, "w", encoding="utf-8", newline="\n") as fh:
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\t".join(FIELDS) + "\n")
         for (r, s, pos, unit), (n, u, b) in items:
             fh.write(f"{r}\t{s}\t{pos}\t{unit}\t{n}\t{u}\t{b}\n")
+
+
+HOLDOUT_SET = CORPUS / "holdout.jsonl"
+HOLDOUT_VOCAB = CORPUS / "vocab_train.tsv"
+_SENT = re.compile(r"(?<=[。！？!?])|\n")
+
+
+def is_held(unit_id: str, k: int) -> bool:
+    return int(unit_id[:8], 16) % k == 0
+
+
+def holdout_items(rows: list[dict], limit: int) -> list[dict]:
+    """取り分けた文を、本人の文体の合成セット（eval/build_synth.py）と同じ道具で評価の項目にする。
+    打鍵列は SudachiPy の読みから作り（表記揺れの乱数つき）、句読点は文のとおりに打つ。正解は本人が書いた表記。"""
+    import random
+
+    from data.build import _HAS_WORD, _TYPED_OK, segment_pieces
+    from data.reading import Unreadable, analyze
+    from data.romaji import UnreadableKana, romanize
+    from data.symbols import is_typable
+    from tools.corpus import jp_len
+
+    out, seen = [], set()
+    for r in rows:
+        for s in _SENT.split(r["text"]):
+            s = s.strip()
+            n = jp_len(s)
+            if s in seen or not 6 <= n <= 40 or n < 0.6 * len(s) or "http" in s or "`" in s:
+                continue
+            seen.add(s)
+            try:
+                romaji = romanize(segment_pieces(analyze(s)), random.Random(f"0:{s}"))
+            except (Unreadable, UnreadableKana):
+                continue
+            if not romaji or not _TYPED_OK.match(romaji) or not is_typable(romaji) or not _HAS_WORD.search(romaji):
+                continue
+            out.append({"romaji": romaji, "output": s, "left_context": "",
+                        "meta": {"category": "user_holdout", "source": r["source"], "date": r.get("date", "")}})
+    # 並びは中身から決める（評価の id は行の番号なので、作り直しても同じ項目が同じ id になるように）
+    import hashlib
+    out.sort(key=lambda it: hashlib.sha1(it["output"].encode()).hexdigest())
+    return out[:limit]
+
+
+def main() -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--holdout", type=int, default=0, metavar="K",
+                    help="文の K 件に 1 件を取り分け、残りで vocab_train.tsv を、取り分けた文で評価セット holdout.jsonl を作る")
+    ap.add_argument("--limit", type=int, default=600, help="評価セットの項目の上限")
+    args = ap.parse_args()
+    rows = read_jsonl(CLEAN)
+    if not rows:
+        raise SystemExit(f"{CLEAN} が無い。先に tools.corpus apply を走らせる")
+    if args.holdout:
+        train = [r for r in rows if not is_held(r["id"], args.holdout)]
+        held = [r for r in rows if is_held(r["id"], args.holdout)]
+        write_table(HOLDOUT_VOCAB, count(train)[0])
+        items = holdout_items(held, args.limit)
+        HOLDOUT_SET.write_text("".join(json.dumps(it, ensure_ascii=False) + "\n" for it in items), encoding="utf-8")
+        print(f"取り分け {len(held)} 件（残り {len(train)} 件で {HOLDOUT_VOCAB}）→ 評価の項目 {len(items)} 件: {HOLDOUT_SET}")
+        return
+    table, unknown = count(rows)
+    write_table(VOCAB, table)
     (CORPUS / "vocab_unknown.json").write_text(
         json.dumps(unknown.most_common(), ensure_ascii=False), encoding="utf-8")
 
