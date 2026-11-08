@@ -166,6 +166,7 @@ def make_converter(name: str, device: str = "cuda", model: str | None = None,
     if name == "core" or name.startswith(("core:", "core-ort")):
         # core / core:k=3 / core:k=3,w=1.0,f=1,b=0（b=0 は k 件を1件ずつ生成。速度の比較用）
         opts = dict(kv.split("=") for kv in name.partition(":")[2].split(",") if kv)
+        from core.pipeline import W_VOC
         # p=auto|ja|ascii|insert（句読点）、e=zenz|typed|registered|auto（英字の表記）、tc/te/tq=句読点 B の閾値（読点・句点・疑問符）
         kw = dict(k=int(opts.get("k", 5)), w_read=float(opts.get("w", 4.0)), w_flu=float(opts.get("f", 1.0)),
                   punct=opts.get("p", "auto"),  # 常駐入力の既定と同じ auto（D48。句読点 B は p=insert）
@@ -175,7 +176,9 @@ def make_converter(name: str, device: str = "cuda", model: str | None = None,
                   punct_end=opts.get("pe", "0") == "1",  # pe=1 で句読点 B が文末の句点も補う（D31 より前の既定）
                   # ct=0 で読点の位置を「。」を仮に付けずに比べる、cl=0 で短い文にも読点を足す（どちらも D46 より前の振る舞い）
                   comma_tail=opts.get("ct", "1") == "1", comma_min_len=int(opts.get("cl", 10)),
-                  user_dict=opts.get("ud") or None)  # ud=<パス> で本人のユーザー辞書を読む（docs/REVIEW.md の検証）
+                  user_dict=opts.get("ud") or None,  # ud=<パス> で本人のユーザー辞書を読む（docs/REVIEW.md の検証）
+                  # v=<パス> で本人の語彙の加点を読む（core.uservocab、docs/CORPUS.md）。wv=<数> はその重み
+                  vocab=opts.get("v") or None, w_voc=float(opts.get("wv", W_VOC)))
         if name.startswith("core-ort"):
             # core-ort:t=8,...（CPU の変換。forward を ONNX Runtime で回す。照合・採点は torch 版と同じ。core/ort_backend.py）
             from core.ort_backend import OrtCorePipeline

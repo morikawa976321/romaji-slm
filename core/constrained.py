@@ -49,11 +49,12 @@ def _en_surface(seg, en_case: str) -> str:
 
 
 class LatticeMatcher:
-    def __init__(self, reading: Reading, dic: Dictionary, punct: str = "auto", en_case: str = "zenz"):
+    def __init__(self, reading: Reading, dic: Dictionary, punct: str = "auto", en_case: str = "zenz", vocab=None):
         """punct: 記号の表記。auto=全角/半角の両方を候補に残して zenz に選ばせる、ja=全角だけ、ascii=打ったまま。
         en_case: 英字の表記。zenz=登録表記と綴りの両方を残して zenz に選ばせる（旧来の振る舞い）。それ以外
         （typed / registered / auto）はラティスでは打った綴りだけにし、表記の置き換えは後段（core.pipeline.render_en_case）。
         行き止まり（終点に届かない節点）は刈らない。貪欲法が行き止まりに入った読みは未完（score −∞）で捨てられる。
+        vocab: 本人の語彙の加点（core.uservocab.UserVocab）。辞書の語とかなの弧に付け、advance_acc で持ち回る。
         """
         if punct not in PUNCT_MODES:
             raise ValueError(f"punct は {PUNCT_MODES} のどれか: {punct}")
@@ -61,6 +62,7 @@ class LatticeMatcher:
             raise ValueError(f"en_case は {EN_CASE_MODES} のどれか: {en_case}")
         lat, self.final = _build_lattice(reading, dic)
         self.out: dict[int, list[tuple[bytes, int]]] = {}
+        self.bonus: dict[tuple[int, bytes, int], float] = {}  # (始点, 表層, 終点) → その語に入ったときの加点
         seen: set[tuple[int, bytes, int]] = set()
         for s, e, surf, rd, si, src in zip(lat.start, lat.end, lat.surface, lat.reading, lat.seg, lat.source):
             if src in ("bos", "eos") or not surf:
@@ -77,9 +79,48 @@ class LatticeMatcher:
             if b and (s, b, e) not in seen:
                 seen.add((s, b, e))
                 self.out.setdefault(s, []).append((b, e))
+            if b and vocab and src in ("dict", "kana"):
+                v = vocab.get(rd, surf)
+                if v > self.bonus.get((s, b, e), 0.0):
+                    self.bonus[(s, b, e)] = v
 
     def start(self) -> frozenset[State]:
         return frozenset({(0, b"")})
+
+    def start_acc(self) -> dict[State, float]:
+        return {(0, b""): 0.0}
+
+    def advance_acc(self, acc: dict[State, float], data: bytes) -> dict[State, float]:
+        """advance と同じ進め方で、状態ごとに「そこまでの経路で入った語の加点の和」の最大を持ち回る（Viterbi）。
+        語の加点は、その語の最初のバイトを読んだ時点で足す（貪欲法がその語に入るかどうかを決める位置）。"""
+        cur = acc
+        bonus, out = self.bonus, self.out
+        for byte in data:
+            nxt: dict[State, float] = {}
+            for (node, rest), v in cur.items():
+                if rest:
+                    if rest[0] == byte:
+                        k = (node, rest[1:])
+                        if v > nxt.get(k, -1e18):
+                            nxt[k] = v
+                    continue
+                for b, end in out.get(node, ()):
+                    if b[0] == byte:
+                        k = (end, b[1:])
+                        w = v + bonus.get((node, b, end), 0.0)
+                        if w > nxt.get(k, -1e18):
+                            nxt[k] = w
+            if not nxt:
+                return {}
+            cur = nxt
+        return cur
+
+    def bonus_of(self, text: str) -> float:
+        """文全体の語の加点の和（その文を出せる経路のうち最大）。出せない文は 0。生成していない文（core.window）用。"""
+        if not self.bonus:
+            return 0.0
+        acc = self.advance_acc(self.start_acc(), scoring_text(text).encode())
+        return acc.get((self.final, b""), 0.0)
 
     def advance(self, states: frozenset[State], data: bytes) -> frozenset[State]:
         return self.advance_bounds(states, data)[0]
@@ -134,6 +175,47 @@ class Decoded(NamedTuple):
     logp: float  # 選んだトークンの対数確率の和（EOS を含む。制約をかける前の分布で測る）
     finished: bool  # ラティスの終点まで届いて EOS を選べたか
     bounds: tuple[int, ...] = ()  # 語の切れ目になりうる文字位置（0 と末尾を除く。句読点の自動挿入の候補位置）
+    bonus: float = 0.0  # 本人の語彙の加点の和（重みを掛ける前。LatticeMatcher.advance_acc。加点が無ければ 0）
+
+
+# 1 トークンで入る語の加点の和の見込みの上限。logit がこれ × 重み以上低いトークンは、加点で逆転しえないので比べない
+# （複数文字のトークンが加点 1 に近い語を 3 つ以上またぐと見落とすが、選びが少し本人寄りでなくなるだけ）
+BONUS_SPAN = 2.0
+
+
+def pick_with_bonus(order, m: LatticeMatcher, acc: dict[State, float], w: float, tok_bytes, eos: int):
+    """order: (トークン, logit) を logit の降順に。制約を満たすトークンのうち、logit + w ×（経路の加点の最大の増分）が
+    最大のものと、進めた状態（加点つき）を返す。無ければ (None, None)。
+
+    加点が無ければ（w=0）最初に見つかった合法トークン = 加点なしの貪欲法と同じ選びになる。"""
+    base = max(acc.values())
+    best = None
+    for t, lg in order:
+        if best is not None and lg + w * BONUS_SPAN < best[0]:
+            break
+        if t == eos:
+            v = acc.get((m.final, b""))
+            if v is None:
+                continue
+            cand = (lg + w * (v - base), t, acc)
+        else:
+            b = tok_bytes[t]
+            if not b:
+                continue
+            na = m.advance_acc(acc, b)
+            if not na:
+                continue
+            cand = (lg + w * (max(na.values()) - base), t, na)
+        if best is None or cand[0] > best[0]:
+            best = cand
+        if w <= 0:
+            break
+    return (best[1], best[2]) if best else (None, None)
+
+
+def final_bonus(m: LatticeMatcher, acc: dict[State, float] | None, finished: bool) -> float:
+    """生成し終えた文の語彙の加点の和（終点の状態の値）。加点を使っていない・終点まで届かなかったなら 0。"""
+    return acc.get((m.final, b""), 0.0) if finished and acc else 0.0
 
 
 def _char_bounds(out: bytes, byte_offsets: list[int]) -> tuple[int, ...]:
@@ -157,15 +239,18 @@ class ConstrainedZenz:
         return self.decode_scored(reading, dic, left_context, max_new)[0]
 
     def decode_scored(self, reading: Reading, dic: Dictionary, left_context: str = "",
-                      max_new: int | None = None, punct: str = "auto", en_case: str = "zenz") -> Decoded:
-        """1件ずつの制約付き生成（Decoded: 出力・対数確率の和・終点まで届いたか・語の切れ目）。
+                      max_new: int | None = None, punct: str = "auto", en_case: str = "zenz",
+                      vocab=None, w_voc: float = 0.0) -> Decoded:
+        """1件ずつの制約付き生成（Decoded: 出力・対数確率の和・終点まで届いたか・語の切れ目・語彙の加点）。
 
         対数確率は制約をかける前の分布で測る（制約で弾いた分を正規化し直さない）。読みの違う候補どうしを
         比べるとき、zenz がその読みと出力をどれだけ自然と見たかの尺度になる。
+        vocab と w_voc > 0 を渡すと、トークンを logit + w_voc ×（本人の語彙の加点の増分）で選ぶ（pick_with_bonus）。
         """
         torch, model, tok = self.s._torch, self.s.model, self.s.tok
-        m = LatticeMatcher(reading, dic, punct, en_case)
+        m = LatticeMatcher(reading, dic, punct, en_case, vocab)
         states = m.start()
+        acc = m.start_acc() if w_voc > 0 and m.bonus else None
         ids = tok(zenz_prompt(reading.zenz_input(), left_context), add_special_tokens=False,
                   return_tensors="pt").input_ids.to(self.s.device)
         max_new = max_new or 3 * len(reading.zenz_input()) + 8
@@ -182,7 +267,11 @@ class ConstrainedZenz:
             past = r.past_key_values
             logits = r.logits[0, -1].float()
             prev_states = states
-            chosen, states = self._pick(logits, m, states)
+            if acc is None:
+                chosen, states = self._pick(logits, m, states)
+            else:
+                chosen, acc = self._pick_acc(logits, m, acc, w_voc)
+                states = frozenset(acc) if acc else None
             if chosen is None:
                 break
             logp_sum += torch.log_softmax(logits, dim=-1)[chosen].item()
@@ -193,10 +282,12 @@ class ConstrainedZenz:
             out += self.tok_bytes[chosen]
             bounds.extend(base + k for k in m.advance_bounds(prev_states, self.tok_bytes[chosen])[1])
             step_ids = torch.tensor([[chosen]], device=self.s.device)
-        return Decoded(out.decode("utf-8", errors="replace"), logp_sum, finished, _char_bounds(bytes(out), bounds))
+        return Decoded(out.decode("utf-8", errors="replace"), logp_sum, finished, _char_bounds(bytes(out), bounds),
+                       final_bonus(m, acc, finished))
 
     def decode_batch(self, readings: list[Reading], dic: Dictionary, left_context: str = "",
-                     max_new: int | None = None, punct: str = "auto", en_case: str = "zenz") -> list[Decoded]:
+                     max_new: int | None = None, punct: str = "auto", en_case: str = "zenz",
+                     vocab=None, w_voc: float = 0.0) -> list[Decoded]:
         """k 件の読みを1つのバッチで制約付き生成する。結果は decode_scored を1件ずつ呼んだのと同じ。
 
         CPU では forward 1回の固定費が支配的で、バッチを 5 にしても 1 件の約 1.4 倍の時間で済む
@@ -207,8 +298,9 @@ class ConstrainedZenz:
             return []
         torch, model, tok = self.s._torch, self.s.model, self.s.tok
         dev = self.s.device
-        matchers = [LatticeMatcher(r, dic, punct, en_case) for r in readings]
+        matchers = [LatticeMatcher(r, dic, punct, en_case, vocab) for r in readings]
         states = [m.start() for m in matchers]
+        accs = [m.start_acc() if w_voc > 0 and m.bonus else None for m in matchers]
         prompts = [tok(zenz_prompt(r.zenz_input(), left_context), add_special_tokens=False).input_ids
                    for r in readings]
         B, L = len(prompts), max(len(p) for p in prompts)
@@ -241,7 +333,12 @@ class ConstrainedZenz:
                 if step >= limits[i]:
                     alive[i] = False
                     continue
-                chosen, ns = self._pick(logits[i], matchers[i], states[i])
+                if accs[i] is None:
+                    chosen, ns = self._pick(logits[i], matchers[i], states[i])
+                else:
+                    chosen, na = self._pick_acc(logits[i], matchers[i], accs[i], w_voc)
+                    if chosen is not None:
+                        accs[i], ns = na, frozenset(na)
                 if chosen is None:
                     alive[i] = False
                     continue
@@ -262,10 +359,21 @@ class ConstrainedZenz:
             step_ids = torch.tensor(nxt, device=dev).unsqueeze(1)
             mask = torch.cat([mask, torch.ones((B, 1), dtype=torch.long, device=dev)], dim=1)
             step_pos = step_pos[:, -1:] + torch.tensor([[int(a)] for a in alive], device=dev)
-        return [Decoded(o.decode("utf-8", errors="replace"), lp, f, _char_bounds(bytes(o), bd))
-                for o, lp, f, bd in zip(outs, logp_sum, finished, bounds)]
+        return [Decoded(o.decode("utf-8", errors="replace"), lp, f, _char_bounds(bytes(o), bd), final_bonus(m, a, f))
+                for o, lp, f, bd, m, a in zip(outs, logp_sum, finished, bounds, matchers, accs)]
 
     _TOP = 64  # ほとんどの位置はこの中で決まる。足りなければ max_tries まで全順位を見る
+
+    def _pick_acc(self, logits, m: LatticeMatcher, acc: dict[State, float], w: float):
+        """_pick の語彙の加点つき（pick_with_bonus）。"""
+        torch = self.s._torch
+        n_top = min(self._TOP, self.max_tries, logits.shape[-1])
+        vals, idx = torch.topk(logits, n_top)
+        t, na = pick_with_bonus(zip(idx.tolist(), vals.tolist()), m, acc, w, self.tok_bytes, self.eos)
+        if t is not None or self.max_tries <= n_top:
+            return t, na
+        order = torch.argsort(logits, descending=True)[n_top:self.max_tries]
+        return pick_with_bonus(zip(order.tolist(), logits[order].tolist()), m, acc, w, self.tok_bytes, self.eos)
 
     def _pick(self, logits, m: LatticeMatcher, states: frozenset[State]):
         """制約を満たす最も確率の高いトークンと、進めた状態。無ければ (None, None)。"""
