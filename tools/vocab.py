@@ -19,15 +19,20 @@ VOCAB = CORPUS / "vocab.tsv"
 # 見分けられるよう、これより前の回数を別の列に持つ
 ROMAJI_SLM_FROM = "2026-10-16"
 _KANA = re.compile(r"^[ぁ-ゖァ-ヺー]+$")
-FIELDS = ("reading", "surface", "pos", "unit", "count", "units", "before")
+FIELDS = ("reading", "surface", "lemma", "pos", "unit", "count", "units", "before")
 
 
 def to_hira(s: str) -> str:
     return "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in s)
 
 
-def _morphs(text: str, mode) -> list[tuple[int, int, str, str | None, str]]:
-    """(始まり, 終わり, 表記, ひらがなの読み, 品詞) の列。読みは表記どおり（助詞は は・を のまま。打つ綴りと同じ）で、分からない語は None。
+def to_kata(s: str) -> str:
+    return "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c for c in s)
+
+
+def _morphs(text: str, mode) -> list[tuple[int, int, str, str | None, str, str]]:
+    """(始まり, 終わり, 表記, ひらがなの読み, 品詞, 正規形) の列。読みは表記どおり（助詞は は・を のまま。打つ綴りと同じ）で、
+    分からない語は None。正規形は SudachiDict の表記揺れの寄せ先（すべて・全て → 全て）で、同じ語の書き分けを束ねるのに使う。
 
     結果はその場で取り出す。SudachiPy 0.7 の Morpheme は解析器の入力を共有していて、Morpheme.split を続けて呼ぶと
     別の文の位置を読んで panic した（2026-11-08）。だから split を使わず、単位ごとに解析し直して位置で突き合わせる。
@@ -42,12 +47,12 @@ def _morphs(text: str, mode) -> list[tuple[int, int, str, str | None, str]]:
             r = to_hira(s)
         else:
             r = None
-        out.append((m.begin(), m.end(), s, r, "-".join(p for p in m.part_of_speech()[:2] if p != "*")))
+        out.append((m.begin(), m.end(), s, r, "-".join(p for p in m.part_of_speech()[:2] if p != "*"), m.normalized_form()))
     return out
 
 
-def words(text: str) -> tuple[list[tuple[str, str, str, str]], list[str]]:
-    """文を (読み, 表記, 品詞, 単位) の列と、読みの分からない語の列にする。
+def words(text: str) -> tuple[list[tuple[str, str, str, str, str]], list[str]]:
+    """文を (読み, 表記, 正規形, 品詞, 単位) の列と、読みの分からない語の列にする。
 
     単位は SudachiPy の長い単位（C）と短い単位（A）。両方で同じ区切りの語は "AC" として 1 回、
     C が A に分かれる語は C の語と A の各語をそれぞれ数える。
@@ -69,18 +74,18 @@ def words(text: str) -> tuple[list[tuple[str, str, str, str]], list[str]]:
         prev_digits = False
         spans_c, spans_a = {m[:2] for m in c}, {m[:2] for m in a}
         units = [(m, "AC" if m[:2] in spans_a else "C") for m in c] + [(m, "A") for m in a if m[:2] not in spans_c]
-        for (_, _, s, r, pos), unit in sorted(units, key=lambda u: u[0][:2]):
+        for (_, _, s, r, pos, lemma), unit in sorted(units, key=lambda u: u[0][:2]):
             if not _JP_CHARS.match(s):
                 continue
             if r is None:
                 unknown.append(s)
                 continue
-            out.append((r, s, pos, unit))
+            out.append((r, s, lemma, pos, unit))
     return out, unknown
 
 
 def count(rows: list[dict]) -> tuple[dict, collections.Counter]:
-    """{(読み, 表記, 品詞, 単位): [回数, 出た文の数, ROMAJI_SLM_FROM より前の回数]} と、読みの分からない語の回数。"""
+    """{(読み, 表記, 正規形, 品詞, 単位): [回数, 出た文の数, ROMAJI_SLM_FROM より前の回数]} と、読みの分からない語の回数。"""
     table: dict = collections.defaultdict(lambda: [0, 0, 0])
     unknown: collections.Counter = collections.Counter()
     for r in rows:
@@ -95,12 +100,51 @@ def count(rows: list[dict]) -> tuple[dict, collections.Counter]:
     return table, unknown
 
 
+def add_variants(table: dict, dic=None) -> int:
+    """本人が使った語（同じ読み・同じ正規形の組）ごとに、Mozc の辞書にある同じ語の別の書き方を回数 0 の行（単位 "V"）として足す。
+    本人が一度も使っていない書き方（「総て」）も、本人の書き方より下げる対象にするため（core.uservocab）。足した行の数を返す。
+
+    同じ語かどうかは、Mozc がその読みに載せている表記を SudachiPy にかけて 1 語になり、正規形が一致するかで決める。
+    かなの書き方（読みのひらがな・カタカナ）も同じように確かめる。読みは比べない — 表記だけを解析すると SudachiPy は
+    一つの読みに決めてしまい（良い → ヨイ）、Mozc が「いい」に載せている 良い を落とすため。"""
+    from sudachipy import tokenizer
+
+    from core.kanakanji import Dictionary
+
+    dic = dic or Dictionary.load()
+    tok, _ = _tokenizer()
+    mode = tokenizer.Tokenizer.SplitMode.C
+    groups: dict = collections.defaultdict(dict)   # (読み, 正規形) → {表記: 品詞}
+    for (r, s, lemma, pos, _), (n, _, _) in table.items():
+        if n:
+            groups[(r, lemma)].setdefault(s, pos)
+    memo: dict = {}
+
+    def as_word(t: str):
+        if t not in memo:
+            ms = list(tok.tokenize(t, mode))
+            memo[t] = ms[0].normalized_form() if len(ms) == 1 else None
+        return memo[t]
+
+    added = 0
+    for (r, lemma), surfaces in groups.items():
+        k = to_kata(r)
+        # 本人の表と同じく日本語の文字だけの表記に限る（英数字は数えていないので、「１」を いち の使わない書き方にしない）
+        cands = {t for t in {e[3] for e in dic.lookup(k)} | {r, k} if _JP_CHARS.match(t)}
+        pos = next(iter(surfaces.values()))
+        for t in sorted(cands - set(surfaces)):
+            if as_word(t) == lemma:
+                table[(r, t, lemma, pos, "V")] = [0, 0, 0]
+                added += 1
+    return added
+
+
 def write_table(path, table: dict) -> None:
     items = sorted(table.items(), key=lambda kv: (-kv[1][0], kv[0]))
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\t".join(FIELDS) + "\n")
-        for (r, s, pos, unit), (n, u, b) in items:
-            fh.write(f"{r}\t{s}\t{pos}\t{unit}\t{n}\t{u}\t{b}\n")
+        for (r, s, lemma, pos, unit), (n, u, b) in items:
+            fh.write(f"{r}\t{s}\t{lemma}\t{pos}\t{unit}\t{n}\t{u}\t{b}\n")
 
 
 HOLDOUT_SET = CORPUS / "holdout.jsonl"
@@ -159,26 +203,31 @@ def main() -> None:
     if args.holdout:
         train = [r for r in rows if not is_held(r["id"], args.holdout)]
         held = [r for r in rows if is_held(r["id"], args.holdout)]
-        write_table(HOLDOUT_VOCAB, count(train)[0])
+        train_table = count(train)[0]
+        add_variants(train_table)
+        write_table(HOLDOUT_VOCAB, train_table)
         items = holdout_items(held, args.limit)
         HOLDOUT_SET.write_text("".join(json.dumps(it, ensure_ascii=False) + "\n" for it in items), encoding="utf-8")
         print(f"取り分け {len(held)} 件（残り {len(train)} 件で {HOLDOUT_VOCAB}）→ 評価の項目 {len(items)} 件: {HOLDOUT_SET}")
         return
     table, unknown = count(rows)
+    n_var = add_variants(table)
     write_table(VOCAB, table)
     (CORPUS / "vocab_unknown.json").write_text(
         json.dumps(unknown.most_common(), ensure_ascii=False), encoding="utf-8")
 
     pairs = collections.Counter()
-    for (r, s, _, _), (n, _, _) in table.items():
-        pairs[(r, s)] += n
+    for (r, s, _, _, unit), (n, _, _) in table.items():
+        if unit != "V":
+            pairs[(r, s)] += n
     two = {k: n for k, n in pairs.items() if n >= 2}
     by_reading = collections.defaultdict(list)
     for (r, s), n in two.items():
         by_reading[r].append(n)
     print(f"文 {len(rows)} 件 → 読みと表記の組 {len(pairs):,} 個（2 回以上 {len(two):,} 個）・"
           f"語の延べ {sum(pairs.values()):,}。2 回以上の表記が 2 つ以上ある読み {sum(len(v) > 1 for v in by_reading.values()):,} 個。"
-          f"読みの分からない語 {len(unknown):,} 種（延べ {sum(unknown.values()):,}）→ {VOCAB}")
+          f"読みの分からない語 {len(unknown):,} 種（延べ {sum(unknown.values()):,}）。"
+          f"辞書から足した書き分け {n_var:,} 行 → {VOCAB}")
 
 
 if __name__ == "__main__":

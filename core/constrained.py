@@ -5,6 +5,7 @@ N-best の再順位（core.select）は、辞書の上位 N に正解が入ら�
 照合はバイト単位: zenz はバイト単位 BPE で、1トークンが UTF-8 の1文字の途中で切れることがある。
 """
 
+import re
 from typing import NamedTuple
 
 from .cancel import check as _check_cancel
@@ -29,6 +30,7 @@ def bytes_to_unicode() -> dict[int, str]:
 
 
 _BAD_HEAD = frozenset("ァィゥェォャュョッヮーン")
+_KANA_ONLY = re.compile(r"^[ぁ-ゖァ-ヺー]+$")
 
 # 状態: (ラティスの節点, そこへ向かう途中の語の残りバイト)。残りが b"" なら節点の上にいる
 State = tuple[int, bytes]
@@ -54,7 +56,8 @@ class LatticeMatcher:
         en_case: 英字の表記。zenz=登録表記と綴りの両方を残して zenz に選ばせる（旧来の振る舞い）。それ以外
         （typed / registered / auto）はラティスでは打った綴りだけにし、表記の置き換えは後段（core.pipeline.render_en_case）。
         行き止まり（終点に届かない節点）は刈らない。貪欲法が行き止まりに入った読みは未完（score −∞）で捨てられる。
-        vocab: 本人の語彙の加点（core.uservocab.UserVocab）。辞書の語とかなの弧に付け、advance_acc で持ち回る。
+        vocab: 本人の語彙の点（core.uservocab.UserVocab。同じ語の本人が使わない書き方ほど負）。辞書の語とかなの弧に付け、
+        advance_acc で持ち回る。
         """
         if punct not in PUNCT_MODES:
             raise ValueError(f"punct は {PUNCT_MODES} のどれか: {punct}")
@@ -62,7 +65,7 @@ class LatticeMatcher:
             raise ValueError(f"en_case は {EN_CASE_MODES} のどれか: {en_case}")
         lat, self.final = _build_lattice(reading, dic)
         self.out: dict[int, list[tuple[bytes, int]]] = {}
-        self.bonus: dict[tuple[int, bytes, int], float] = {}  # (始点, 表層, 終点) → その語に入ったときの加点
+        self.bonus: dict[tuple[int, bytes, int], float] = {}  # (始点, 表層, 終点) → その語に入ったときの点（0 の弧は持たない）
         seen: set[tuple[int, bytes, int]] = set()
         for s, e, surf, rd, si, src in zip(lat.start, lat.end, lat.surface, lat.reading, lat.seg, lat.source):
             if src in ("bos", "eos") or not surf:
@@ -81,8 +84,17 @@ class LatticeMatcher:
                 self.out.setdefault(s, []).append((b, e))
             if b and vocab and src in ("dict", "kana"):
                 v = vocab.get(rd, surf)
-                if v > self.bonus.get((s, b, e), 0.0):
-                    self.bonus[(s, b, e)] = v
+                self.bonus[(s, b, e)] = max(self.bonus.get((s, b, e), v), v)
+        self.bonus = {k: v for k, v in self.bonus.items() if v}
+        # 経路の点は最大を取るので、減点のある語（欲しい）と同じ文字列を短い語の連なり（欲し＋い）で出すと減点が消える。
+        # 同じ位置から始まり、表記も読みもその語の頭になっている短い語にも同じ減点を付けてふさぐ。その語より長い語
+        # （欲しがる）の弧は 0 のままなので、長い語として出す道は減らない。かなだけの頭（はいる の は・はい）には付けない —
+        # 助詞などの別の語としての区切りと見分けられず、助詞の は＋いる を 入る に変えた（2026-11-08）
+        for (s, b, e), v in [kv for kv in self.bonus.items() if kv[1] < 0]:
+            for b2, e2 in self.out.get(s, ()):
+                if e2 < e and len(b2) < len(b) and b.startswith(b2) and not _KANA_ONLY.match(b2.decode()):
+                    self.bonus[(s, b2, e2)] = min(self.bonus.get((s, b2, e2), 0.0), v)
+        self.bonus_max = max(0.0, *self.bonus.values()) if self.bonus else 0.0  # 1 語で入る点の最大（pick_with_bonus の打ち切り）
 
     def start(self) -> frozenset[State]:
         return frozenset({(0, b"")})
@@ -175,11 +187,12 @@ class Decoded(NamedTuple):
     logp: float  # 選んだトークンの対数確率の和（EOS を含む。制約をかける前の分布で測る）
     finished: bool  # ラティスの終点まで届いて EOS を選べたか
     bounds: tuple[int, ...] = ()  # 語の切れ目になりうる文字位置（0 と末尾を除く。句読点の自動挿入の候補位置）
-    bonus: float = 0.0  # 本人の語彙の加点の和（重みを掛ける前。LatticeMatcher.advance_acc。加点が無ければ 0）
+    bonus: float = 0.0  # 本人の語彙の点の和（重みを掛ける前。≤ 0。LatticeMatcher.advance_acc。語彙を使わなければ 0）
 
 
-# 1 トークンで入る語の加点の和の見込みの上限。logit がこれ × 重み以上低いトークンは、加点で逆転しえないので比べない
-# （複数文字のトークンが加点 1 に近い語を 3 つ以上またぐと見落とすが、選びが少し本人寄りでなくなるだけ）
+# 1 トークンで入る語の数の見込みの上限。logit が これ × 重み × 1 語の点の最大 より低いトークンは、点で逆転しえないので
+# 比べない（複数文字のトークンが正の点の語を 3 つ以上またぐと見落とすが、選びが少し本人寄りでなくなるだけ）。
+# 本人の語彙の点は ≤ 0（core.uservocab）なので、ふだんは最初の合法トークンより logit の低いものだけを比べる
 BONUS_SPAN = 2.0
 
 
@@ -189,9 +202,10 @@ def pick_with_bonus(order, m: LatticeMatcher, acc: dict[State, float], w: float,
 
     加点が無ければ（w=0）最初に見つかった合法トークン = 加点なしの貪欲法と同じ選びになる。"""
     base = max(acc.values())
+    slack = w * BONUS_SPAN * m.bonus_max
     best = None
     for t, lg in order:
-        if best is not None and lg + w * BONUS_SPAN < best[0]:
+        if best is not None and lg + slack < best[0]:
             break
         if t == eos:
             v = acc.get((m.final, b""))

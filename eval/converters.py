@@ -177,7 +177,7 @@ def make_converter(name: str, device: str = "cuda", model: str | None = None,
                   # ct=0 で読点の位置を「。」を仮に付けずに比べる、cl=0 で短い文にも読点を足す（どちらも D46 より前の振る舞い）
                   comma_tail=opts.get("ct", "1") == "1", comma_min_len=int(opts.get("cl", 10)),
                   user_dict=opts.get("ud") or None,  # ud=<パス> で本人のユーザー辞書を読む（docs/REVIEW.md の検証）
-                  # v=<パス> で本人の語彙の加点を読む（core.uservocab、docs/CORPUS.md）。wv=<数> はその重み
+                  # v=<パス> で本人の語彙の書き分けの点を読む（core.uservocab、docs/CORPUS.md「書き分けの点」）。wv=<数> はその重み
                   vocab=opts.get("v") or None, w_voc=float(opts.get("wv", W_VOC)))
         if name.startswith("core-ort"):
             # core-ort:t=8,...（CPU の変換。forward を ONNX Runtime で回す。照合・採点は torch 版と同じ。core/ort_backend.py）

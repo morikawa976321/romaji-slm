@@ -19,7 +19,7 @@ from .select import ZenzScorer, fluency
 from .types import Edit
 
 FIX_COST = 0.5  # ユーザー辞書の打ち間違いの癖で直した読みに足すコスト（1 編集ぶんより安い。直すかは採点が決める）
-W_VOC = 1.0  # 本人の語彙の加点の重み（core.uservocab。1 語あたり最大この値を対数確率に足す）
+W_VOC = 1.0  # 本人の語彙の点の重み（core.uservocab。本人が使わない書き方の語 1 つにつき最大この値を対数確率から引く）
 
 
 _TYPED_PUNCT = frozenset(",.?!")  # 打鍵列に句読点として打たれうる記号
@@ -131,8 +131,9 @@ class CorePipeline:
         backend: 生成と採点の差し替え（CPU では core.ort_backend.OrtBackend）。decode_batch・fluency・logprobs を持つもの。
         None なら model を transformers で GPU（device は cuda だけ）に読む。
         max_tries: transformers 版の制約付き生成の探索の幅（core.constrained.ConstrainedZenz）。
-        vocab: 本人の語彙の加点（core.uservocab。UserVocab かパス）。None なら使わない（評価の再現性のため。常駐入力は
-        既定の置き場所を渡す）。w_voc はその重み。生成のトークンの選び方と、候補の点数の両方に同じ重みで効く。
+        vocab: 本人の語彙の書き分けの点（core.uservocab。UserVocab かパス）。None なら使わない（評価の再現性のため。
+        常駐入力は既定の置き場所を渡す）。w_voc はその重み。読みの中の生成のトークンの選び方（同じ読みの書き分け）にだけ効き、
+        読みどうしの点数の比べには入れない。
         """
         self.dic = Dictionary.load()
         # user_dict: 本人のユーザー辞書（core.userdict）。None なら読まない（評価の再現性のため。常駐入力は既定の置き場所を渡す）
@@ -238,7 +239,9 @@ class CorePipeline:
         for r, d in zip(rs, decoded):
             out.append({
                 "text": d.text,
-                "score": d.logp - self.w_read * r.cost + self.w_voc * d.bonus if d.finished else float("-inf"),
+                # 語彙の点（d.bonus）は読みどうしの比べに入れない。書き分けの点で読みを選ぶと、本人の使わない書き方を
+                # 残した読みが負けて、英字の語を崩した別の読みの誤変換が勝った（docs/decisions.md D51）
+                "score": d.logp - self.w_read * r.cost if d.finished else float("-inf"),
                 "lm": d.logp, "read_cost": r.cost, "bonus": d.bonus,
                 "reading": r.zenz_input(), "edits": [e.detail for e in r.edits],
                 "bounds": d.bounds, "reading_obj": r,

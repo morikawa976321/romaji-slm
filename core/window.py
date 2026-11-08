@@ -138,7 +138,8 @@ def alternatives(p, best: dict, left_context: str = "", end: str = "", n_alt: in
     edited = bool(best["edits"])
     out = []
     for i, t in enumerate(texts):
-        # 1 位（core.pipeline.candidates）と同じ式。語彙の加点も同じ重みで足す
+        # 1 位（core.pipeline.candidates）と同じ式に、同じ読みの書き分けの点（本人の語彙）を足す。1 位の読みの中の並びなので、
+        # 読みどうしの比べ（core.pipeline）には入れない点もここでは使う
         score = lp[i] + p.w_flu * lp[n + i] - p.w_read * r.cost + w_voc * m.bonus_of(t)
         text = _render(t, end, r, p.en_case, bounds_from_text(m, t))
         out.append(Entry(text, score, "same", best["reading"], edited))
