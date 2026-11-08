@@ -49,6 +49,24 @@ def test_dialogue_takes_only_the_labelled_speaker(tmp_path):
     assert got == [("2026-07-07", "本人の発言"), ("2026-07-07", "二つ目")]
 
 
+def test_apply_reassigns_fix_with_wrong_id_within_batch(tmp_path, monkeypatch):
+    for name in ("RAW", "CLEAN", "FIX_LOG"):
+        monkeypatch.setattr(c, name, tmp_path / f"{name}.jsonl")
+    monkeypatch.setattr(c, "FIX_IN", tmp_path / "in")
+    monkeypatch.setattr(c, "FIX_OUT", tmp_path / "out")
+    rows = [{"id": "a", "source": "s", "text": "資料を買えて"}, {"id": "b", "source": "s", "text": "別の文"}]
+    c.write_jsonl(c.RAW, rows)
+    c.FIX_IN.mkdir()
+    c.FIX_OUT.mkdir()
+    c.write_jsonl(c.FIX_IN / "x.jsonl", [{"id": r["id"], "text": r["text"]} for r in rows])
+    (c.FIX_OUT / "x.json").write_text(json.dumps(
+        {"fixes": [{"id": "b", "from": "買えて", "to": "変えて"}], "drop": []}, ensure_ascii=False), encoding="utf-8")
+    c.cmd_apply(None)
+    got = {r["id"]: r for r in c.read_jsonl(c.CLEAN)}
+    assert got["a"]["text"] == "資料を変えて" and got["b"]["text"] == "別の文"
+    assert all(r["checked"] for r in got.values())
+
+
 def test_unit_id_is_stable_and_depends_on_source():
     assert c.unit_id("a", "文") == c.unit_id("a", "文")
     assert c.unit_id("a", "文") != c.unit_id("b", "文")

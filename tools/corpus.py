@@ -289,11 +289,18 @@ def cmd_apply(args) -> None:
     fixes, drops, answered = collections.defaultdict(list), set(), set()
     for f in FIX_OUT.glob("*.json"):
         out = json.loads(f.read_text(encoding="utf-8"))
+        batch = {r["id"]: r["text"] for r in read_jsonl(FIX_IN / (f.stem + ".jsonl"))}
         for fx in out.get("fixes", []):
-            fixes[fx["id"]].append(fx)
+            fid = fx.get("id")
+            if fx.get("from") and fx["from"] not in batch.get(fid, ""):
+                # 直す係が id を隣の文と取り違えることがある（2026-11-08 の試しで 8 個中 1 個）。
+                # 同じ束で from を含む文が 1 つだけなら、その文の直しとみなす
+                owners = [i for i, t in batch.items() if fx["from"] in t]
+                if len(owners) == 1:
+                    fid = owners[0]
+            fixes[fid].append(dict(fx, id=fid))
         drops |= set(out.get("drop", []))
-        src = FIX_IN / (f.stem + ".jsonl")
-        answered |= {r["id"] for r in read_jsonl(src)}
+        answered |= set(batch)
     clean, log = [], []
     n_hit = n_miss = 0
     for r in read_jsonl(RAW):
