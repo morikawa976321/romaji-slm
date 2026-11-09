@@ -109,6 +109,34 @@ def test_decode_batch_matches_torch(ort, cz, dic, left_context):
         assert o.logp == pytest.approx(h.logp, abs=TOL)
 
 
+VOCAB = {("キョウ", "京"): 0.9, ("テンキ", "転機"): 0.9, ("イイ", "良い"): 0.5}
+
+
+@pytest.mark.parametrize("w_voc", [1.0, 8.0])
+def test_decode_with_vocab_matches_torch_and_sequential(ort, cz, dic, w_voc):
+    # 語彙の加点つきの選び方（core.constrained.pick_with_bonus）も、ONNX 版・torch 版・1件ずつで同じ結果になる。
+    # 生成した文の加点の和は、その文をラティスで辿り直した加点（bonus_of）と同じ
+    from core.uservocab import UserVocab
+
+    v = UserVocab(VOCAB)
+    hf = cz.decode_batch(READINGS, dic, vocab=v, w_voc=w_voc)
+    ox = ort.decode_batch(READINGS, dic, vocab=v, w_voc=w_voc)
+    single = [cz.decode_scored(r, dic, vocab=v, w_voc=w_voc) for r in READINGS]
+    for r, h, o, s in zip(READINGS, hf, ox, single):
+        assert (o.text, o.finished, o.bounds) == (h.text, h.finished, h.bounds) == (s.text, s.finished, s.bounds)
+        assert o.bonus == pytest.approx(h.bonus) == pytest.approx(s.bonus)
+        if h.finished:
+            assert h.bonus == pytest.approx(LatticeMatcher(r, dic, vocab=v).bonus_of(h.text))
+
+
+def test_vocab_with_zero_weight_is_unchanged(cz, dic):
+    from core.uservocab import UserVocab
+
+    plain = cz.decode_batch(READINGS, dic)
+    zero = cz.decode_batch(READINGS, dic, vocab=UserVocab(VOCAB), w_voc=0.0)
+    assert [(d.text, d.logp, d.bonus) for d in zero] == [(d.text, d.logp, 0.0) for d in plain]
+
+
 @pytest.mark.parametrize("left_context", LEFT_CONTEXTS)
 def test_fluency_matches_torch(ort, scorer, left_context):
     for h, o in zip(fluency(scorer, FLUENCY_TEXTS, left_context), ort.fluency(FLUENCY_TEXTS, left_context)):

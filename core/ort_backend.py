@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from . import cancel
-from .constrained import Decoded, LatticeMatcher, _char_bounds, bytes_to_unicode
+from .constrained import Decoded, LatticeMatcher, _char_bounds, bytes_to_unicode, final_bonus, pick_with_bonus
 from .kanakanji import Dictionary
 from .pipeline import CorePipeline
 from .select import scoring_text, zenz_prompt
@@ -323,12 +323,25 @@ class OrtBackend:
                 return t, ns
         return None, None
 
+    def _pick_acc(self, logits: np.ndarray, m: LatticeMatcher, acc, w: float):
+        """_pick の語彙の加点つき（core.constrained.pick_with_bonus）。"""
+        n_top = min(self._TOP, self.max_tries, logits.shape[-1])
+        part = np.argpartition(-logits, n_top - 1)[:n_top]
+        top = part[np.argsort(-logits[part], kind="stable")]
+        t, na = pick_with_bonus(zip(top.tolist(), logits[top].tolist()), m, acc, w, self.tok_bytes, self.eos)
+        if t is not None or self.max_tries <= n_top:
+            return t, na
+        order = np.argsort(-logits, kind="stable")[n_top:self.max_tries]
+        return pick_with_bonus(zip(order.tolist(), logits[order].tolist()), m, acc, w, self.tok_bytes, self.eos)
+
     def decode_batch(self, readings: list[Reading], dic: Dictionary, left_context: str = "",
-                     max_new: int | None = None, punct: str = "auto", en_case: str = "zenz") -> list[Decoded]:
+                     max_new: int | None = None, punct: str = "auto", en_case: str = "zenz",
+                     vocab=None, w_voc: float = 0.0) -> list[Decoded]:
         if not readings:
             return []
-        matchers = [LatticeMatcher(r, dic, punct, en_case) for r in readings]
+        matchers = [LatticeMatcher(r, dic, punct, en_case, vocab) for r in readings]
         states = [m.start() for m in matchers]
+        accs = [m.start_acc() if w_voc > 0 and m.bonus else None for m in matchers]
         prompts = [self.tok(zenz_prompt(r.zenz_input(), left_context), add_special_tokens=False).input_ids
                    for r in readings]
         B = len(prompts)
@@ -360,7 +373,12 @@ class OrtBackend:
                 if step >= limits[i]:
                     alive[i] = False
                     continue
-                chosen, ns = self._pick(last[i], matchers[i], states[i])
+                if accs[i] is None:
+                    chosen, ns = self._pick(last[i], matchers[i], states[i])
+                else:
+                    chosen, na = self._pick_acc(last[i], matchers[i], accs[i], w_voc)
+                    if chosen is not None:
+                        accs[i], ns = na, frozenset(na)
                 if chosen is None:
                     alive[i] = False
                     continue
@@ -379,8 +397,8 @@ class OrtBackend:
             step_ids = np.array(nxt, dtype=np.int64)[:, None]
             mask = np.concatenate([mask, np.ones((B, 1), dtype=np.int64)], axis=1)
             step_pos = step_pos[:, -1:] + np.array([[int(a)] for a in alive], dtype=np.int64)
-        return [Decoded(o.decode("utf-8", errors="replace"), lp, f, _char_bounds(bytes(o), bd))
-                for o, lp, f, bd in zip(outs, logp, finished, bounds)]
+        return [Decoded(o.decode("utf-8", errors="replace"), lp, f, _char_bounds(bytes(o), bd), final_bonus(m, a, f))
+                for o, lp, f, bd, m, a in zip(outs, logp, finished, bounds, matchers, accs)]
 
     # --- 採点 ---
 

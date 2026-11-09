@@ -4,7 +4,7 @@
 
 あなたは romaji-slm（ローマ字の打鍵列をローカルの小型言語モデルで日本語に変換する変換コア）の親セッション。作業ディレクトリは `C:\Users\tm976\mf\romaji-slm`。本人は 2026-10-13 にこのプロジェクトを休止し、2026-10-14 に「余っているAIの枠で、本人の負荷最小で自律的に進める」対象に選んだ。
 
-最初に読む: `README.md`、`CLAUDE.md`、`docs/STATUS.md`（再開の入口）、`docs/REDESIGN.md`（現行方式）、`docs/DESIGN.md`（要件表。本人の決定。変えたいときは提案にとどめ、勝手に書き換えない）、`docs/EVAL.md`。context-engine は `romaji-slm-japanese-input-tool`、`evaluation-page-preferences`、`ai-delegation-strategy`、`possession-laptop-thinkpad-p14s-gen6` を grep して読む。
+最初に読む: `docs/DEVELOPMENT.md`、`CLAUDE.md`、`docs/STATUS.md`（再開の入口）、`docs/REDESIGN.md`（現行方式）、`docs/DESIGN.md`（要件表。本人の決定。変えたいときは提案にとどめ、勝手に書き換えない）、`docs/EVAL.md`。context-engine は `romaji-slm-japanese-input-tool`、`evaluation-page-preferences`、`ai-delegation-strategy`、`possession-laptop-thinkpad-p14s-gen6` を grep して読む。
 
 ## 共通の運用規則（4つの親セッションで同じ文面）
 
@@ -12,8 +12,8 @@
 
 - 本人の指示（2026-10-14）: 「サブエージェントやCodex3枠、cursor枠は親の判断でいくらでも使っていいものとする。コスト、時間に制約はなく、私無しでできることをどんどんすすめる」。
   - サブエージェントは `model:` に `haiku`（事実の取得・列挙・抜き出し。親が検算する）か `sonnet`（分類・評価・合否が成果物。親が検算しない）を必ず明示する（フックが強制する）。設計・判断・実装の核心は親が持つ。
-  - Codex 3役は codex-roles スキルの規則どおり `codex-role.cmd implement|consult|review` で呼ぶ。通常は本人の都度指示が要るが、**このセッションには本人の常時許可がある**。返ってきた成果物は自分で検証してから採用し、commit は親がパス指定で行う。
-  - cursor は multi-ai-delegation スキルの規則どおり。fable-consultant は判断に確信が持てないときの第二意見。
+  - Codex 3役は delegate スキルの規則どおり `codex-role.cmd implement|consult|review` で呼ぶ。通常は本人の都度指示が要るが、**このセッションには本人の常時許可がある**。返ってきた成果物は自分で検証してから採用し、commit は親がパス指定で行う。
+  - cursor は delegate スキルの規則どおり `cursor-role.cmd` で呼ぶ。fable-consultant は判断に確信が持てないときの第二意見。
 - 可逆な操作は裁量で行ってよい（本人の指示 2026-10-09）。しないこと: 公開・購入・外部サービスへの書き込み、他リポジトリ・`~/.claude`・`~/.codex`・システム設定の変更、context-engine への AI の判断の書き込み。`git push` はこの4リポジトリに限り、下記「クラウドセッションの活用」のとおり許可する。
 - **このWindows機は他の親セッション（romaji-slm / dotbox / fdm-trunk / lighting-diffuser のうち自分以外）と同時に動く。** RAM は 32GB で、2026-10-14 の起動時点の空きは約10GB。重い処理の前に空きRAMを見て、空きが6GB を切るなら待つか軽くする。GPU（RTX 5060 Ti 16GB）は romaji-slm が優先。他のアプリを巻き込んで落とすような処理は絶対にしない（本人が再発防止を明示的に求めている）。
 - 10分を超える処理はセッションから切り離して起動し、ログをファイルに落とし、ポーリングせず完了通知で待つ。

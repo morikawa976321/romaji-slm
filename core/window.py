@@ -107,7 +107,9 @@ def alternatives(p, best: dict, left_context: str = "", end: str = "", n_alt: in
     制約付き生成と同じ照合器（core.constrained.LatticeMatcher）を通るものだけを残す。句読点・英字の表記モードと、
     辞書に無いかなの断片の扱い（小書き・ンで始まる断片を許さない）が 1 位と揃う。"""
     r = best["reading_obj"]
-    m = LatticeMatcher(r, p.dic, p.punct, p.en_case)
+    vocab = getattr(p, "vocab", None)
+    w_voc = getattr(p, "w_voc", 0.0) if vocab else 0.0
+    m = LatticeMatcher(r, p.dic, p.punct, p.en_case, vocab if w_voc > 0 else None)
     seen = {_key(best["text"])}
     texts = []
     for conv in convert(r, p.dic, n=n_alt):
@@ -136,7 +138,9 @@ def alternatives(p, best: dict, left_context: str = "", end: str = "", n_alt: in
     edited = bool(best["edits"])
     out = []
     for i, t in enumerate(texts):
-        score = lp[i] + p.w_flu * lp[n + i] - p.w_read * r.cost
+        # 1 位（core.pipeline.candidates）と同じ式に、同じ読みの書き分けの点（本人の語彙）を足す。1 位の読みの中の並びなので、
+        # 読みどうしの比べ（core.pipeline）には入れない点もここでは使う
+        score = lp[i] + p.w_flu * lp[n + i] - p.w_read * r.cost + w_voc * m.bonus_of(t)
         text = _render(t, end, r, p.en_case, bounds_from_text(m, t))
         out.append(Entry(text, score, "same", best["reading"], edited))
     return sorted(out, key=lambda e: -e.score)

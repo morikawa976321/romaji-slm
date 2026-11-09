@@ -19,6 +19,7 @@ from .select import ZenzScorer, fluency
 from .types import Edit
 
 FIX_COST = 0.5  # ユーザー辞書の打ち間違いの癖で直した読みに足すコスト（1 編集ぶんより安い。直すかは採点が決める）
+W_VOC = 1.0  # 本人の語彙の点の重み（core.uservocab。本人が使わない書き方の語 1 つにつき最大この値を対数確率から引く）
 
 
 _TYPED_PUNCT = frozenset(",.?!")  # 打鍵列に句読点として打たれうる記号
@@ -118,7 +119,8 @@ class CorePipeline:
                  batched: bool = True, punct: str = "auto", en_case: str = "typed",
                  tau_comma: float = -0.5, tau_end: float = -6.0, tau_q: float = -5.0, backend=None,
                  preselect: bool = True, n_pre: int = 30, punct_end: bool = False, user_dict=None,
-                 max_tries: int = 2000, comma_tail: bool = True, comma_min_len: int = 10):
+                 max_tries: int = 2000, comma_tail: bool = True, comma_min_len: int = 10,
+                 vocab=None, w_voc: float = W_VOC):
         """punct / en_case: 記号と英字の表記モード（core.constrained.LatticeMatcher と render_en_case）。
         punct="insert" は句読点の自動挿入（句読点 B）: 打鍵列に句読点が無いとき、完成文の自然さで読点・句点を補う。
         既定は punct="auto"（句読点は自動で足さず、打った句読点の全角・半角だけを zenz が選ぶ。本人の決定、docs/decisions.md D48）と
@@ -129,6 +131,9 @@ class CorePipeline:
         backend: 生成と採点の差し替え（CPU では core.ort_backend.OrtBackend）。decode_batch・fluency・logprobs を持つもの。
         None なら model を transformers で GPU（device は cuda だけ）に読む。
         max_tries: transformers 版の制約付き生成の探索の幅（core.constrained.ConstrainedZenz）。
+        vocab: 本人の語彙の書き分けの点（core.uservocab。UserVocab かパス）。None なら使わない（評価の再現性のため。
+        常駐入力は既定の置き場所を渡す）。w_voc はその重み。読みの中の生成のトークンの選び方（同じ読みの書き分け）にだけ効き、
+        読みどうしの点数の比べには入れない。
         """
         self.dic = Dictionary.load()
         # user_dict: 本人のユーザー辞書（core.userdict）。None なら読まない（評価の再現性のため。常駐入力は既定の置き場所を渡す）
@@ -139,6 +144,8 @@ class CorePipeline:
         self.dic.add_user_words(ud.words)
         self.fixes = ud.fixes
         self.user_dict = ud
+        self.set_vocab(vocab)
+        self.w_voc = w_voc
         self.backend = backend
         if backend is None:
             self.scorer = ZenzScorer(model, device)
@@ -171,6 +178,11 @@ class CorePipeline:
         self.dic.add_user_words(ud.words)
         self.fixes = ud.fixes
         self.user_dict = ud
+
+    def set_vocab(self, vocab) -> None:
+        """本人の語彙の書き分けの点を入れ替える（UserVocab かパス。None は使わない）。"""
+        from .uservocab import UserVocab, load as load_vocab
+        self.vocab = vocab if isinstance(vocab, UserVocab) else (load_vocab(vocab) if vocab else UserVocab())
 
     def release_memory(self) -> None:
         """変換の中で確保して今は使っていないメモリを返す（常駐の変換サーバが暇なときに呼ぶ。出力は変わらない）。
@@ -215,6 +227,8 @@ class CorePipeline:
             rs += readings(romaji, n=1, max_edits=0)
         t0 = time.perf_counter()
         modes = dict(punct=self.punct, en_case=self.en_case)
+        if self.vocab and self.w_voc > 0:
+            modes.update(vocab=self.vocab, w_voc=self.w_voc)
         if self.backend is not None:
             decoded = self.backend.decode_batch(rs, self.dic, left_context, **modes)
         elif self.batched:
@@ -224,8 +238,12 @@ class CorePipeline:
         decode_ms = (time.perf_counter() - t0) * 1000
         for r, d in zip(rs, decoded):
             out.append({
-                "text": d.text, "score": d.logp - self.w_read * r.cost if d.finished else float("-inf"),
-                "lm": d.logp, "read_cost": r.cost, "reading": r.zenz_input(), "edits": [e.detail for e in r.edits],
+                "text": d.text,
+                # 語彙の点（d.bonus）は読みどうしの比べに入れない。書き分けの点で読みを選ぶと、本人の使わない書き方を
+                # 残した読みが負けて、英字の語を崩した別の読みの誤変換が勝った（docs/decisions.md D51）
+                "score": d.logp - self.w_read * r.cost if d.finished else float("-inf"),
+                "lm": d.logp, "read_cost": r.cost, "bonus": d.bonus,
+                "reading": r.zenz_input(), "edits": [e.detail for e in r.edits],
                 "bounds": d.bounds, "reading_obj": r,
                 "ms": decode_ms,  # k 件まとめての生成時間（候補ごとには分けられない）
             })

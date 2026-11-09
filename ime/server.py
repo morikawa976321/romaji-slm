@@ -269,6 +269,7 @@ def main(argv=None):
 
     def convert(romaji, ctx, full):
         reload_user_dict()
+        reload_vocab()
         lists = holder["lists"]
         return lists.full(romaji, ctx) if full else lists.first(romaji, ctx)
 
@@ -287,6 +288,18 @@ def main(argv=None):
             holder["lists"].clear()   # 取っておいた候補の列は前の辞書で作ったもの
             print(f"user dict reloaded: en={len(ud.en)} word={len(ud.words)} fix={len(ud.fixes)} errors={len(ud.errors)}", flush=True)
 
+    def reload_vocab():
+        """本人の語彙の表（core.uservocab、tools/vocab.py が作る）が更新されていたら読み直す。変換の錠の中で呼ばれる"""
+        from core.uservocab import default_path as vocab_path, load as load_vocab
+        p = vocab_path()
+        m = p.stat().st_mtime if p.exists() else 0.0
+        if m != holder.get("voc_mtime"):
+            holder["voc_mtime"] = m
+            v = load_vocab(p)
+            holder["p"].set_vocab(v)
+            holder["lists"].clear()
+            print(f"vocab reloaded: {len(v)}", flush=True)
+
     # 先に待ち受けを開く。トレイアプリは /health が返るまで「準備中」と表示する
     srv = ThreadingHTTPServer(("127.0.0.1", args.port),
                               make_handler(convert, ready, idle, release=lambda: holder["p"].release_memory()))
@@ -298,6 +311,9 @@ def main(argv=None):
     from core.userdict import default_path, load as load_user
     ud = load_user(default_path())   # 本人のユーザー辞書（docs/REVIEW.md）。中身はログに書かない（件数だけ）
     print(f"user dict: {default_path()} en={len(ud.en)} word={len(ud.words)} fix={len(ud.fixes)} errors={len(ud.errors)}", flush=True)
+    from core.uservocab import default_path as vocab_path, load as load_vocab
+    voc = load_vocab(vocab_path())   # 本人の語彙の書き分け（docs/CORPUS.md「書き分けの点」）。無ければ空で、使わないのと同じ
+    print(f"vocab: {vocab_path()} {len(voc)}", flush=True)
     engine = pick_engine(args.engine, device)
     if args.engine == "torch" and engine != "torch":
         print("engine=torch needs a GPU (cuda); using onnx", flush=True)
@@ -309,7 +325,7 @@ def main(argv=None):
     if engine == "onnx":
         try:
             from core.ort_backend import OrtCorePipeline
-            holder["p"] = OrtCorePipeline(model=args.model, threads=args.threads or None, user_dict=ud)
+            holder["p"] = OrtCorePipeline(model=args.model, threads=args.threads or None, user_dict=ud, vocab=voc)
         except Exception as e:
             # GPU があれば torch 版で動かす。無ければ変換できない（CPU の torch 版は削除した）ので、起動の失敗として記録に残す
             print(f"onnx engine failed: {type(e).__name__}: {e}", flush=True)
@@ -318,8 +334,9 @@ def main(argv=None):
             engine = "torch"
     if engine == "torch":
         set_threads(args.threads)
-        holder["p"] = CorePipeline(model=args.model, device=device, user_dict=ud)
+        holder["p"] = CorePipeline(model=args.model, device=device, user_dict=ud, vocab=voc)
     holder["ud_mtime"] = default_path().stat().st_mtime if default_path().exists() else 0.0
+    holder["voc_mtime"] = vocab_path().stat().st_mtime if vocab_path().exists() else 0.0
     holder["lists"] = Lists(holder["p"], args.window)
     holder["p"].convert_nbest("konnichiha", order=args.window)  # 最初の 1 件の遅さ（CUDA の初期化・辞書の索引）を起動時に済ませる
     ready.set()
