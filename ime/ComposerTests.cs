@@ -1069,6 +1069,22 @@ namespace RomajiSlm
                 Check(c.Candidates.Length == 3, "full list");
             });
 
+            Run("Qt の窓へ WM_CHAR で送れる並び", () =>
+            {
+                Func<string, Delivery> t = s => new Delivery { Text = s, Window = W1 };
+                Func<Delivery> k = () => new Delivery { IsKey = true, Key = new KeyEv(0x0D, 0x1C, false, true) };
+                Check(QtDelivery.IsQtClass("Qt51514QWindowIcon") && QtDelivery.IsQtClass("Qt5QWindowIcon") &&
+                      QtDelivery.IsQtClass("Qt6100QWindowToolSaveBits"), "Qt class names");
+                Check(!QtDelivery.IsQtClass("Chrome_WidgetWin_1") && !QtDelivery.IsQtClass("Notepad") && !QtDelivery.IsQtClass(null),
+                      "other class names");
+                Check(QtDelivery.CanPostChars(new List<Delivery> { t("はい") }), "text only");
+                Check(QtDelivery.CanPostChars(new List<Delivery> { t("い"), t("う"), k(), k() }), "text then keys");
+                Check(!QtDelivery.CanPostChars(new List<Delivery> { k(), t("い") }), "key before text keeps SendInput");
+                Check(!QtDelivery.CanPostChars(new List<Delivery> { t("い"), k(), t("う") }), "key between texts keeps SendInput");
+                Check(!QtDelivery.CanPostChars(new List<Delivery> { t("\U0001F600") }), "surrogate pair keeps SendInput");
+                Check(!QtDelivery.CanPostChars(new List<Delivery> { k() }), "keys only keep SendInput");
+            });
+
             Console.WriteLine(failures == 0 ? "all passed" : failures + " failure(s)");
             return failures == 0 ? 0 : 1;
         }

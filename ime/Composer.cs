@@ -43,6 +43,34 @@ namespace RomajiSlm
         public string Text; public IntPtr Window; public bool IsKey; public KeyEv Key;
     }
 
+    /// Qt のアプリへの確定文の送り方（docs/IME.md「Qt のアプリ」、decisions.md D52）。
+    /// Qt は VK_PACKET の押下を仮想キーで覚え、離鍵で忘れる。日本語の IME がある窓では VK_PACKET の離鍵が窓に届かないので、
+    /// 次の VK_PACKET を押しっぱなしの繰り返しとみなし、前に送った文字を入れる（「はい」→「はは」）。
+    /// 押下を伴わない WM_CHAR なら、Qt はその文字をそのまま入れる
+    public static class QtDelivery
+    {
+        /// Qt の窓のクラス名（Qt5QWindowIcon、Qt51514QWindowIcon、Qt6100QWindowIcon など）
+        public static bool IsQtClass(string cls)
+        {
+            return cls != null && cls.StartsWith("Qt", StringComparison.Ordinal) && cls.Contains("QWindow");
+        }
+
+        /// WM_CHAR で送れる並びか。窓に置いた WM_CHAR は入力の列にある打鍵より先に読まれるので、確定文がすべて打鍵より前にあること。
+        /// Qt は単独の WM_CHAR のサロゲートを捨てるので、サロゲート対を含まないこと（実利用の確定 1510 件に 0 件、2026-11-09）
+        public static bool CanPostChars(List<Delivery> ds)
+        {
+            bool text = false, key = false;
+            foreach (var d in ds)
+            {
+                if (d.IsKey) { key = true; continue; }
+                if (key) return false;
+                foreach (char ch in d.Text) if (char.IsSurrogate(ch)) return false;
+                text = true;
+            }
+            return text;
+        }
+    }
+
     public abstract class Effect { }
     /// 待ち行列の先頭に送れるものがある（呼び出し側は TakeReady → 送る → Delivered / DeliveryFailed）
     public sealed class DeliverEffect : Effect { }

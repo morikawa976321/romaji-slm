@@ -1093,15 +1093,16 @@ namespace RomajiSlm
             if (ds.Count == 0) return;
             var fg = Native.GetForegroundWindow();
             string why = null;
+            bool chars = Native.IsQtWindow(fg) && QtDelivery.CanPostChars(ds);
             if (ds.Any(d => !d.IsKey && d.Window != fg))
                 why = "確定の前に窓が替わったので入力していません。Enter で今の窓に入力します";
-            else if (!Native.SendBatch(ds))
+            else if (!(chars ? Native.PostBatch(ds, fg) : Native.SendBatch(ds)))
                 why = "この窓には入力できませんでした（管理者権限の窓など）。Esc で捨てます";
             batchTick = unchecked((uint)Environment.TickCount);
             batchAt = Now;
             traceLeft = 80;   // 送った直後 1 秒のフックの様子を診断の記録に残す（文字の中身は残さない）
             dbg.Write("deliver items=" + ds.Count + " chars=" + ds.Where(x => !x.IsKey).Sum(x => x.Text.Length) +
-                      " keys=" + ds.Count(x => x.IsKey) + (why != null ? " FAILED " + why : ""));
+                      " keys=" + ds.Count(x => x.IsKey) + (chars ? " via=wm_char" : "") + (why != null ? " FAILED " + why : ""));
             if (why != null) { comp.DeliveryFailed(why, Now); return; }
             if (ds.Any(d => !d.IsKey)) usage.App(Native.ForegroundExe());
             comp.Delivered(Now);
@@ -1447,6 +1448,8 @@ namespace RomajiSlm
         [DllImport("imm32.dll")] public static extern IntPtr ImmGetDefaultIMEWnd(IntPtr hwnd);
         [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
         [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr h);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder name, int max);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
         [DllImport("kernel32.dll")] static extern IntPtr CreateJobObject(IntPtr attr, string name);
         [DllImport("kernel32.dll")] static extern bool SetInformationJobObject(IntPtr job, int cls, IntPtr info, uint len);
         [DllImport("kernel32.dll")] public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr proc);
@@ -1485,6 +1488,28 @@ namespace RomajiSlm
             }
             if (list.Count == 0) return true;
             return SendInput((uint)list.Count, list.ToArray(), Marshal.SizeOf(typeof(INPUT))) == list.Count;
+        }
+
+        public static bool IsQtWindow(IntPtr hwnd)
+        {
+            var sb = new StringBuilder(256);
+            return GetClassName(hwnd, sb, sb.Capacity) > 0 && QtDelivery.IsQtClass(sb.ToString());
+        }
+
+        /// Qt の窓へ: 確定文を WM_CHAR でフォーカスの窓に置き、後ろの打鍵は SendInput で送る（並びは QtDelivery.CanPostChars が確かめる）。
+        /// 置いた文字は、窓がまだ読んでいない入力の列の打鍵（送る直前に素通しにした Backspace など）より先に読まれる
+        public static bool PostBatch(List<Delivery> ds, IntPtr fg)
+        {
+            uint pid;
+            var gi = new GUITHREADINFO { cbSize = Marshal.SizeOf(typeof(GUITHREADINFO)) };
+            var target = GetGUIThreadInfo(GetWindowThreadProcessId(fg, out pid), ref gi) && gi.hwndFocus != IntPtr.Zero ? gi.hwndFocus : fg;
+            foreach (var d in ds)
+            {
+                if (d.IsKey) continue;
+                foreach (char ch in d.Text)
+                    if (!PostMessage(target, 0x0102, new IntPtr(ch), new IntPtr(1))) return false;   // WM_CHAR、繰り返し 1
+            }
+            return SendBatch(ds.Where(d => d.IsKey).ToList());
         }
 
         /// Alt を押したまま握りつぶしたあと、Alt を離したときにメニューが開かないよう、割り当ての無いキーを 1 回はさむ
